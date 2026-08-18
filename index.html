@@ -7,6 +7,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./supabase-client.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <style>
     /* ===== RESET & VARIABLES ===== */
     :root {
@@ -1260,7 +1261,52 @@
         else { c.pauseDates.push(state.currentDate); notice('Pedido pausado solo para este día.'); }
         save(); renderDispatch();
       }
-      function exportDiets(){const date=state.currentDate;const rows=state.clients.filter(c=>status(c,date)==='Activo').map(c=>{const pitems=c.items||plan(c.planId)?.items||{};return `<tr><td>${esc(c.name)}</td><td>${esc(planName(c.planId))}</td><td>${items.map(([k,l])=>`${l}: ${n(pitems[k])}`).join(' | ')}</td><td>${esc([c.notes,c.specialDiet].filter(Boolean).join(' — '))}</td></tr>`;}).join('');const doc=`<html><meta charset="utf-8"><table><thead><tr><th>Cliente</th><th>Plan</th><th>Artículos incluidos</th><th>Observaciones / dieta especial</th></tr></thead><tbody>${rows}</tbody></table></html>`;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([doc],{type:'application/vnd.ms-excel'}));a.download=`dietas-especiales-${date}.xls`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);notice('Archivo Excel generado.');}
+      async function exportDiets(){
+        const date=state.currentDate;
+        const activeClients=state.clients.filter(c=>status(c,date)==='Activo');
+        if(!window.ExcelJS){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
+        const wb=new ExcelJS.Workbook();
+        wb.creator=state.settings.companyName||APP_CONFIG.companyName;
+        const ws=wb.addWorksheet('Dietas especiales',{views:[{state:'frozen',ySplit:1}]});
+        ws.columns=[
+          {header:'Cliente',key:'cliente',width:26},
+          {header:'Plan',key:'plan',width:18},
+          {header:'Artículos incluidos',key:'items',width:46},
+          {header:'Observaciones / dieta especial',key:'notes',width:38}
+        ];
+        const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
+        const headerRow=ws.getRow(1);
+        headerRow.height=22;
+        headerRow.eachCell(cell=>{
+          cell.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+          cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0D6EFD'}};
+          cell.alignment={vertical:'middle',horizontal:'left'};
+          cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
+        });
+        activeClients.forEach((c,i)=>{
+          const pitems=c.items||plan(c.planId)?.items||{};
+          const row=ws.addRow({
+            cliente:c.name,
+            plan:planName(c.planId),
+            items:items.filter(([k])=>n(pitems[k])>0).map(([k,l])=>`${l}: ${n(pitems[k])}`).join(' | ')||'—',
+            notes:[c.notes,c.specialDiet].filter(Boolean).join(' — ')||'—'
+          });
+          const fillColor=i%2===0?'FFF3F6FB':'FFFFFFFF';
+          row.eachCell(cell=>{
+            cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:fillColor}};
+            cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
+            cell.alignment={vertical:'top',horizontal:'left',wrapText:true};
+          });
+        });
+        if(!activeClients.length){ notice('No hay clientes activos para exportar hoy.',true); return; }
+        const buffer=await wb.xlsx.writeBuffer();
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+        a.download=`dietas-especiales-${date}.xlsx`;
+        a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+        notice('Archivo Excel generado.');
+      }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"process-day":processDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();renderSettings();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:state,label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};map[action]?.();});
       document.addEventListener('click',e=>{const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
       $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);normalize();save();render();notice('Respaldo importado.');}catch{notice('El respaldo no es válido.',true);}};r.readAsText(file);};
