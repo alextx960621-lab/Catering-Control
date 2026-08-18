@@ -35,7 +35,7 @@ begin
   return query
   select c ->> 'id', c ->> 'name'
   from db_clientes, jsonb_array_elements(coalesce(payload -> 'clients', '[]'::jsonb)) as c
-  where id = 'main'
+  where db_clientes.id = 'main'
     and lower(trim(coalesce(c ->> 'carnet', ''))) = lower(trim(coalesce(p_carnet, '')))
     and (
       regexp_replace(coalesce(c ->> 'phone1', ''), '\D', '', 'g') = v_phone
@@ -63,7 +63,7 @@ set search_path = public, extensions
 as $$
 declare v_users jsonb;
 begin
-  select coalesce(payload -> 'staffUsers', '[]'::jsonb) into v_users from db_personal where id = 'main';
+  select coalesce(payload -> 'staffUsers', '[]'::jsonb) into v_users from db_personal where db_personal.id = 'main';
 
   if v_users is null or jsonb_array_length(v_users) = 0 then
     if lower(p_email) = 'admin@catering.local' and p_password = 'admin123' then
