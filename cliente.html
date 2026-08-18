@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Catering Control · Mi plan</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="./config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./supabase-client.js"></script>
   <style>
@@ -17,20 +18,9 @@
     (()=>{
       'use strict';
 
-      /* ==========================================================================
-         CONFIGURACIÓN DE LA EMPRESA
-         Edita estos valores para personalizar el sistema para cada cliente/empresa.
-         El "storagePrefix" debe coincidir con el usado en login.html y index.html.
-         ========================================================================== */
-      const APP_CONFIG = {
-        companyName: 'Catering Control',        // Nombre de la empresa mostrado en el portal
-        logoUrl: './logo.jpg',                  // Ruta o URL del logo de la empresa
-        whatsappNumber: '',                     // Número de WhatsApp de atención (formato internacional sin +, ej. 59170000000). Déjalo vacío para ocultar el botón.
-        instagramUrl: '',                       // URL del perfil de Instagram. Déjalo vacío para ocultar la tarjeta de Instagram.
-        instagramHandle: '',                    // Usuario de Instagram mostrado, ej. @miempresa
-        storagePrefix: 'catering-app'           // Prefijo usado para las claves de almacenamiento local
-      };
-      /* ========================================================================== */
+      /* La configuración de la empresa vive en config.js (un solo archivo
+         para toda la app: marca + credenciales de Supabase). */
+      const APP_CONFIG = window.APP_CONFIG;
 
       const OPERATIONS_KEY=`${APP_CONFIG.storagePrefix}-operaciones-v3`,CLIENT_SESSION_KEY=`${APP_CONFIG.storagePrefix}-client-session-v1`,THEME_KEY=`${APP_CONFIG.storagePrefix}-client-theme-v1`;
       const $=s=>document.querySelector(s),n=v=>Number(v)||0,items=[['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];

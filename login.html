@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Catering Control · Iniciar sesión</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="./config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./supabase-client.js"></script>
   <style>
@@ -22,7 +23,7 @@
       <div class="col-12 login-card">
         <section class="card shadow-lg border-0 rounded-4">
           <div class="card-body p-4 p-md-5">
-            <div class="d-flex align-items-center gap-3 mb-4"><div class="brand-mark d-flex align-items-center justify-content-center fs-4" id="brand-mark">🍽</div><div><h1 class="h4 mb-0" id="brand-title">Catering Control</h1><p class="text-secondary small mb-0">Iniciar sesión</p></div>
+            <div class="d-flex align-items-center gap-3 mb-4"><div class="brand-mark d-flex align-items-center justify-content-center fs-4" id="brand-mark"></div><div><h1 class="h4 mb-0" id="brand-title">Catering Control</h1><p class="text-secondary small mb-0">Iniciar sesión</p></div>
             </div>
 
             <nav class="nav nav-pills nav-fill bg-body-tertiary rounded-3 p-1 mb-4" aria-label="Tipo de acceso">
@@ -51,16 +52,14 @@
   </main>
 
 <script>
-/* ==========================================================================
-   CONFIGURACIÓN DE LA EMPRESA
-   Edita estos valores para personalizar el sistema para cada cliente/empresa.
-   ========================================================================== */
-const APP_CONFIG = {
-  companyName: 'Catering Control',   // Nombre mostrado en el título de la página de login
-  storagePrefix: 'catering-app'      // Prefijo usado para las claves de almacenamiento local (debe coincidir en todos los archivos del sistema)
-};
+/* La configuración de la empresa vive en config.js (un solo archivo
+   para toda la app: marca + credenciales de Supabase). */
+const APP_CONFIG = window.APP_CONFIG;
 document.getElementById('brand-title').textContent = APP_CONFIG.companyName;
 document.title = `${APP_CONFIG.companyName} · Iniciar sesión`;
+document.getElementById('brand-mark').innerHTML = APP_CONFIG.logoUrl
+  ? `<img src="${APP_CONFIG.logoUrl}" alt="${APP_CONFIG.companyName}" onerror="this.parentElement.textContent='🍽'">`
+  : '🍽';
 (async () => {
   try {
     const personal = await window.SupabaseDB?.dbGet('personal');

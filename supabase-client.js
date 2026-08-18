@@ -3,8 +3,13 @@
    No necesitas tocar este archivo salvo que cambies de proyecto de Supabase.
    ========================================================================== */
 (() => {
-  const SUPABASE_URL = 'https://sucygrskajrcnwizrfpd.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_yiChv91nKsuQVEPMd0t3Ng_hjpiurFD';
+  const SUPABASE_URL = window.APP_CONFIG?.supabaseUrl;
+  const SUPABASE_KEY = window.APP_CONFIG?.supabaseKey;
+
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    console.error('[supabase] Falta config.js (o supabaseUrl/supabaseKey) antes de supabase-client.js.');
+    return;
+  }
 
   if (!window.supabase || !window.supabase.createClient) {
     console.error('[supabase] No se cargó la librería @supabase/supabase-js. Revisa tu conexión a internet.');
