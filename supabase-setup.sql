@@ -56,7 +56,7 @@ create or replace function login_cliente(p_carnet text, p_phone text)
 returns table(id text, name text)
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare v_phone text := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
 begin
@@ -79,7 +79,7 @@ create or replace function login_staff(p_email text, p_password text)
 returns table(id text, name text, role text, "routeId" text, "driverId" text)
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare v_users jsonb;
 begin
@@ -106,7 +106,7 @@ create or replace function hash_password(p_password text)
 returns text
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   select crypt(p_password, gen_salt('bf', 10));
 $$;
