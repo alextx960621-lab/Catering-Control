@@ -361,6 +361,13 @@
     th[data-sort]:hover { color: var(--primary); }
     th:last-child, td:last-child { border-right: 0; }
     tr:last-child td { border-bottom: 0; }
+    /* Filas alternadas (zebra) para que sea más fácil seguir cada fila con
+       la vista, como en una hoja de cálculo. Las filas de totales (tfoot)
+       quedan fuera porque ya tienen su propio estilo (.table-totals). */
+    .sheet table.table tbody tr:nth-child(even) td,
+    #dispatch-table tbody tr:nth-child(even) td {
+      background: var(--surface-2);
+    }
     tbody tr:hover td {
       background: color-mix(in srgb, var(--primary) 4%, transparent);
     }
@@ -906,11 +913,11 @@
         plans: [
           {id:'p_balance', name:'Balance', type:'General', items:{shots:1,proteins:1,juices:1,breakfast:1,snack1:1,lunch:1,snack2:1,dinner:1}},
           {id:'p_light', name:'Light', type:'General', items:{shots:0,proteins:1,juices:1,breakfast:1,snack1:0,lunch:1,snack2:0,dinner:1}}
-        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], companyName:'', logoUrl:'', itemIcons:{}}
+        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}}
       });
       function normalize() {
         state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
-        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {};
+        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {};
         if (!state.routes.some(r => r.open)) state.routes.unshift({id:'r_open',name:'Ruta abierta',description:'Drivers disponibles sin ruta de trabajo',open:true,order:0});
         state.clients.forEach(c => { c.items ||= {}; c.order ??= ''; c.status ||= 'Activo'; c.returnDate ??= c.estimatedReturn || ''; c.paidDays ??= 0; c.consumedDays ??= 0; });
       }
@@ -1022,20 +1029,62 @@
       function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; return [...list].sort((a,b)=>String(value(a,key)).localeCompare(String(value(b,key)),undefined,{numeric:true})*s.dir); }
       function value(x,key){ if(key==='route') return routeName(x.routeId); if(key==='driver') return driverName(x.driverId); if(key==='plan') return planName(x.planId); return x[key] ?? ''; }
       function th(label,key,group){ const s=ui.sort[group]; const drag=group==='dispatch'?' draggable="true" title="Arrastra para reordenar la columna"':''; return `<th data-sort="${key}" data-group="${group}"${drag}>${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
-      function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
+      function defaultColWidth(label){ return Math.min(240, Math.max(70, String(label).length*8+56)); }
+      function colgroupHtml(cols, group){
+        const saved = state.settings.columnWidths?.[group] || {};
+        return `<colgroup>${cols.map(([label,key])=>`<col data-col-key="${esc(key)}" style="width:${n(saved[key])||defaultColWidth(label)}px">`).join('')}</colgroup>`;
+      }
+      function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${colgroupHtml(headers,group)}<thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
       function activate(name){ ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); }
       function render(){ document.documentElement.dataset.theme=state.settings.theme; $('#current-name').textContent=activeUser.name || (isAdmin()?'Operaciones':'Driver'); $('#current-role').textContent=isAdmin()?'Administrador':'Driver'; $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('[data-admin-only]').forEach(x=>x.hidden=!isAdmin()); renderPage(ui.page); }
       function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,settings:renderSettings}[name]; if(fn) { fn(); enableTableTools(); } }
       function enableTableTools(){
-        $$('.sheet table').forEach((tbl, tableIndex)=>$$('.resize-handle',tbl).forEach((handle,index)=>{
-          handle.onmousedown=e=>{
-            e.preventDefault(); e.stopPropagation();
-            const th=handle.parentElement, initial=th.getBoundingClientRect().width, start=e.clientX;
-            const move=ev=>{ const width=Math.max(70,initial+ev.clientX-start); th.style.width=width+'px'; $$(`tbody tr td:nth-child(${index+1})`,tbl).forEach(td=>td.style.width=width+'px'); };
-            const up=()=>{ document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up); };
-            document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
-          };
-        }));
+        // Redimensionado de columnas al estilo Excel: se arrastra el borde
+        // de la columna y se ajusta el elemento <col> correspondiente, lo
+        // que cambia el ancho de TODA la columna (encabezado + celdas) a la
+        // vez. El ancho mínimo es muy bajo a propósito: así se puede achicar
+        // una columna incluso más que la palabra que contiene, y el texto se
+        // recorta con "…" en vez de forzar que la columna crezca (ver CSS
+        // "text-overflow: ellipsis" en th/td). El ancho final se guarda en
+        // state.settings.columnWidths para que sobreviva a los re-render.
+        $$('.sheet table').forEach(tbl=>{
+          const cols=$$('colgroup col',tbl);
+          $$('.resize-handle',tbl).forEach((handle,index)=>{
+            const headCell=handle.parentElement, col=cols[index];
+            if(!col) return;
+            handle.onmousedown=e=>{
+              e.preventDefault(); e.stopPropagation();
+              const initial=col.getBoundingClientRect().width, start=e.clientX;
+              const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.clientX-start)); col.style.width=width+'px'; };
+              const up=()=>{
+                document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+                const group=headCell.dataset.group, key=headCell.dataset.sort;
+                if(group && key){
+                  state.settings.columnWidths[group] ||= {};
+                  state.settings.columnWidths[group][key]=parseInt(col.style.width,10);
+                  save();
+                }
+              };
+              document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+            };
+            // Soporte táctil (tablet/celular): mismo comportamiento con touch events.
+            handle.ontouchstart=e=>{
+              e.stopPropagation();
+              const touch=e.touches[0], initial=col.getBoundingClientRect().width, start=touch.clientX;
+              const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.touches[0].clientX-start)); col.style.width=width+'px'; };
+              const up=()=>{
+                document.removeEventListener('touchmove',move); document.removeEventListener('touchend',up);
+                const group=headCell.dataset.group, key=headCell.dataset.sort;
+                if(group && key){
+                  state.settings.columnWidths[group] ||= {};
+                  state.settings.columnWidths[group][key]=parseInt(col.style.width,10);
+                  save();
+                }
+              };
+              document.addEventListener('touchmove',move,{passive:true}); document.addEventListener('touchend',up);
+            };
+          });
+        });
         // Reordenar columnas del Día de trabajo mediante arrastre. El orden se
         // guarda para que se conserve después de recargar la página.
         const dispatchTable=$('#dispatch-page .sheet table');
@@ -1109,10 +1158,10 @@
         };
         const rows=c=>`<tr data-id="${c.id}">${columns.map(col=>`<td>${col.cell(c)}</td>`).join('')}</tr>`;
         const filteredActive=list.filter(c=>status(c,date)==='Activo');
-        const totals=`<tfoot>${totalRow(`Totales generales (${activeOrders.length} pedidos activos)`,activeOrders,'general')}${totalRow(`Totales filtrados (${filteredActive.length} pedidos activos)`,filteredActive,'filtered')}</tfoot>`;
+        const totals=`<tfoot>${totalRow(`Totales filtrados (${filteredActive.length} pedidos activos)`,filteredActive,'filtered')}${totalRow(`Totales generales (${activeOrders.length} pedidos activos)`,activeOrders,'general')}</tfoot>`;
         $('#dispatch-page').innerHTML=pageHead('Día de trabajo','La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`<button class="outline" data-action="export-diets">Imprimir dietas especiales</button>${isAdmin()?'<button class="primary" data-action="process-day">Procesar día</button>':''}`)+
           `<div class="toolbar"><label class="field">Día de trabajo<input type="date" id="work-date" value="${date}"></label><label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label><label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${isAdmin()?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
-          `<div class="sheet"><table id="dispatch-table"><thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
+          `<div class="sheet"><table id="dispatch-table">${colgroupHtml(columns.map(c=>[c.label,c.key]),'dispatch')}<thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
         $('#work-date').onchange=e=>{ state.currentDate=e.target.value; day(e.target.value); save(); renderDispatch(); };
         $('#dispatch-route').onchange=e=>{ui.route=e.target.value;renderDispatch();}; $('#dispatch-status').onchange=e=>{ui.dispatchStatus=e.target.value;renderDispatch();}; $('#work-status').onchange=e=>{day().laborable=e.target.value==='work';save();renderDispatch();}; bindSearch('dispatch-search','dispatch',renderDispatch);
         $$('.day-edit').forEach(i=>i.onchange=()=>{const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return; if(!isAdmin()&&!['maps','phone1','phone2','order'].includes(i.dataset.field))return; c[i.dataset.field]=i.value; save(); if(i.dataset.field==='returnDate'){syncReturnDates(state.currentDate);renderDispatch();notice('Fecha de retorno actualizada. El pedido volverá a Activo en esa fecha.');}});
