@@ -1,0 +1,1192 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Catering Control · Operaciones</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabase-client.js"></script>
+  <style>
+    /* ===== RESET & VARIABLES ===== */
+    :root {
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-2: #f0f4fa;
+      --text: #172033;
+      --muted: #657188;
+      --line: #dbe2ee;
+      --primary: #3867f4;
+      --primary-ink: #fff;
+      --accent: #15a77f;
+      --danger: #e24c4b;
+      --warning: #f4a940;
+      --shadow: 0 14px 36px rgba(21,35,62,.10);
+      --radius: 12px;
+      --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    [data-theme="night"] {
+      --bg: #121824;
+      --surface: #1b2433;
+      --surface-2: #222e40;
+      --text: #edf2fa;
+      --muted: #a9b6c9;
+      --line: #324158;
+      --primary: #7296ff;
+      --primary-ink: #0f1726;
+      --accent: #51cfaa;
+      --danger: #ff7775;
+      --warning: #ffc466;
+      --shadow: 0 14px 36px rgba(0,0,0,.3);
+    }
+    [data-theme="forest"] {
+      --bg: #e1ebe2;
+      --surface: #ebf2eb;
+      --surface-2: #d7e4d9;
+      --text: #173328;
+      --muted: #60766b;
+      --line: #bccdc0;
+      --primary: #237a57;
+      --primary-ink: #fff;
+      --accent: #9c5f20;
+      --danger: #c34545;
+      --warning: #bd7b1d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.35 var(--font);
+      transition: background .2s, color .2s;
+    }
+    button, input, select, textarea { font: inherit; }
+    button {
+      border: 0;
+      cursor: pointer;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-weight: 650;
+      color: var(--text);
+      background: var(--surface-2);
+      min-height: 36px;
+      transition: background .15s, transform .1s, box-shadow .15s;
+    }
+    button:hover { filter: brightness(.97); transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    button.primary {
+      background: var(--primary);
+      color: var(--primary-ink);
+    }
+    button.danger { background: var(--danger); color: #fff; }
+    button.outline {
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: .52;
+      transform: none !important;
+    }
+    input, select, textarea {
+      width: 100%;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px 10px;
+      outline: none;
+      min-height: 36px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+    }
+    textarea { resize: vertical; min-height: 70px; }
+
+    /* ===== LOGIN ===== */
+    #login {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--bg);
+    }
+    .login-card {
+      width: min(440px, 100%);
+      padding: 28px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .brand {
+      display: flex;
+      gap: 11px;
+      align-items: center;
+    }
+    .brand-mark {
+      background: var(--primary);
+      color: var(--primary-ink);
+      font-size: 22px;
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: var(--radius);
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    .muted { color: var(--muted); }
+    .stack { display: grid; gap: 12px; }
+    label { display: grid; gap: 5px; font-weight: 650; font-size: 12px; }
+
+    /* ===== APP LAYOUT ===== */
+    #app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+    }
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 18px 12px;
+      background: var(--surface);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: background .2s;
+    }
+    .aside-title {
+      padding: 6px 10px 16px;
+    }
+    .aside-title small {
+      color: var(--muted);
+      display: block;
+      margin: 4px 0 0 54px;
+    }
+    /* Botón hamburguesa (visible en móvil) */
+    .menu-toggle {
+      display: none;
+      background: transparent;
+      font-size: 24px;
+      padding: 4px 8px;
+      min-height: auto;
+      color: var(--text);
+    }
+    nav {
+      display: grid;
+      gap: 4px;
+    }
+    nav button {
+      display: flex;
+      text-align: left;
+      gap: 11px;
+      align-items: center;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 10px;
+      font-weight: 500;
+    }
+    nav button.active,
+    nav button:hover {
+      color: var(--primary);
+      background: color-mix(in srgb, var(--primary) 10%, transparent);
+    }
+    .nav-icon { width: 21px; text-align: center; font-size: 16px; }
+    .aside-bottom {
+      margin-top: auto;
+      padding: 12px 10px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 8px;
+    }
+    .profile {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .avatar {
+      width: 31px; height: 31px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: var(--primary);
+      color: var(--primary-ink);
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .sync-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .sync-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--muted);
+      flex: 0 0 auto;
+    }
+    .sync-dot.ok { background: var(--accent); }
+    .sync-dot.error { background: var(--danger); }
+    .sync-dot.local { background: var(--warning); }
+
+    main {
+      min-width: 0;
+      padding: 26px;
+      background: var(--bg);
+      transition: background .2s;
+    }
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .page-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .page-head h1 { font-size: 25px; margin: 0 0 5px; }
+    .page-head p { color: var(--muted); margin: 0; }
+    .head-actions, .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .toolbar {
+      margin-bottom: 13px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 10px;
+    }
+    .toolbar .search { width: 230px; }
+    .toolbar .field { width: 175px; }
+    .toolbar .spacer { flex: 1; }
+
+    .card {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: 0 2px 5px rgba(20,35,55,.025);
+    }
+    .card-pad { padding: 17px; }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(135px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .metric {
+      padding: 14px;
+    }
+    .metric strong {
+      font-size: 24px;
+      display: block;
+      margin-top: 4px;
+    }
+    .metric small { color: var(--muted); }
+
+    .sheet {
+      overflow: auto;
+      max-height: calc(100vh - 244px);
+      min-height: 340px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      -webkit-overflow-scrolling: touch;
+    }
+    table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: max-content;
+      min-width: 100%;
+      table-layout: fixed;
+    }
+    .sheet table.table {
+      width: max-content;
+      min-width: 100%;
+      table-layout: fixed;
+      margin-bottom: 0;
+    }
+    .sheet table.table > :not(caption) > * > * { box-shadow: none; color: inherit; }
+    th, td {
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 8px 10px;
+      vertical-align: middle;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--surface-2);
+      text-align: left;
+      font-size: 11px;
+      letter-spacing: .02em;
+      color: var(--muted);
+      text-transform: uppercase;
+      user-select: none;
+    }
+    th[data-sort] { cursor: pointer; }
+    th[data-sort]:hover { color: var(--primary); }
+    th:last-child, td:last-child { border-right: 0; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td {
+      background: color-mix(in srgb, var(--primary) 4%, transparent);
+    }
+    tr.dragging td { opacity: .4; }
+
+    .resize-handle {
+      position: absolute;
+      right: -3px;
+      top: 0;
+      width: 7px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 4;
+    }
+    th { position: sticky; }
+    th .resize-handle:hover { background: var(--primary); }
+
+    .editable-cell input,
+    .editable-cell select {
+      padding: 4px 5px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface);
+      min-width: 64px;
+      font-size: 12px;
+    }
+    .editable-cell select { width: 135px; }
+    .handle {
+      color: var(--muted);
+      cursor: grab;
+      font-size: 16px;
+      text-align: center;
+      width: 30px;
+      position: relative;
+    }
+    .row-resize-handle {
+      position: absolute;
+      left: 0; right: 0; bottom: -3px;
+      height: 7px;
+      cursor: row-resize;
+      z-index: 5;
+    }
+    .row-resize-handle:hover { background: var(--primary); opacity: .35; }
+    .id-cell { color: var(--muted); font-size: 12px; }
+    .actions { display: flex; gap: 5px; }
+    .icon-btn {
+      padding: 5px 7px;
+      background: transparent;
+      color: var(--primary);
+      min-height: auto;
+    }
+    .icon-btn.delete { color: var(--danger); }
+    .sort-ind {
+      font-size: 9px;
+      margin-left: 3px;
+      opacity: .7;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .badge.active { color: #087354; background: #dff7ed; }
+    .badge.paused { color: #8d5a02; background: #fff2d9; }
+    .badge.pending { color: #7551ad; background: #eee5ff; }
+    .badge.done { color: #697589; background: #e8edf4; }
+    .badge.off { color: #778293; background: #edf0f5; }
+    .badge.warn { color: #8d5a02; background: #fff2d9; }
+    [data-theme="night"] .badge.active { color: #8cf0ce; background: #164c3b; }
+    [data-theme="night"] .badge.paused { color: #ffd58e; background: #5e4318; }
+    [data-theme="night"] .badge.pending { color: #d5b9ff; background: #423061; }
+
+    .route-totals {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 11px;
+      background: var(--surface-2);
+      border-top: 1px solid var(--line);
+      position: sticky;
+      bottom: 0;
+      left: 0;
+      width: max-content;
+      min-width: 100%;
+    }
+    .route-total {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 7px;
+      padding: 5px 8px;
+      font-size: 12px;
+    }
+    .table-totals td {
+      background: var(--surface-2);
+      border-top: 2px solid var(--line);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .table-totals.general td { color: var(--primary); }
+    .table-totals.filtered td { border-top-width: 1px; }
+    .pause-day-btn {
+      display: block;
+      margin-top: 5px;
+      padding: 3px 6px;
+      min-height: auto;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .empty {
+      padding: 42px 20px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 18px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .form-grid .wide { grid-column: 1 / -1; }
+    .items-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 9px;
+      padding: 12px;
+      background: var(--surface-2);
+      border-radius: 99px;
+    }
+    .items-grid label { font-size: 11px; }
+    .items-grid input { padding: 6px; min-height: auto; }
+
+    dialog {
+      border: 0;
+      padding: 0;
+      background: transparent;
+      width: min(760px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      max-height: calc(100dvh - 24px);
+    }
+    dialog::backdrop {
+      background: rgba(11, 21, 38, .48);
+      backdrop-filter: blur(2px);
+    }
+    .app-modal {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      max-height: calc(100vh - 24px);
+      max-height: calc(100dvh - 24px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .app-modal-head {
+      padding: 16px 19px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      flex: 0 0 auto;
+    }
+    .app-modal-head h2 { font-size: 17px; margin: 0; }
+    .app-modal-body {
+      padding: 18px 19px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .app-modal-foot {
+      padding: 14px 19px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex: 0 0 auto;
+      background: var(--surface);
+    }
+    .close {
+      padding: 3px 8px;
+      font-size: 20px;
+      min-height: auto;
+    }
+
+    .notice {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 20;
+      background: #172033;
+      color: #fff;
+      padding: 11px 15px;
+      border-radius: 99px;
+      box-shadow: var(--shadow);
+      transform: translateY(90px);
+      opacity: 0;
+      transition: .25s;
+      max-width: 320px;
+    }
+    .notice.show { transform: none; opacity: 1; }
+    .notice.error { background: var(--danger); }
+
+    .legend {
+      display: flex;
+      gap: 9px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .toggle-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+    .toggle-list label {
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .toggle-list input { width: auto; min-height: auto; }
+
+    .payroll td, .payroll th { text-align: center; padding: 7px; min-width: 52px; }
+    .payroll th:first-child, .payroll td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      min-width: 170px;
+      text-align: left;
+      background: var(--surface);
+    }
+    .payroll th:first-child { z-index: 3; background: var(--surface-2); }
+    .payroll td:last-child, .payroll th:last-child,
+    .payroll td:nth-last-child(2), .payroll th:nth-last-child(2) {
+      font-weight: 800;
+      background: var(--surface-2);
+      min-width: 78px;
+    }
+
+    .info-box {
+      border-left: 3px solid var(--primary);
+      padding: 10px 12px;
+      background: color-mix(in srgb, var(--primary) 8%, transparent);
+      color: var(--muted);
+      border-radius: 0 7px 7px 0;
+      font-size: 12px;
+    }
+    .pause-panel {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--line));
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+    }
+    .pause-panel p { margin: 0; color: var(--muted); font-size: 13px; }
+    .pause-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      font-weight: 700;
+    }
+    .pause-option input { width: auto; min-height: auto; margin-top: 3px; }
+    .rate-row input { padding: 5px 6px; }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 850px) {
+      #app {
+        grid-template-columns: 1fr;
+      }
+      aside {
+        height: auto;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        padding: 8px 12px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        flex-direction: row;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .aside-title {
+        padding: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+      }
+      .aside-title small { display: none; }
+      .menu-toggle { display: block; }
+      nav {
+        display: none;
+        width: 100%;
+        flex-direction: column;
+        gap: 2px;
+        padding: 12px 0 4px;
+        border-top: 1px solid var(--line);
+        margin-top: 8px;
+      }
+      nav.open { display: flex; }
+      nav button {
+        padding: 8px 10px;
+        font-size: 14px;
+        white-space: nowrap;
+        justify-content: center;
+      }
+      .aside-bottom {
+        margin-top: 0;
+        padding: 6px 0 0;
+        border-top: 0;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .profile { font-size: 12px; }
+      .mobile-sync-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .aside-bottom button { padding: 5px 9px; font-size: 12px; min-height: 30px; }
+
+      main { padding: 12px; }
+      .summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+      .metric { padding: 10px; }
+      .metric strong { font-size: 18px; }
+      .toolbar {
+        padding: 8px;
+        gap: 8px;
+      }
+      .toolbar .search, .toolbar .field { width: 100%; }
+      .two-col { grid-template-columns: 1fr; }
+      .page-head {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .page-head h1 { font-size: 20px; }
+      .sheet { max-height: calc(100vh - 280px); }
+      .form-grid { grid-template-columns: 1fr; }
+      .items-grid { grid-template-columns: repeat(2, 1fr); border-radius: 10px; }
+      /* Fija la columna de Acciones a la derecha para que los botones de
+         Editar/Pausar/Eliminar siempre sean alcanzables sin desplazar toda
+         la tabla horizontalmente, incluso con el teléfono en vertical. */
+      .sheet table.table th:last-child,
+      .sheet table.table td:last-child,
+      #dispatch-table th:last-child,
+      #dispatch-table td:last-child {
+        position: sticky;
+        right: 0;
+        z-index: 3;
+        background: var(--surface);
+        box-shadow: -6px 0 8px -6px rgba(0,0,0,.18);
+      }
+      .sheet table.table th:last-child { z-index: 4; background: var(--surface-2); }
+      #dispatch-table th:last-child { z-index: 4; background: var(--surface-2); }
+    }
+    @media (max-width: 480px) {
+      .summary-grid { grid-template-columns: 1fr 1fr; }
+      .toolbar .field { width: 100%; }
+      .login-card { padding: 20px; }
+    }
+    /* Fila recién creada/editada: se resalta y hace scroll automático hacia
+       ella para que sea visible de inmediato, incluso si queda "debajo" del
+       resto de la tabla. */
+    tr[data-id] { scroll-margin-top: 90px; }
+    @keyframes rowFlash {
+      0% { background: color-mix(in srgb, var(--accent) 38%, transparent); }
+      100% { background: transparent; }
+    }
+    tr.row-flash td { animation: rowFlash 2.1s ease-out; }
+  </style>
+</head>
+<body>
+
+  <!-- ===== APP (la sesión es una página más del menú, no una pantalla aparte) ===== -->
+  <div id="app">
+    <aside>
+      <div class="aside-title">
+        <div class="brand"><div class="brand-mark">🍽</div><strong id="brand-name">Catering Control</strong></div>
+        <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú">☰</button>
+        <small>Gestión de operaciones</small>
+      </div>
+      <nav id="nav">
+        <button data-page="dispatch" class="active"><span class="nav-icon">▦</span>Día de trabajo</button>
+        <button data-page="clients"><span class="nav-icon">♙</span>Clientes</button>
+        <button data-page="drivers"><span class="nav-icon">⌁</span>Drivers</button>
+        <button data-page="routes"><span class="nav-icon">⌘</span>Rutas</button>
+        <button data-page="plans"><span class="nav-icon">▤</span>Planes</button>
+        <button data-page="payroll"><span class="nav-icon">💵</span>Sueldos</button>
+        <button data-page="inventory"><span class="nav-icon">▧</span>Inventario</button>
+        <button data-page="users" data-admin-only><span class="nav-icon">♟</span>Usuarios</button>
+        <button data-page="settings"><span class="nav-icon">⚙</span>Configuración</button>
+      </nav>
+      <div class="aside-bottom">
+        <div class="profile" id="profile-link" style="cursor:pointer" title="Ver sesión">
+          <div class="avatar" id="avatar">👤</div>
+          <div><b id="current-name">Operaciones</b><small class="muted" id="current-role" style="display:block;font-size:10px;">Administrador</small></div>
+        </div>
+        <div class="mobile-sync-group">
+          <div class="sync-pill"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">Listo</span></div>
+          <button class="outline" id="manual-sync-btn">🔄 Sincronizar</button>
+        </div>
+      </div>
+    </aside>
+    <main>
+      <section class="page active" id="dispatch-page"></section>
+      <section class="page" id="clients-page"></section>
+      <section class="page" id="drivers-page"></section>
+      <section class="page" id="routes-page"></section>
+      <section class="page" id="plans-page"></section>
+      <section class="page" id="payroll-page"></section>
+      <section class="page" id="inventory-page"></section>
+      <section class="page" id="users-page"></section>
+      <section class="page" id="settings-page"></section>
+    </main>
+  </div>
+
+  <dialog id="modal"><form method="dialog" class="app-modal" id="modal-form"><div class="app-modal-head"><h2 id="modal-title"></h2><button type="button" class="close" id="modal-close" aria-label="Cerrar">×</button></div><div class="app-modal-body" id="modal-body"></div><div class="app-modal-foot" id="modal-foot"><button value="cancel">Cancelar</button><button class="primary" id="modal-save" value="default">Guardar</button></div></form></dialog>
+  <input id="import-file" type="file" accept="application/json" hidden>
+  <div class="notice" id="notice"></div>
+
+  <script>
+    (() => {
+      'use strict';
+      /* ==========================================================================
+         CONFIGURACIÓN DE LA EMPRESA
+         El "storagePrefix" debe coincidir con el usado en login.html y cliente.html.
+         ========================================================================== */
+      const APP_CONFIG = {
+        companyName: 'Catering Control',
+        storagePrefix: 'catering-app'
+      };
+      /* ========================================================================== */
+      const KEY = `${APP_CONFIG.storagePrefix}-operaciones-v3`;
+      // Esta base almacena exclusivamente cuentas del equipo. Los clientes,
+      // planes, rutas y operaciones continúan dentro de KEY.
+      const STAFF_USERS_KEY = `${APP_CONFIG.storagePrefix}-staff-users-v1`;
+      const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
+      const $ = (s, root=document) => root.querySelector(s);
+      const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+      const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));
+      const n = v => Number(v) || 0;
+      const uid = p => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
+      const today = () => new Date().toISOString().slice(0,10);
+      const items = [['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
+      const defaultStaffUser = {id:'staff_admin',name:'Administrador',username:'admin',email:'admin@catering.local',password:'admin123',role:'admin',routeId:'',driverId:''};
+      function readStaffUsers(){
+        try { const stored=JSON.parse(localStorage.getItem(STAFF_USERS_KEY)); if(Array.isArray(stored) && stored.length) return stored; } catch (_) {}
+        localStorage.setItem(STAFF_USERS_KEY,JSON.stringify([defaultStaffUser]));
+        return [defaultStaffUser];
+      }
+      // El guardado y borrado de usuarios de staff viaja dentro de la tabla
+      // "personal" de Supabase junto con drivers/rutas/configuración, cada
+      // vez que se llama a save().
+      let activeUser = null;
+      let staffUsers = readStaffUsers();
+      const isAdmin = () => activeUser.role !== 'driver';
+      let ui = { page:'dispatch', search:{}, sort:{}, route:'', month:today().slice(0,7) };
+      let state;
+
+      const seed = () => ({
+        currentDate: today(), days: {},
+        routes: [
+          {id:'r_open', name:'Ruta abierta', description:'Drivers disponibles en empresa sin ruta de trabajo', open:true, order:0},
+          {id:'r_centro', name:'Centro', description:'Centro y zona norte', order:1},
+          {id:'r_sur', name:'Sur', description:'Zona sur', order:2}
+        ],
+        plans: [
+          {id:'p_balance', name:'Balance', type:'General', items:{shots:1,proteins:1,juices:1,breakfast:1,snack1:1,lunch:1,snack2:1,dinner:1}},
+          {id:'p_light', name:'Light', type:'General', items:{shots:0,proteins:1,juices:1,breakfast:1,snack1:0,lunch:1,snack2:0,dinner:1}}
+        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[]}
+      });
+      function normalize() {
+        state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
+        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= [];
+        if (!state.routes.some(r => r.open)) state.routes.unshift({id:'r_open',name:'Ruta abierta',description:'Drivers disponibles sin ruta de trabajo',open:true,order:0});
+        state.clients.forEach(c => { c.items ||= {}; c.order ??= ''; c.status ||= 'Activo'; c.returnDate ??= c.estimatedReturn || ''; c.paidDays ??= 0; c.consumedDays ??= 0; });
+      }
+      let operationsSaveQueue=Promise.resolve(true);
+      function setDatabaseStatus(kind){
+        const dot=$('#sync-dot'),text=$('#sync-text');
+        if(dot)dot.className='sync-dot '+(kind==='saving'?'local':kind);
+        if(text)text.textContent=kind==='saving'?'Guardando…':kind==='ok'?'Sincronizado':'Error de guardado';
+      }
+      // Guarda en Supabase, repartido en sus 3 bases de datos independientes:
+      // db_clientes (clientes, planes, días de trabajo), db_personal (drivers,
+      // rutas, usuarios de staff y configuración) y db_inventario (inventario).
+      function save(){
+        localStorage.setItem(KEY, JSON.stringify(state));
+        localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
+        setDatabaseStatus('saving');
+        operationsSaveQueue=operationsSaveQueue.then(async()=>{
+          try{
+            const db=window.SupabaseDB;
+            if(!db) throw new Error('Supabase no está disponible');
+            const [okClientes,okPersonal,okInventario]=await Promise.all([
+              db.dbSet('clientes',{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate}),
+              db.dbSet('personal',{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers}),
+              db.dbSet('inventario',{inventory:state.inventory})
+            ]);
+            const ok=okClientes&&okPersonal&&okInventario;
+            setDatabaseStatus(ok?'ok':'error');
+            if(!ok) notice('Los cambios quedaron locales, pero no se guardaron completamente en Supabase.',true);
+            return ok;
+          }catch(_){setDatabaseStatus('error');notice('Los cambios quedaron locales, pero no se guardaron en la base de datos.',true);return false;}
+        });
+        return operationsSaveQueue;
+      }
+      function load(){ try { state=JSON.parse(localStorage.getItem(KEY)); } catch { state=null; } normalize(); localStorage.setItem(KEY,JSON.stringify(state)); }
+      async function loadFromServer(){
+        try {
+          const db=window.SupabaseDB;
+          if(!db) throw new Error('Supabase no está disponible');
+          const [clientesData,personalData,inventarioData]=await Promise.all([
+            db.dbGet('clientes'), db.dbGet('personal'), db.dbGet('inventario')
+          ]);
+          let gotAny=false;
+          if (clientesData) {
+            gotAny=true;
+            state.clients = clientesData.clients ?? state.clients;
+            state.plans = clientesData.plans ?? state.plans;
+            state.days = clientesData.days ?? state.days;
+            state.currentDate = clientesData.currentDate ?? state.currentDate;
+          }
+          if (personalData) {
+            gotAny=true;
+            state.drivers = personalData.drivers ?? state.drivers;
+            state.routes = personalData.routes ?? state.routes;
+            state.settings = personalData.settings ?? state.settings;
+            if (Array.isArray(personalData.staffUsers) && personalData.staffUsers.length) {
+              staffUsers = personalData.staffUsers;
+              localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
+            }
+          }
+          if (inventarioData) {
+            gotAny=true;
+            state.inventory = inventarioData.inventory ?? state.inventory;
+          }
+          if (gotAny) localStorage.setItem(KEY, JSON.stringify(state));
+          setDatabaseStatus('ok');
+          return gotAny;
+        } catch (_) { setDatabaseStatus('error'); return false; }
+      }
+      function day(date=state.currentDate){ return state.days[date] ||= {laborable:true, processed:false, rates:{}}; }
+      function route(id){ return state.routes.find(x=>x.id===id); }
+      function plan(id){ return state.plans.find(x=>x.id===id); }
+      function driver(id){ return state.drivers.find(x=>x.id===id); }
+      function routeName(id){ return route(id)?.name || 'Sin ruta'; }
+      function planName(id){ return plan(id)?.name || 'Sin plan'; }
+      function driverName(id){ const d=driver(id); return d ? `${d.firstName} ${d.lastName}` : 'Sin asignar'; }
+      function driverForRoute(routeId){ return state.drivers.find(d=>d.routeId===routeId); }
+      function syncClientRouteAndDriver(data){
+        const selectedDriver=driver(data.driverId);
+        if(selectedDriver?.routeId) data.routeId=selectedDriver.routeId;
+        else if(data.routeId) data.driverId=driverForRoute(data.routeId)?.id || '';
+        return data;
+      }
+      function status(c,date=state.currentDate){
+        if (!day(date).laborable) return 'No laborable';
+        if (c.returnDate && date>=c.returnDate) return 'Activo';
+        // Pausas solicitadas desde el portal del cliente. Una fecha de retorno
+        // hace que el estado vuelva a Activo automáticamente ese día.
+        if (c.pauseStart && date >= c.pauseStart && (!c.returnDate || date < c.returnDate)) return 'Pausado';
+        if (c.pauseDates?.includes(date)) return 'Pausado';
+        if (c.startDate && c.startDate > date) return 'Programado';
+        if (n(c.paidDays) && n(c.consumedDays)>=n(c.paidDays)) return 'Retorno pendiente';
+        return c.status || 'Activo';
+      }
+      function badge(s){ const cl=({Activo:'active',Pausado:'paused','Retorno pendiente':'pending',Programado:'pending','No laborable':'off'})[s] || 'done'; return `<span class="badge ${cl}">${esc(s)}</span>`; }
+      function syncReturnDates(date=state.currentDate){
+        let changed=false;
+        state.clients.forEach(c=>{
+          if(c.returnDate && date>=c.returnDate && c.status!=='Activo'){
+            c.status='Activo'; c.pauseStart=''; changed=true;
+          }
+        });
+        if(changed) save();
+      }
+      function notice(text, error=false){ const el=$('#notice'); el.textContent=text; el.className='notice show'+(error?' error':''); clearTimeout(notice.t); notice.t=setTimeout(()=>el.className='notice',2600); }
+      function pageHead(title, subtitle, actions=''){ return `<div class="page-head"><div><h1>${title}</h1><p>${subtitle}</p></div><div class="head-actions">${actions}</div></div>`; }
+      function options(list,current,placeholder='Seleccionar…',label=x=>x.name){ return `<option value="">${placeholder}</option>`+list.map(x=>`<option value="${esc(x.id)}" ${x.id===current?'selected':''}>${esc(label(x))}</option>`).join(''); }
+      function itemFields(values={}){ return `<div class="items-grid">${items.map(([key,label])=>`<label>${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`).join('')}</div>`; }
+      function formItems(f){ return Object.fromEntries(items.map(([key])=>[key,n(f.elements[key]?.value)])); }
+      function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; return [...list].sort((a,b)=>String(value(a,key)).localeCompare(String(value(b,key)),undefined,{numeric:true})*s.dir); }
+      function value(x,key){ if(key==='route') return routeName(x.routeId); if(key==='driver') return driverName(x.driverId); if(key==='plan') return planName(x.planId); return x[key] ?? ''; }
+      function th(label,key,group){ const s=ui.sort[group]; const drag=group==='dispatch'?' draggable="true" title="Arrastra para reordenar la columna"':''; return `<th data-sort="${key}" data-group="${group}"${drag}>${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
+      function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
+      function activate(name){ ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); }
+      function render(){ document.documentElement.dataset.theme=state.settings.theme; $('#current-name').textContent=activeUser.name || (isAdmin()?'Operaciones':'Driver'); $('#current-role').textContent=isAdmin()?'Administrador':'Driver'; $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('[data-admin-only]').forEach(x=>x.hidden=!isAdmin()); renderPage(ui.page); }
+      function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,settings:renderSettings}[name]; if(fn) { fn(); enableTableTools(); } }
+      function enableTableTools(){
+        $$('.sheet table').forEach((tbl, tableIndex)=>$$('.resize-handle',tbl).forEach((handle,index)=>{
+          handle.onmousedown=e=>{
+            e.preventDefault(); e.stopPropagation();
+            const th=handle.parentElement, initial=th.getBoundingClientRect().width, start=e.clientX;
+            const move=ev=>{ const width=Math.max(70,initial+ev.clientX-start); th.style.width=width+'px'; $$(`tbody tr td:nth-child(${index+1})`,tbl).forEach(td=>td.style.width=width+'px'); };
+            const up=()=>{ document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up); };
+            document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+          };
+        }));
+        // Reordenar columnas del Día de trabajo mediante arrastre. El orden se
+        // guarda para que se conserve después de recargar la página.
+        const dispatchTable=$('#dispatch-page .sheet table');
+        if(dispatchTable){
+          let sourceKey='';
+          $$('thead th[data-group="dispatch"]',dispatchTable).forEach(head=>{
+            head.ondragstart=e=>{ sourceKey=head.dataset.sort; e.dataTransfer.effectAllowed='move'; };
+            head.ondragover=e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; };
+            head.ondrop=e=>{
+              e.preventDefault(); const targetKey=head.dataset.sort;
+              if(!sourceKey || sourceKey===targetKey) return;
+              const all=['order','name','route','driver','plan',...items.map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'];
+              const order=state.settings.dispatchColumnOrder.length?[...state.settings.dispatchColumnOrder]:all;
+              all.forEach(key=>{if(!order.includes(key))order.push(key);});
+              const from=order.indexOf(sourceKey), to=order.indexOf(targetKey);
+              order.splice(to,0,order.splice(from,1)[0]);
+              state.settings.dispatchColumnOrder=order; save(); renderDispatch();
+            };
+          });
+        }
+      }
+
+      function renderDispatch(){
+        syncReturnDates(state.currentDate);
+        const date=state.currentDate, d=day(date), q=(ui.search.dispatch||'').toLowerCase(), rf=ui.route, sf=ui.dispatchStatus||'all';
+        const matchesBase=c=>(!rf || c.routeId===rf) && (!q || [c.name,c.carnet,c.address1,c.phone1,c.phone2,c.specialDiet,c.notes].join(' ').toLowerCase().includes(q));
+        const matchesStatus=c=>sf==='all' || status(c,date)===sf;
+        const activeOrders=state.clients.filter(c=>status(c,date)==='Activo');
+        let list=state.clients.filter(c=>matchesBase(c) && matchesStatus(c));
+        list=sort(list,'order','dispatch');
+        const editableField=(c,field,val,type='text')=>`<input class="day-edit" data-id="${c.id}" data-field="${field}" type="${type}" value="${esc(val)}" ${(!isAdmin() && !['maps','phone1','phone2','order'].includes(field))?'disabled':''}>`;
+        const itemValue=(c,key)=>{
+          const ownItems=c.items && Object.keys(c.items).length ? c.items : plan(c.planId)?.items || {};
+          return n(ownItems[key]);
+        };
+        const statusCell=c=>{
+          const current=status(c,date), pausedToday=c.pauseDates?.includes(date);
+          const canToggle=current==='Activo' || pausedToday;
+          return `${badge(current)}${isAdmin()&&canToggle?`<button class="outline pause-day-btn" data-action="toggle-day-pause" data-id="${c.id}">${pausedToday?'Reanudar hoy':'Pausar hoy'}</button>`:''}`;
+        };
+        const definitions=[
+          {key:'order',label:'Orden',cell:c=>editableField(c,'order',c.order,'number')},
+          {key:'name',label:'Cliente',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">${esc(c.carnet||'Sin carnet')}</small>`},
+          {key:'route',label:'Ruta',cell:c=>esc(routeName(c.routeId))},
+          {key:'driver',label:'Driver',cell:c=>esc(driverName(c.driverId))},
+          {key:'plan',label:'Plan',cell:c=>esc(planName(c.planId))},
+          ...items.map(([key,label])=>({key,label,cell:c=>itemValue(c,key)})),
+          {key:'address1',label:'Dirección',cell:c=>`${esc(c.address1||'—')}<br><small>${esc(c.address2||'')}</small>`},
+          {key:'maps',label:'Google Maps',cell:c=>`${c.maps?`<a href="${esc(c.maps)}" target="_blank" rel="noopener">Abrir mapa</a>`:'—'}<br>${editableField(c,'maps',c.maps||'')}`},
+          {key:'phone1',label:'Teléfono 1',cell:c=>editableField(c,'phone1',c.phone1||'')},
+          {key:'phone2',label:'Teléfono 2',cell:c=>editableField(c,'phone2',c.phone2||'')},
+          {key:'notes',label:'Observaciones',cell:c=>esc(c.notes||'—')},
+          {key:'specialDiet',label:'Dieta especial',cell:c=>esc(c.specialDiet||'—')},
+          {key:'career',label:'Carreras / entrega',cell:c=>n(c.career||1)},
+          {key:'bags',label:'Bolsas',cell:c=>n(c.bags)},
+          {key:'status',label:'Estado',cell:statusCell},
+          {key:'returnDate',label:'Fecha de retorno',cell:c=>isAdmin()?editableField(c,'returnDate',c.returnDate||'','date'):esc(c.returnDate||'—')},
+          {key:'id',label:'Acciones',cell:c=>isAdmin()?`<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button>`:'—'}
+        ];
+        const allKeys=definitions.map(x=>x.key), wanted=state.settings.dispatchColumnOrder;
+        const arranged=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
+        const columns=arranged.filter(x=>!state.settings.hiddenColumns.includes(x.key));
+        const numericKeys=new Set([...items.map(([key])=>key),'career','bags']);
+        const totalRow=(label,orders,variant)=>{
+          let labelled=false;
+          return `<tr class="table-totals ${variant}">${columns.map(col=>{
+            if(numericKeys.has(col.key)) return `<td>${orders.reduce((sum,c)=>sum+(col.key==='career'?n(c.career||1):col.key==='bags'?n(c.bags):itemValue(c,col.key)),0)}</td>`;
+            if(!labelled){ labelled=true; return `<td>${label}</td>`; }
+            return '<td>—</td>';
+          }).join('')}</tr>`;
+        };
+        const rows=c=>`<tr data-id="${c.id}">${columns.map(col=>`<td>${col.cell(c)}</td>`).join('')}</tr>`;
+        const filteredActive=list.filter(c=>status(c,date)==='Activo');
+        const totals=`<tfoot>${totalRow(`Totales generales (${activeOrders.length} pedidos activos)`,activeOrders,'general')}${totalRow(`Totales filtrados (${filteredActive.length} pedidos activos)`,filteredActive,'filtered')}</tfoot>`;
+        $('#dispatch-page').innerHTML=pageHead('Día de trabajo','La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`<button class="outline" data-action="export-diets">Imprimir dietas especiales</button>${isAdmin()?'<button class="primary" data-action="process-day">Procesar día</button>':''}`)+
+          `<div class="toolbar"><label class="field">Día de trabajo<input type="date" id="work-date" value="${date}"></label><label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label><label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${isAdmin()?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
+          `<div class="sheet"><table id="dispatch-table"><thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
+        $('#work-date').onchange=e=>{ state.currentDate=e.target.value; day(e.target.value); save(); renderDispatch(); };
+        $('#dispatch-route').onchange=e=>{ui.route=e.target.value;renderDispatch();}; $('#dispatch-status').onchange=e=>{ui.dispatchStatus=e.target.value;renderDispatch();}; $('#work-status').onchange=e=>{day().laborable=e.target.value==='work';save();renderDispatch();}; bindSearch('dispatch-search','dispatch',renderDispatch);
+        $$('.day-edit').forEach(i=>i.onchange=()=>{const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return; if(!isAdmin()&&!['maps','phone1','phone2','order'].includes(i.dataset.field))return; c[i.dataset.field]=i.value; save(); if(i.dataset.field==='returnDate'){syncReturnDates(state.currentDate);renderDispatch();notice('Fecha de retorno actualizada. El pedido volverá a Activo en esa fecha.');}});
+        enableTableTools();
+      }
+      function bindSearch(id,key,fn){
+        const el=$('#'+id);
+        if(!el) return;
+        el.oninput=e=>{
+          const cursor=e.target.selectionStart;
+          ui.search[key]=e.target.value;
+          fn();
+          // La tabla se redibuja al filtrar; se restaura el foco para poder escribir
+          // una frase completa y no quedarse bloqueado después de la primera letra.
+          const fresh=$('#'+id);
+          fresh?.focus();
+          fresh?.setSelectionRange(cursor,cursor);
+        };
+      }
+      function renderClients(){
+        const q=(ui.search.clients||'').toLowerCase(); let list=state.clients.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
+        const rows=c=>`<tr data-id="${c.id}"><td>${n(c.order)||''}</td><td><b>${esc(c.name)}</b><br><small class="muted">CI: ${esc(c.carnet||'—')}</small></td><td>${esc(routeName(c.routeId))}</td><td>${esc(c.address1||'—')}</td><td>${esc(c.phone1||'—')}</td><td>${esc(planName(c.planId))}</td><td>${esc(driverName(c.driverId))}</td><td>${badge(status(c))}</td><td>${n(c.paidDays)}</td><td>${n(c.consumedDays)}</td><td>${esc(c.specialDiet||'—')}</td><td>${isAdmin()?`<button class="icon-btn" data-action="pause-client" data-id="${c.id}">Pausar</button><button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button><button class="icon-btn delete" data-action="delete-client" data-id="${c.id}">×</button>`:'—'}</td></tr>`;
+        $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',isAdmin()?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+table(list,[['Orden','order'],['Cliente / carnet','name'],['Ruta','route'],['Dirección','address1'],['Teléfono','phone1'],['Plan','plan'],['Driver','driver'],['Estado','status'],['Días pagados','paidDays'],['Consumidos','consumedDays'],['Dieta especial','specialDiet'],['Acciones','id']],rows,'clients'); bindSearch('clients-search','clients',renderClients);
+      }
+      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno<input name="returnDate" type="date" value="${esc(c.returnDate)}"></label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label>${itemFields(c.items || plan(c.planId)?.items || {})}</div></div>`; }
+      function scrollToRow(id){
+        requestAnimationFrame(()=>{
+          const row=document.querySelector(`tr[data-id="${id}"]`);
+          if(!row)return;
+          row.scrollIntoView({behavior:'smooth',block:'center',inline:'center'});
+          row.classList.add('row-flash');
+          setTimeout(()=>row.classList.remove('row-flash'),2100);
+        });
+      }
+      function openClient(id){
+        let c=id?state.clients.find(x=>x.id===id):null;
+        showModal(c?'Editar cliente':'Añadir cliente',clientForm(c||{}),async f=>{
+          const data=syncClientRouteAndDriver(Object.fromEntries(new FormData(f))); data.items=formItems(f);
+          if(c)Object.assign(c,data);else{c={id:uid('c'),...data};state.clients.push(c);}
+          const saved=await save();
+          if(!saved)return false;
+          renderClients();notice('Cliente guardado en la base de datos.');
+          scrollToRow(c.id);
+        });
+        const form=$('#modal-form'), routeField=form?.elements.routeId, driverField=form?.elements.driverId;
+        if(routeField) routeField.onchange=()=>{ driverField.value=driverForRoute(routeField.value)?.id || ''; };
+        if(driverField) driverField.onchange=()=>{ const d=driver(driverField.value); if(d?.routeId) routeField.value=d.routeId; };
+      }
+      function openClientPause(id){
+        const c=state.clients.find(x=>x.id===id);if(!c)return;
+        const html=`<div class="form-grid"><div class="wide pause-panel"><label class="pause-option"><input type="checkbox" name="pauseService" checked><span>Pausar servicio desde el día de trabajo actual</span></label><p>La pausa puede quedar abierta. Si deseas programar el regreso, activa la fecha de retorno.</p><label class="pause-option"><input type="checkbox" id="pause-with-return"><span>Agregar fecha de retorno (opcional)</span></label><label id="pause-return-wrap" hidden>Fecha de retorno<input type="date" name="returnDate" min="${state.currentDate}" value=""></label></div></div>`;
+        showModal(`Pausar a ${c.name}`,html,async f=>{
+          if(!f.elements.pauseService.checked)return false;
+          const returnDate=f.elements.returnDate.value;
+          if(returnDate&&returnDate<=state.currentDate){notice('La fecha de retorno debe ser posterior al inicio de la pausa.',true);return false;}
+          c.status='Pausado';c.pauseStart=state.currentDate;c.returnDate=returnDate;c.pauseDates=[];
+          const saved=await save();if(!saved)return false;
+          renderClients();notice(returnDate?'Pausa guardada con fecha de retorno.':'Pausa abierta guardada sin fecha de retorno.');
+          scrollToRow(c.id);
+        });
+        const toggle=$('#pause-with-return'),wrap=$('#pause-return-wrap'),input=$('#modal-form').elements.returnDate;
+        toggle.onchange=()=>{wrap.hidden=!toggle.checked;input.disabled=!toggle.checked;if(!toggle.checked)input.value='';};
+        input.disabled=true;
+      }
+
+      function renderDrivers(){ const q=(ui.search.drivers||'').toLowerCase();let list=state.drivers.filter(d=>!q||[d.firstName,d.lastName,d.carnet,d.phone,d.address,routeName(d.routeId)].join(' ').toLowerCase().includes(q));list=sort(list,'order','drivers');const rows=d=>`<tr><td>${n(d.order)||''}</td><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b></td><td>${esc(d.carnet||'—')}</td><td>${esc(d.phone||'—')}</td><td>${esc(d.address||'—')}</td><td>${esc(routeName(d.routeId))}</td><td>${isAdmin()?`<button class="icon-btn" data-action="edit-driver" data-id="${d.id}">Editar</button><button class="icon-btn delete" data-action="delete-driver" data-id="${d.id}">×</button>`:'—'}</td></tr>`;$('#drivers-page').innerHTML=pageHead('Drivers','Personal de entrega registrado.',isAdmin()?'<button class="primary" data-action="add-driver">+ Añadir driver</button>':'')+`<div class="toolbar"><input id="drivers-search" class="search" placeholder="Buscar driver…" value="${esc(ui.search.drivers||'')}"></div>`+table(list,[['Orden','order'],['Nombre','firstName'],['Carnet','carnet'],['Teléfono','phone'],['Dirección domicilio','address'],['Ruta','route'],['Acciones','id']],rows,'drivers');bindSearch('drivers-search','drivers',renderDrivers);}
+      function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label>Orden<input name="order" type="number" min="0" value="${esc(d.order)}"></label></div>`;}
+      function openDriver(id){const d=id?driver(id):null;showModal(d?'Editar driver':'Añadir driver',driverForm(d||{}),f=>{const data=Object.fromEntries(new FormData(f));if(d){Object.assign(d,data);state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);}else state.drivers.push({id:uid('d'),...data});save();renderDrivers();notice('Driver guardado.');});}
+      function renderRoutes(){const q=(ui.search.routes||'').toLowerCase();let list=state.routes.filter(r=>!q||[r.name,r.description].join(' ').toLowerCase().includes(q));list=sort(list,'order','routes');const rows=r=>`<tr><td>${n(r.order)||''}</td><td><b>${esc(r.name)}</b>${r.open?' <span class="badge off">Abierta</span>':''}</td><td>${esc(r.description||'—')}</td><td>${state.clients.filter(c=>c.routeId===r.id).length}</td><td>${state.drivers.filter(d=>d.routeId===r.id).length}</td><td>${isAdmin()&&!r.open?`<button class="icon-btn" data-action="edit-route" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-route" data-id="${r.id}">×</button>`:'—'}</td></tr>`;$('#routes-page').innerHTML=pageHead('Rutas','Incluye una ruta abierta para drivers disponibles sin ruta de trabajo.',isAdmin()?'<button class="primary" data-action="add-route">+ Crear ruta</button>':'')+`<div class="toolbar"><input id="routes-search" class="search" placeholder="Buscar ruta…" value="${esc(ui.search.routes||'')}"></div>`+table(list,[['Orden','order'],['Ruta','name'],['Descripción','description'],['Clientes','clients'],['Drivers','drivers'],['Acciones','id']],rows,'routes');bindSearch('routes-search','routes',renderRoutes);}
+      function routeForm(r={}){return `<div class="form-grid"><label>Nombre de ruta *<input name="name" required value="${esc(r.name)}"></label><label>Orden<input type="number" min="0" name="order" value="${esc(r.order)}"></label><label class="wide">Descripción / zona<input name="description" value="${esc(r.description)}"></label></div>`;}
+      function openRoute(id){const r=id?route(id):null;showModal(r?'Editar ruta':'Crear ruta',routeForm(r||{}),f=>{const data=Object.fromEntries(new FormData(f));if(r)Object.assign(r,data);else state.routes.push({id:uid('r'),...data});save();renderRoutes();notice('Ruta guardada.');});}
+
+      function renderPlans(){const rows=p=>`<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.type||'General')}</td><td>${items.map(([k,l])=>`${l}: ${n(p.items?.[k])}`).join('<br>')}</td><td>${isAdmin()?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button>`:'—'}</td></tr>`;$('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan.',isAdmin()?'<button class="primary" data-action="add-plan">+ Crear plan</button>':'')+table(state.plans,[['Plan','name'],['Tipo','type'],['Artículos incluidos','items'],['Acciones','id']],rows,'plans');}
+      function planForm(p={}){return `<div class="form-grid"><label>Nombre *<input name="name" required value="${esc(p.name)}"></label><label>Tipo<input name="type" value="${esc(p.type||'General')}"></label><div class="wide"><label>Artículos incluidos</label>${itemFields(p.items)}</div></div>`;}
+      function openPlan(id){const p=id?plan(id):null;showModal(p?'Editar plan':'Crear plan',planForm(p||{}),f=>{const data=Object.fromEntries(new FormData(f));data.items=formItems(f);if(p)Object.assign(p,data);else state.plans.push({id:uid('p'),...data});save();renderPlans();notice('Plan guardado.');});}
+
+      function kitchenItem(id){ return state.inventory.items.find(x=>x.id===id); }
+      function clientItemQuantity(c,key){ const own=c.items && Object.keys(c.items).length ? c.items : plan(c.planId)?.items || {}; return n(own[key]); }
+      function inventoryItemForm(item={}){ return `<div class="form-grid"><label>Producto de cocina *<input name="name" required value="${esc(item.name)}" placeholder="Ej.: Envase mediano"></label><label>Unidad *<input name="unit" required value="${esc(item.unit||'unidades')}" placeholder="unidades, kg, litros"></label><label>Stock inicial / actual<input name="stock" type="number" step="0.01" value="${n(item.stock)}"></label><label>Stock mínimo<input name="minimum" type="number" min="0" step="0.01" value="${n(item.minimum)}"></label></div>`; }
+      function openInventoryItem(id){ const item=id?kitchenItem(id):null; showModal(item?'Editar producto':'Añadir producto de cocina',inventoryItemForm(item||{}),f=>{const data=Object.fromEntries(new FormData(f));if(item)Object.assign(item,data);else state.inventory.items.push({id:uid('inv'),...data});save();renderInventory();notice('Producto de inventario guardado.');}); }
+      function inventoryOptions(current=''){ return `<option value="">Seleccionar producto</option>`+state.inventory.items.map(x=>`<option value="${x.id}" ${x.id===current?'selected':''}>${esc(x.name)} (${esc(x.unit||'unidades')})</option>`).join(''); }
+      function inventoryMovementForm(type){ const title=type==='entry'?'Ingreso de producto':type==='waste'?'Salida por merma':'Salida por uso'; return {title,html:`<div class="form-grid"><label>Fecha<input name="date" type="date" value="${state.currentDate}"></label><label>Producto *<select name="inventoryId" required>${inventoryOptions()}</select></label><label>Cantidad *<input name="quantity" type="number" min="0.01" step="0.01" required></label><label>Motivo / detalle<input name="note" required placeholder="Ej.: recepción proveedor"></label></div>`}; }
+      function openInventoryMovement(type){ const form=inventoryMovementForm(type); showModal(form.title,form.html,f=>{const data=Object.fromEntries(new FormData(f)), item=kitchenItem(data.inventoryId); if(!item)return false; const qty=n(data.quantity), delta=type==='entry'?qty:-qty; item.stock=n(item.stock)+delta; state.inventory.movements.unshift({id:uid('mov'),date:data.date,inventoryId:data.inventoryId,type,quantity:delta,note:data.note});save();renderInventory();notice(type==='entry'?'Ingreso registrado.':'Salida de inventario registrada.');}); }
+      function inventoryLinkForm(link={}){ return `<div class="form-grid"><label>Producto de cocina *<select name="inventoryId" required>${inventoryOptions(link.inventoryId)}</select></label><label>Artículo entregado al cliente *<select name="clientItemKey" required>${items.map(([key,label])=>`<option value="${key}" ${link.clientItemKey===key?'selected':''}>${label}</option>`).join('')}</select></label><label class="wide">Cantidad a descontar por cada artículo entregado *<input name="quantity" type="number" min="0.01" step="0.01" required value="${n(link.quantity)||1}"></label></div>`; }
+      function openInventoryLink(id){ const link=id?state.inventory.links.find(x=>x.id===id):null; showModal(link?'Editar vínculo de consumo':'Vincular consumo a artículo entregado',inventoryLinkForm(link||{}),f=>{const data=Object.fromEntries(new FormData(f));if(link)Object.assign(link,data);else state.inventory.links.push({id:uid('link'),...data});save();renderInventory();notice('Vínculo de consumo guardado.');}); }
+      function deleteInventoryItem(id){ const item=kitchenItem(id); if(!item || !confirm(`¿Eliminar ${item.name} del inventario?`))return; state.inventory.items=state.inventory.items.filter(x=>x.id!==id); state.inventory.links=state.inventory.links.filter(x=>x.inventoryId!==id); save();renderInventory();notice('Producto eliminado.'); }
+      function deleteInventoryLink(id){ if(!confirm('¿Eliminar este vínculo de consumo?'))return; state.inventory.links=state.inventory.links.filter(x=>x.id!==id);save();renderInventory();notice('Vínculo eliminado.'); }
+      function renderInventory(){
+        const itemRows=item=>{const links=state.inventory.links.filter(l=>l.inventoryId===item.id);const low=n(item.stock)<=n(item.minimum);return `<tr><td><b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}</td><td>${esc(item.unit||'unidades')}</td><td>${n(item.stock)}</td><td>${n(item.minimum)}</td><td>${links.length?links.map(l=>`${n(l.quantity)} × ${esc(items.find(([key])=>key===l.clientItemKey)?.[1]||l.clientItemKey)}`).join('<br>'):'—'}</td><td>${isAdmin()?`<button class="icon-btn" data-action="edit-inventory-item" data-id="${item.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-item" data-id="${item.id}">×</button>`:'—'}</td></tr>`;};
+        const linkRows=link=>`<tr><td>${esc(kitchenItem(link.inventoryId)?.name||'Producto eliminado')}</td><td>${esc(items.find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey)}</td><td>${n(link.quantity)}</td><td>${isAdmin()?`<button class="icon-btn" data-action="edit-inventory-link" data-id="${link.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-link" data-id="${link.id}">×</button>`:'—'}</td></tr>`;
+        const recent=state.inventory.movements.slice(0,12);
+        const movementRows=m=>`<tr><td>${esc(m.date)}</td><td>${esc(kitchenItem(m.inventoryId)?.name||'Producto eliminado')}</td><td>${m.quantity>0?`+${n(m.quantity)}`:n(m.quantity)}</td><td>${m.type==='entry'?'Ingreso':m.type==='waste'?'Merma':m.type==='delivery'?'Entrega procesada':'Uso'}</td><td>${esc(m.note||'—')}</td></tr>`;
+        const actions=isAdmin()?`<button class="primary" data-action="add-inventory-item">+ Producto de cocina</button><button class="outline" data-action="add-inventory-entry">+ Ingreso</button><button class="outline" data-action="add-inventory-use">− Uso</button><button class="outline" data-action="add-inventory-waste">− Merma</button><button class="outline" data-action="add-inventory-link">Vincular consumo</button>`:'';
+        $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina. Los vínculos descuentan insumos automáticamente al procesar pedidos activos.',actions)+`<div class="two-col"><div class="card card-pad"><h3 style="margin-bottom:12px">Productos de cocina</h3>${table(state.inventory.items,[['Producto','name'],['Unidad','unit'],['Stock','stock'],['Mínimo','minimum'],['Se descuenta con','links'],['Acciones','id']],itemRows,'inventory')}</div><div class="card card-pad"><h3 style="margin-bottom:12px">Vínculos de consumo</h3>${table(state.inventory.links,[['Producto de cocina','inventoryId'],['Artículo entregado','clientItemKey'],['Cantidad por entrega','quantity'],['Acciones','id']],linkRows,'inventory-links')}</div></div><div class="card card-pad" style="margin-top:18px"><h3 style="margin-bottom:12px">Últimos movimientos</h3>${table(recent,[['Fecha','date'],['Producto','inventoryId'],['Cantidad','quantity'],['Tipo','type'],['Detalle','note']],movementRows,'inventory-movements')}</div>`;
+      }
+      function applyInventoryForProcessedDay(date){
+        const active=state.clients.filter(c=>status(c,date)==='Activo');
+        state.inventory.links.forEach(link=>{
+          const item=kitchenItem(link.inventoryId); if(!item)return;
+          const delivered=active.reduce((sum,c)=>sum+clientItemQuantity(c,link.clientItemKey),0), used=delivered*n(link.quantity);
+          if(!used)return;
+          item.stock=n(item.stock)-used;
+          state.inventory.movements.unshift({id:uid('mov'),date,inventoryId:item.id,type:'delivery',quantity:-used,note:`Descuento automático: ${delivered} ${items.find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey}`});
+        });
+      }
+
+      function monthDates(month){const [y,m]=month.split('-').map(Number),end=new Date(y,m,0).getDate();return Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
+      function renderPayroll(){const dates=monthDates(ui.month);let list=isAdmin()?state.drivers:state.drivers.filter(d=>d.id===activeUser.driverId);const rows=d=>{const values=dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>c.driverId===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=isAdmin()?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};$('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<input id="payroll-month" type="month" value="${ui.month}"></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet"><table class="payroll"><thead><tr><th>Driver / Ruta</th>${dates.map(d=>`<th>${Number(d.slice(-2))}</th>`).join('')}<th>Total</th><th>Día tarifa</th><th>Monto Bs</th></tr></thead><tbody>${list.map(rows).join('')||'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody></table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
+
+      function renderUsers(){if(!isAdmin())return;const rows=u=>`<tr><td><b>${esc(u.username)}</b></td><td>${esc(u.name)}</td><td>${esc(u.email||'—')}</td><td>${badge(u.role==='driver'?'Driver':'Administrador')}</td><td>${esc(routeName(u.routeId))}</td><td><button class="icon-btn" data-action="edit-user" data-id="${u.id}">Editar</button>${u.id!==activeUser.id?`<button class="icon-btn delete" data-action="delete-user" data-id="${u.id}">×</button>`:''}</td></tr>`;$('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Solo existen Administrador y Driver.', '<button class="primary" data-action="add-user">+ Crear usuario</button>')+table(staffUsers,[['Usuario','username'],['Nombre','name'],['Correo','email'],['Rol','role'],['Ruta asignada','route'],['Acciones','id']],rows,'users');}
+      function userForm(u={}){const d=u.driverId?driver(u.driverId):{};return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'}></label><label>Rol<select name="role"><option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="driver" ${u.role==='driver'?'selected':''}>Driver</option></select></label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label>Carnet${u.role==='driver'?' *':''}<input name="carnet" value="${esc(d.carnet)}"></label><label>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="wide">Dirección de domicilio<input name="address" value="${esc(d.address)}"></label></div>`;}
+      function openUser(id){let u=id?staffUsers.find(x=>x.id===id):null;showModal(u?'Editar usuario':'Crear usuario',userForm(u||{}),async f=>{const data=Object.fromEntries(new FormData(f));if(staffUsers.some(x=>x.username===data.username&&x.id!==u?.id)){notice('Ese usuario ya existe.',true);return false;}if(staffUsers.some(x=>x.email.toLowerCase()===data.email.toLowerCase()&&x.id!==u?.id)){notice('Ese correo ya está registrado.',true);return false;}let driverId=u?.driverId;if(data.role==='driver'){let d=driver(driverId);const parts=data.name.trim().split(/\s+/);const driverData={firstName:parts.shift()||data.name,lastName:parts.join(' ')||'',carnet:data.carnet,phone:data.phone,address:data.address,routeId:data.routeId};if(d)Object.assign(d,driverData);else{d={id:uid('d'),...driverData};state.drivers.push(d);}driverId=d.id;}const userData={username:data.username,email:data.email,password:data.password||u?.password||'',name:data.name,role:data.role,routeId:data.routeId,driverId};if(u)Object.assign(u,userData);else{u={id:uid('u'),...userData};staffUsers.push(u);}const saved=await save();if(!saved)return false;renderUsers();notice(data.role==='driver'?'Usuario, acceso y ficha de driver guardados en la base de datos.':'Usuario guardado en la base de datos.');});}
+      function renderSettings(){
+        const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...items,['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['returnDate','Fecha de retorno'],['id','Acciones']];
+        $('#settings-page').innerHTML=pageHead('Configuración','Preferencias visuales, columnas y respaldo de datos.')+`<div class="two-col"><div class="card card-pad stack"><h3>Apariencia</h3><label>Tema<select id="theme"><option value="light" ${state.settings.theme==='light'?'selected':''}>Claro</option><option value="night" ${state.settings.theme==='night'?'selected':''}>Nocturno</option><option value="forest" ${state.settings.theme==='forest'?'selected':''}>Bosque</option></select></label><h3 style="margin-top:10px">Columnas visibles</h3><p class="muted">Afecta a la tabla de Día de trabajo. Allí también puedes arrastrar los encabezados para cambiar su orden.</p><div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!state.settings.hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div></div><div class="card card-pad stack"><h3>Datos</h3><p class="muted">Clientes, operaciones y usuarios del equipo se sincronizan con la base de datos en cada guardado.</p><p class="muted">Los días laborables/no laborables se administran directamente desde Día de trabajo.</p><button class="outline" data-action="export-json">Exportar JSON</button><button class="outline" data-action="import-json">Importar JSON</button></div></div>`;
+        $('#theme').onchange=e=>{state.settings.theme=e.target.value;save();render();};
+        $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
+      }
+      function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
+      async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);}
+      function processDay(){
+        const d=day();
+        if(!d.laborable){notice('Un día no laborable no procesa pedidos ni descuenta inventario.',true);return;}
+        if(d.processed){notice('Este día ya fue procesado.',true);return;}
+        if(!confirm(`¿Procesar el día ${state.currentDate.split('-').reverse().join('/')}?`))return;
+        state.clients.filter(c=>status(c)==='Activo').forEach(c=>c.consumedDays=n(c.consumedDays)+1);
+        applyInventoryForProcessedDay(state.currentDate);
+        d.processed=true;save();renderDispatch();notice('Día procesado e inventario actualizado.');
+      }
+      function toggleDayPause(id){
+        const c=state.clients.find(x=>x.id===id); if(!c) return;
+        c.pauseDates ||= [];
+        const i=c.pauseDates.indexOf(state.currentDate);
+        if(i>=0){ c.pauseDates.splice(i,1); notice('Pedido reanudado para este día.'); }
+        else { c.pauseDates.push(state.currentDate); notice('Pedido pausado solo para este día.'); }
+        save(); renderDispatch();
+      }
+      function exportDiets(){const date=state.currentDate;const rows=state.clients.filter(c=>status(c,date)==='Activo').map(c=>{const pitems=c.items||plan(c.planId)?.items||{};return `<tr><td>${esc(c.name)}</td><td>${esc(planName(c.planId))}</td><td>${items.map(([k,l])=>`${l}: ${n(pitems[k])}`).join(' | ')}</td><td>${esc([c.notes,c.specialDiet].filter(Boolean).join(' — '))}</td></tr>`;}).join('');const doc=`<html><meta charset="utf-8"><table><thead><tr><th>Cliente</th><th>Plan</th><th>Artículos incluidos</th><th>Observaciones / dieta especial</th></tr></thead><tbody>${rows}</tbody></table></html>`;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([doc],{type:'application/vnd.ms-excel'}));a.download=`dietas-especiales-${date}.xls`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);notice('Archivo Excel generado.');}
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"process-day":processDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-json":()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'}));a.download='catering-respaldo.json';a.click();},"import-json":()=>$('#import-file').click()};map[action]?.();});
+      document.addEventListener('click',e=>{const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
+      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);normalize();save();render();notice('Respaldo importado.');}catch{notice('El respaldo no es válido.',true);}};r.readAsText(file);};
+      document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
+      document.title = `${APP_CONFIG.companyName} · Operaciones`;
+      try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
+      if(!activeUser){ window.location.replace('./login.html'); return; }
+      load(); loadFromServer().then(() => { normalize(); render(); }); render(); activate('dispatch');
+    })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+</body>
+</html>

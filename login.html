@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Catering Control · Iniciar sesión</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabase-client.js"></script>
+  <style>
+    body { min-height:100vh; background:radial-gradient(circle at 20% 20%,rgba(13,110,253,.2),transparent 34%),#f5f7fb; }
+    .login-card { max-width:420px; }
+    .brand-mark { width:44px; height:44px; border-radius:.8rem; overflow:hidden; background:#0d6efd; flex:0 0 auto; }
+    .brand-mark img { width:100%; height:100%; object-fit:contain; }
+    .form-panel { display:none; }
+    .form-panel.active { display:block; }
+  </style>
+</head>
+<body class="d-flex align-items-center py-4">
+  <main class="container">
+    <div class="row justify-content-center">
+      <div class="col-12 login-card">
+        <section class="card shadow-lg border-0 rounded-4">
+          <div class="card-body p-4 p-md-5">
+            <div class="d-flex align-items-center gap-3 mb-4">🍽<div><h1 class="h4 mb-0" id="brand-title">Catering Control</h1><p class="text-secondary small mb-0">Iniciar sesión</p></div>
+            </div>
+
+            <nav class="nav nav-pills nav-fill bg-body-tertiary rounded-3 p-1 mb-4" aria-label="Tipo de acceso">
+              <button type="button" id="tab-client" class="nav-link active">Soy cliente</button>
+              <button type="button" id="tab-staff" class="nav-link">Soy del equipo</button>
+            </nav>
+
+            <form id="form-client" class="form-panel active">
+              <p class="text-secondary small">Ingresa con tu carnet de identidad y el teléfono registrado en tu plan.</p>
+              <div class="mb-3"><label class="form-label" for="client-carnet">Carnet de identidad</label><input class="form-control" id="client-carnet" autocomplete="username" placeholder="Ej. 1234567 LP" required></div>
+              <div class="mb-3"><label class="form-label" for="client-phone">Teléfono</label><input class="form-control" id="client-phone" inputmode="tel" autocomplete="current-password" placeholder="70000000" required></div>
+              <button class="btn btn-primary w-100" type="submit">Entrar a mi plan</button>
+            </form>
+
+            <form id="form-staff" class="form-panel">
+              <p class="text-secondary small">Acceso del equipo operativo.</p>
+              <div class="mb-3"><label class="form-label" for="staff-email">Correo</label><input class="form-control" id="staff-email" type="email" autocomplete="username" required></div>
+              <div class="mb-3"><label class="form-label" for="staff-pass">Contraseña</label><input class="form-control" id="staff-pass" type="password" autocomplete="current-password" required></div>
+              <button class="btn btn-primary w-100" type="submit">Entrar al panel</button>
+            </form>
+            <div class="alert alert-danger mt-3 mb-0 d-none" id="error-msg" role="alert"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+<script>
+/* ==========================================================================
+   CONFIGURACIÓN DE LA EMPRESA
+   Edita estos valores para personalizar el sistema para cada cliente/empresa.
+   ========================================================================== */
+const APP_CONFIG = {
+  companyName: 'Catering Control',   // Nombre mostrado en el título de la página de login
+  storagePrefix: 'catering-app'      // Prefijo usado para las claves de almacenamiento local (debe coincidir en todos los archivos del sistema)
+};
+document.getElementById('brand-title').textContent = APP_CONFIG.companyName;
+/* ========================================================================== */
+
+const STAFF_USERS_KEY = `${APP_CONFIG.storagePrefix}-staff-users-v1`;
+const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
+const STAFF_APP_URL = './index.html';
+const CLIENT_PORTAL_URL = './cliente.html';
+const CLIENT_SESSION_KEY = `${APP_CONFIG.storagePrefix}-client-session-v1`;
+const OPERATIONS_KEY = `${APP_CONFIG.storagePrefix}-operaciones-v3`;
+const defaultUsers = [{id:'staff_admin',name:'Administrador',username:'admin',email:'admin@catering.local',password:'admin123',role:'admin',routeId:'',driverId:''}];
+
+// Lee la base de "clientes" desde Supabase; si no hay conexión, usa la copia local como respaldo.
+async function fetchOperaciones(){
+  try{
+    const remote=await window.SupabaseDB?.dbGet('clientes');
+    if(remote){ localStorage.setItem(OPERATIONS_KEY, JSON.stringify(remote)); return remote; }
+  }catch(_){}
+  try{return JSON.parse(localStorage.getItem(OPERATIONS_KEY));}catch(_){return null;}
+}
+// Lee la base de "personal" (usuarios de staff) desde Supabase; respaldo en localStorage.
+async function fetchStaffUsers(){
+  try{
+    const remote=await window.SupabaseDB?.dbGet('personal');
+    if(remote && Array.isArray(remote.staffUsers) && remote.staffUsers.length){
+      localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(remote.staffUsers));
+      return remote.staffUsers;
+    }
+  }catch(_){}
+  try{const local=JSON.parse(localStorage.getItem(STAFF_USERS_KEY)||'[]');if(local.length)return local;}catch(_){}
+  return defaultUsers;
+}
+const tabClient=document.getElementById('tab-client'), tabStaff=document.getElementById('tab-staff'), formClient=document.getElementById('form-client'), formStaff=document.getElementById('form-staff'), errorEl=document.getElementById('error-msg');
+function showError(msg){errorEl.textContent=msg;errorEl.classList.remove('d-none');}
+function clearError(){errorEl.classList.add('d-none');}
+function switchAccess(type){const client=type==='client';tabClient.classList.toggle('active',client);tabStaff.classList.toggle('active',!client);formClient.classList.toggle('active',client);formStaff.classList.toggle('active',!client);clearError();}
+tabClient.addEventListener('click',()=>switchAccess('client')); tabStaff.addEventListener('click',()=>switchAccess('staff'));
+formClient.addEventListener('submit',async e=>{e.preventDefault();clearError();const carnet=document.getElementById('client-carnet').value.trim().toLowerCase(),phone=document.getElementById('client-phone').value.replace(/\D/g,'');const operationalData=await fetchOperaciones();const normalizePhone=value=>String(value||'').replace(/\D/g,'');const client=operationalData?.clients?.find(c=>String(c.carnet||'').trim().toLowerCase()===carnet&&[c.phone1,c.phone2].map(normalizePhone).includes(phone));if(!client){showError('Carnet o teléfono no coinciden con un cliente registrado.');return;}sessionStorage.setItem(CLIENT_SESSION_KEY,JSON.stringify({id:client.id,name:client.name}));window.location.href=CLIENT_PORTAL_URL;});
+formStaff.addEventListener('submit',async e=>{e.preventDefault();clearError();const email=document.getElementById('staff-email').value.trim(),password=document.getElementById('staff-pass').value;const staff=await fetchStaffUsers();const person=staff.find(u=>u.email?.toLowerCase()===email.toLowerCase()&&u.password===password)||null;if(!person){showError('Correo o contraseña incorrectos.');return;}sessionStorage.setItem(STAFF_SESSION_KEY,JSON.stringify({id:person.id,name:person.name,role:person.role,routeId:person.routeId||'',driverId:person.driverId||''}));window.location.href=STAFF_APP_URL;});
+if(sessionStorage.getItem(STAFF_SESSION_KEY)) window.location.href=STAFF_APP_URL;
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+</body>
+</html>
