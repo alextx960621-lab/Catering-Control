@@ -135,7 +135,9 @@
       display: grid;
       place-items: center;
       border-radius: var(--radius);
+      overflow: hidden;
     }
+    .brand-mark img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
     h1, h2, h3, p { margin-top: 0; }
     .muted { color: var(--muted); }
     .stack { display: grid; gap: 12px; }
@@ -740,7 +742,7 @@
   <div id="app">
     <aside>
       <div class="aside-title">
-        <div class="brand"><div class="brand-mark">🍽</div><strong id="brand-name">Catering Control</strong></div>
+        <div class="brand"><div class="brand-mark" id="brand-mark">🍽</div><strong id="brand-name">Catering Control</strong></div>
         <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú">☰</button>
         <small>Gestión de operaciones</small>
       </div>
@@ -807,6 +809,37 @@
       const uid = p => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
       const today = () => new Date().toISOString().slice(0,10);
       const items = [['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
+      // Comprime y redimensiona una imagen antes de guardarla como base64,
+      // para que subir logos/íconos/fotos no infle la base de datos ni ralentice la web.
+      function readImageAsDataURL(file, maxDim = 480, quality = 0.82) {
+        return new Promise((resolve, reject) => {
+          if (!file || !file.type?.startsWith('image/')) { reject(new Error('Archivo no válido')); return; }
+          const img = new Image();
+          const reader = new FileReader();
+          reader.onload = () => {
+            img.onload = () => {
+              const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+              const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+              const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+              canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+              resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.onerror = () => reject(new Error('No se pudo leer la imagen'));
+            img.src = reader.result;
+          };
+          reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+          reader.readAsDataURL(file);
+        });
+      }
+      // Aplica el nombre y logo de la empresa (guardados en Configuración) al
+      // encabezado. Si no hay nada configurado, usa el valor por defecto.
+      function applyBranding(){
+        const name = state?.settings?.companyName?.trim() || APP_CONFIG.companyName;
+        const logo = state?.settings?.logoUrl || '';
+        const nameEl = $('#brand-name'); if (nameEl) nameEl.textContent = name;
+        const markEl = $('#brand-mark'); if (markEl) markEl.innerHTML = logo ? `<img src="${logo}" alt="${esc(name)}">` : '🍽';
+        document.title = `${name} · Operaciones`;
+      }
       const defaultStaffUser = {id:'staff_admin',name:'Administrador',username:'admin',email:'admin@catering.local',password:'admin123',role:'admin',routeId:'',driverId:''};
       function readStaffUsers(){
         try { const stored=JSON.parse(localStorage.getItem(STAFF_USERS_KEY)); if(Array.isArray(stored) && stored.length) return stored; } catch (_) {}
@@ -832,11 +865,11 @@
         plans: [
           {id:'p_balance', name:'Balance', type:'General', items:{shots:1,proteins:1,juices:1,breakfast:1,snack1:1,lunch:1,snack2:1,dinner:1}},
           {id:'p_light', name:'Light', type:'General', items:{shots:0,proteins:1,juices:1,breakfast:1,snack1:0,lunch:1,snack2:0,dinner:1}}
-        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[]}
+        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], companyName:'', logoUrl:'', itemIcons:{}}
       });
       function normalize() {
         state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
-        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= [];
+        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {};
         if (!state.routes.some(r => r.open)) state.routes.unshift({id:'r_open',name:'Ruta abierta',description:'Drivers disponibles sin ruta de trabajo',open:true,order:0});
         state.clients.forEach(c => { c.items ||= {}; c.order ??= ''; c.status ||= 'Activo'; c.returnDate ??= c.estimatedReturn || ''; c.paidDays ??= 0; c.consumedDays ??= 0; });
       }
@@ -943,7 +976,7 @@
       function notice(text, error=false){ const el=$('#notice'); el.textContent=text; el.className='notice show'+(error?' error':''); clearTimeout(notice.t); notice.t=setTimeout(()=>el.className='notice',2600); }
       function pageHead(title, subtitle, actions=''){ return `<div class="page-head"><div><h1>${title}</h1><p>${subtitle}</p></div><div class="head-actions">${actions}</div></div>`; }
       function options(list,current,placeholder='Seleccionar…',label=x=>x.name){ return `<option value="">${placeholder}</option>`+list.map(x=>`<option value="${esc(x.id)}" ${x.id===current?'selected':''}>${esc(label(x))}</option>`).join(''); }
-      function itemFields(values={}){ return `<div class="items-grid">${items.map(([key,label])=>`<label>${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`).join('')}</div>`; }
+      function itemFields(values={}){ return `<div class="items-grid">${items.map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<label>${icon?`<img src="${icon}" alt="" style="width:16px;height:16px;object-fit:cover;border-radius:4px;vertical-align:-3px;margin-right:4px">`:''}${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`;}).join('')}</div>`; }
       function formItems(f){ return Object.fromEntries(items.map(([key])=>[key,n(f.elements[key]?.value)])); }
       function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; return [...list].sort((a,b)=>String(value(a,key)).localeCompare(String(value(b,key)),undefined,{numeric:true})*s.dir); }
       function value(x,key){ if(key==='route') return routeName(x.routeId); if(key==='driver') return driverName(x.driverId); if(key==='plan') return planName(x.planId); return x[key] ?? ''; }
@@ -1153,9 +1186,58 @@
       function openUser(id){let u=id?staffUsers.find(x=>x.id===id):null;showModal(u?'Editar usuario':'Crear usuario',userForm(u||{}),async f=>{const data=Object.fromEntries(new FormData(f));if(staffUsers.some(x=>x.username===data.username&&x.id!==u?.id)){notice('Ese usuario ya existe.',true);return false;}if(staffUsers.some(x=>x.email.toLowerCase()===data.email.toLowerCase()&&x.id!==u?.id)){notice('Ese correo ya está registrado.',true);return false;}let driverId=u?.driverId;if(data.role==='driver'){let d=driver(driverId);const parts=data.name.trim().split(/\s+/);const driverData={firstName:parts.shift()||data.name,lastName:parts.join(' ')||'',carnet:data.carnet,phone:data.phone,address:data.address,routeId:data.routeId};if(d)Object.assign(d,driverData);else{d={id:uid('d'),...driverData};state.drivers.push(d);}driverId=d.id;}const userData={username:data.username,email:data.email,password:data.password||u?.password||'',name:data.name,role:data.role,routeId:data.routeId,driverId};if(u)Object.assign(u,userData);else{u={id:uid('u'),...userData};staffUsers.push(u);}const saved=await save();if(!saved)return false;renderUsers();notice(data.role==='driver'?'Usuario, acceso y ficha de driver guardados en la base de datos.':'Usuario guardado en la base de datos.');});}
       function renderSettings(){
         const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...items,['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['returnDate','Fecha de retorno'],['id','Acciones']];
-        $('#settings-page').innerHTML=pageHead('Configuración','Preferencias visuales, columnas y respaldo de datos.')+`<div class="two-col"><div class="card card-pad stack"><h3>Apariencia</h3><label>Tema<select id="theme"><option value="light" ${state.settings.theme==='light'?'selected':''}>Claro</option><option value="night" ${state.settings.theme==='night'?'selected':''}>Nocturno</option><option value="forest" ${state.settings.theme==='forest'?'selected':''}>Bosque</option></select></label><h3 style="margin-top:10px">Columnas visibles</h3><p class="muted">Afecta a la tabla de Día de trabajo. Allí también puedes arrastrar los encabezados para cambiar su orden.</p><div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!state.settings.hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div></div><div class="card card-pad stack"><h3>Datos</h3><p class="muted">Clientes, operaciones y usuarios del equipo se sincronizan con la base de datos en cada guardado.</p><p class="muted">Los días laborables/no laborables se administran directamente desde Día de trabajo.</p><button class="outline" data-action="export-json">Exportar JSON</button><button class="outline" data-action="import-json">Importar JSON</button></div></div>`;
+        const logo=state.settings.logoUrl;
+        $('#settings-page').innerHTML=pageHead('Configuración','Preferencias visuales, columnas y respaldo de datos.')+`<div class="two-col">
+          <div class="card card-pad stack">
+            <h3>Apariencia</h3>
+            <label>Tema<select id="theme"><option value="light" ${state.settings.theme==='light'?'selected':''}>Claro</option><option value="night" ${state.settings.theme==='night'?'selected':''}>Nocturno</option><option value="forest" ${state.settings.theme==='forest'?'selected':''}>Bosque</option></select></label>
+            <h3 style="margin-top:10px">Columnas visibles</h3>
+            <p class="muted">Afecta a la tabla de Día de trabajo. Allí también puedes arrastrar los encabezados para cambiar su orden.</p>
+            <div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!state.settings.hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div>
+          </div>
+          <div class="card card-pad stack">
+            <h3>Empresa</h3>
+            <label>Nombre de la empresa<input id="company-name" value="${esc(state.settings.companyName||APP_CONFIG.companyName)}" placeholder="${esc(APP_CONFIG.companyName)}"></label>
+            <label>Logo
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${logo?`<img src="${logo}" alt="Logo" style="width:100%;height:100%;object-fit:contain">`:'🍽'}</div>
+                <input type="file" id="logo-file" accept="image/*">
+                ${logo?'<button type="button" class="outline" data-action="remove-logo">Quitar logo</button>':''}
+              </div>
+            </label>
+          </div>
+          <div class="card card-pad stack">
+            <h3>Íconos de artículos</h3>
+            <p class="muted">Sube una imagen para cada artículo del menú (aparece junto a las cantidades en planes y clientes).</p>
+            <div class="toggle-list" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${items.map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px">
+              <div style="width:34px;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${icon?`<img src="${icon}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12px;font-weight:650;margin-bottom:4px">${label}</div>
+                <input type="file" accept="image/*" data-item-icon="${key}" style="font-size:11px">
+              </div>
+              ${icon?`<button type="button" class="icon-btn" data-action="remove-item-icon" data-id="${key}" title="Quitar">✕</button>`:''}
+            </div>`;}).join('')}</div>
+          </div>
+          <div class="card card-pad stack">
+            <h3>Datos</h3>
+            <p class="muted">Clientes, operaciones y usuarios del equipo se sincronizan con la base de datos en cada guardado.</p>
+            <p class="muted">Los días laborables/no laborables se administran directamente desde Día de trabajo.</p>
+            <label>Exportar
+              <select id="export-scope">
+                <option value="all">Todo (respaldo completo)</option>
+                <option value="clientes">Solo Clientes (clientes, planes, días)</option>
+                <option value="personal">Solo Personal (drivers, rutas, usuarios)</option>
+                <option value="inventario">Solo Inventario</option>
+              </select>
+            </label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="outline" data-action="export-json">Exportar JSON</button><button class="outline" data-action="import-json">Importar JSON</button></div>
+          </div>
+        </div>`;
         $('#theme').onchange=e=>{state.settings.theme=e.target.value;save();render();};
         $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
+        $('#company-name').onchange=async e=>{state.settings.companyName=e.target.value.trim();const saved=await save();applyBranding();notice(saved?'Nombre de la empresa actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
+        $('#logo-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.logoUrl=await readImageAsDataURL(file,240,.85);const saved=await save();applyBranding();renderSettings();notice(saved?'Logo actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
+        $$('[data-item-icon]').forEach(input=>input.onchange=async e=>{const file=e.target.files[0];if(!file)return;const key=input.dataset.itemIcon;try{state.settings.itemIcons[key]=await readImageAsDataURL(file,160,.8);const saved=await save();renderSettings();notice(saved?'Ícono actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}});
       }
       function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
       async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);}
@@ -1177,14 +1259,13 @@
         save(); renderDispatch();
       }
       function exportDiets(){const date=state.currentDate;const rows=state.clients.filter(c=>status(c,date)==='Activo').map(c=>{const pitems=c.items||plan(c.planId)?.items||{};return `<tr><td>${esc(c.name)}</td><td>${esc(planName(c.planId))}</td><td>${items.map(([k,l])=>`${l}: ${n(pitems[k])}`).join(' | ')}</td><td>${esc([c.notes,c.specialDiet].filter(Boolean).join(' — '))}</td></tr>`;}).join('');const doc=`<html><meta charset="utf-8"><table><thead><tr><th>Cliente</th><th>Plan</th><th>Artículos incluidos</th><th>Observaciones / dieta especial</th></tr></thead><tbody>${rows}</tbody></table></html>`;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([doc],{type:'application/vnd.ms-excel'}));a.download=`dietas-especiales-${date}.xls`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);notice('Archivo Excel generado.');}
-      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"process-day":processDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-json":()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'}));a.download='catering-respaldo.json';a.click();},"import-json":()=>$('#import-file').click()};map[action]?.();});
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"process-day":processDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();renderSettings();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:state,label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};map[action]?.();});
       document.addEventListener('click',e=>{const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
-      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);normalize();save();render();notice('Respaldo importado.');}catch{notice('El respaldo no es válido.',true);}};r.readAsText(file);};
+      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);normalize();save();render();notice('Respaldo importado.');}catch{notice('El respaldo no es válido.',true);}};r.readAsText(file);};
       document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
-      document.title = `${APP_CONFIG.companyName} · Operaciones`;
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
       if(!activeUser){ window.location.replace('./login.html'); return; }
-      load(); loadFromServer().then(() => { normalize(); render(); }); render(); activate('dispatch');
+      load(); applyBranding(); loadFromServer().then(() => { normalize(); render(); applyBranding(); }); render(); activate('dispatch');
     })();
   </script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>

@@ -22,7 +22,7 @@
       <div class="col-12 login-card">
         <section class="card shadow-lg border-0 rounded-4">
           <div class="card-body p-4 p-md-5">
-            <div class="d-flex align-items-center gap-3 mb-4">🍽<div><h1 class="h4 mb-0" id="brand-title">Catering Control</h1><p class="text-secondary small mb-0">Iniciar sesión</p></div>
+            <div class="d-flex align-items-center gap-3 mb-4"><div class="brand-mark d-flex align-items-center justify-content-center fs-4" id="brand-mark">🍽</div><div><h1 class="h4 mb-0" id="brand-title">Catering Control</h1><p class="text-secondary small mb-0">Iniciar sesión</p></div>
             </div>
 
             <nav class="nav nav-pills nav-fill bg-body-tertiary rounded-3 p-1 mb-4" aria-label="Tipo de acceso">
@@ -60,6 +60,16 @@ const APP_CONFIG = {
   storagePrefix: 'catering-app'      // Prefijo usado para las claves de almacenamiento local (debe coincidir en todos los archivos del sistema)
 };
 document.getElementById('brand-title').textContent = APP_CONFIG.companyName;
+document.title = `${APP_CONFIG.companyName} · Iniciar sesión`;
+(async () => {
+  try {
+    const personal = await window.SupabaseDB?.dbGet('personal');
+    const name = personal?.settings?.companyName?.trim();
+    const logo = personal?.settings?.logoUrl;
+    if (name) { document.getElementById('brand-title').textContent = name; document.title = `${name} · Iniciar sesión`; }
+    if (logo) { document.getElementById('brand-mark').innerHTML = `<img src="${logo}" alt="${name || APP_CONFIG.companyName}">`; }
+  } catch (_) {}
+})();
 /* ========================================================================== */
 
 const STAFF_USERS_KEY = `${APP_CONFIG.storagePrefix}-staff-users-v1`;
