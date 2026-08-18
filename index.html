@@ -804,7 +804,7 @@
         <button data-page="payroll" data-roles="admin,editor,driver"><span class="nav-icon">💵</span>Sueldos</button>
         <button data-page="inventory" data-roles="admin,editor,kitchen"><span class="nav-icon">▧</span>Inventario</button>
         <button data-page="users" data-roles="admin"><span class="nav-icon">♟</span>Usuarios</button>
-        <button data-page="settings" data-roles="admin"><span class="nav-icon">⚙</span>Configuración</button>
+        <button data-page="settings" data-roles="admin,editor,kitchen,driver"><span class="nav-icon">⚙</span>Configuración</button>
       </nav>
       <div class="aside-bottom">
         <div class="profile" id="profile-link" style="cursor:pointer" title="Ver sesión">
@@ -883,7 +883,12 @@
         const markEl = $('#brand-mark'); if (markEl) markEl.innerHTML = logo ? `<img loading="lazy" decoding="async" src="${logo}" alt="${esc(name)}">` : '🍽';
         document.title = `${name} · Operaciones`;
       }
-      const defaultStaffUser = {id:'staff_admin',name:'Administrador',username:'admin',email:'admin@catering.local',password:'admin123',role:'admin',routeId:'',driverId:''};
+      // Nota de seguridad: este usuario admin por defecto ya NO tiene la
+      // contraseña en texto plano aquí. Solo existe como respaldo visual para
+      // esta pantalla de Usuarios antes de que se haya guardado nada en la
+      // base de datos; el login real se valida en el servidor (login_staff en
+      // supabase-security-update.sql), no contra este objeto.
+      const defaultStaffUser = {id:'staff_admin',name:'Administrador',username:'admin',email:'admin@catering.local',role:'admin',routeId:'',driverId:''};
       function readStaffUsers(){
         try { const stored=JSON.parse(localStorage.getItem(STAFF_USERS_KEY)); if(Array.isArray(stored) && stored.length) return stored; } catch (_) {}
         localStorage.setItem(STAFF_USERS_KEY,JSON.stringify([defaultStaffUser]));
@@ -921,7 +926,7 @@
         payroll: ['admin','editor','driver'],
         inventory: ['admin','editor','kitchen'],
         users: ['admin'],
-        settings: ['admin']
+        settings: ['admin','editor','kitchen','driver']
       };
       const role = () => activeUser?.role || 'driver';
       const isAdmin = () => role() === 'admin';
@@ -1350,19 +1355,55 @@
           const carnet=$('.driver-field input[name="carnet"]'); if(carnet) carnet.required=showDriver;
         };
       }
-      function openUser(id){let u=id?staffUsers.find(x=>x.id===id):null;showModal(u?'Editar usuario':'Crear usuario',userForm(u||{}),async f=>{const data=Object.fromEntries(new FormData(f));if(staffUsers.some(x=>x.username===data.username&&x.id!==u?.id)){notice('Ese usuario ya existe.',true);return false;}if(staffUsers.some(x=>x.email.toLowerCase()===data.email.toLowerCase()&&x.id!==u?.id)){notice('Ese correo ya está registrado.',true);return false;}let driverId=u?.driverId;if(data.role==='driver'){let d=driver(driverId);const parts=data.name.trim().split(/\s+/);const driverData={firstName:parts.shift()||data.name,lastName:parts.join(' ')||'',carnet:data.carnet,phone:data.phone,address:data.address,routeId:data.routeId};if(d)Object.assign(d,driverData);else{d={id:uid('d'),...driverData};state.drivers.push(d);}driverId=d.id;}const userData={username:data.username,email:data.email,password:data.password||u?.password||'',name:data.name,role:data.role,routeId:data.role==='driver'?data.routeId:'',driverId:data.role==='driver'?driverId:''};if(u)Object.assign(u,userData);else{u={id:uid('u'),...userData};staffUsers.push(u);}const saved=await save();if(!saved)return false;renderUsers();notice(data.role==='driver'?'Usuario, acceso y ficha de driver guardados en la base de datos.':'Usuario guardado en la base de datos.');});bindUserFormRoleToggle();}
+      function openUser(id){let u=id?staffUsers.find(x=>x.id===id):null;showModal(u?'Editar usuario':'Crear usuario',userForm(u||{}),async f=>{
+        const data=Object.fromEntries(new FormData(f));
+        if(staffUsers.some(x=>x.username===data.username&&x.id!==u?.id)){notice('Ese usuario ya existe.',true);return false;}
+        if(staffUsers.some(x=>x.email.toLowerCase()===data.email.toLowerCase()&&x.id!==u?.id)){notice('Ese correo ya está registrado.',true);return false;}
+        // La contraseña nunca se guarda en texto plano: se hashea en el
+        // servidor (Supabase) antes de escribirla en la base de datos.
+        let passwordHash=u?.passwordHash||'';
+        if(data.password){
+          passwordHash=await window.SupabaseDB?.rpc('hash_password',{p_password:data.password});
+          if(!passwordHash){notice('No se pudo generar la contraseña de forma segura. Intenta nuevamente.',true);return false;}
+        } else if(!u){
+          notice('La contraseña es obligatoria para un usuario nuevo.',true);return false;
+        }
+        let driverId=u?.driverId;
+        if(data.role==='driver'){
+          let d=driver(driverId);const parts=data.name.trim().split(/\s+/);
+          const driverData={firstName:parts.shift()||data.name,lastName:parts.join(' ')||'',carnet:data.carnet,phone:data.phone,address:data.address,routeId:data.routeId};
+          if(d)Object.assign(d,driverData);else{d={id:uid('d'),...driverData};state.drivers.push(d);}
+          driverId=d.id;
+        }
+        const userData={username:data.username,email:data.email,passwordHash,name:data.name,role:data.role,routeId:data.role==='driver'?data.routeId:'',driverId:data.role==='driver'?driverId:''};
+        if(u){Object.assign(u,userData);delete u.password;}else{u={id:uid('u'),...userData};staffUsers.push(u);}
+        const saved=await save();if(!saved)return false;
+        renderUsers();
+        notice(data.role==='driver'?'Usuario, acceso y ficha de driver guardados en la base de datos.':'Usuario guardado en la base de datos.');
+      });bindUserFormRoleToggle();}
       function renderSettings(){
         if(!canAccessPage('settings')) return;
         const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...items,['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['returnDate','Fecha de retorno'],['id','Acciones']];
         const logo=state.settings.logoUrl;
+        // Todos los roles pueden entrar a Configuración, pero solo ven y editan
+        // la tarjeta de "Columnas visibles". El resto (apariencia, empresa,
+        // íconos, respaldo de datos) sigue siendo exclusivo de admin.
+        const columnsCard=`<div class="card card-pad stack">
+            <h3>Columnas visibles</h3>
+            <p class="muted">Afecta a la tabla de Día de trabajo. Allí también puedes arrastrar los encabezados para cambiar su orden.</p>
+            <div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!state.settings.hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div>
+          </div>`;
+        if(!isAdmin()){
+          $('#settings-page').innerHTML=pageHead('Configuración','Elige qué columnas ver en la tabla de Día de trabajo.')+`<div class="two-col">${columnsCard}</div>`;
+          $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
+          return;
+        }
         $('#settings-page').innerHTML=pageHead('Configuración','Preferencias visuales, columnas y respaldo de datos.')+`<div class="two-col">
           <div class="card card-pad stack">
             <h3>Apariencia</h3>
             <label>Tema<select id="theme"><option value="light" ${state.settings.theme==='light'?'selected':''}>Claro</option><option value="night" ${state.settings.theme==='night'?'selected':''}>Nocturno</option><option value="forest" ${state.settings.theme==='forest'?'selected':''}>Bosque</option></select></label>
-            <h3 style="margin-top:10px">Columnas visibles</h3>
-            <p class="muted">Afecta a la tabla de Día de trabajo. Allí también puedes arrastrar los encabezados para cambiar su orden.</p>
-            <div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!state.settings.hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div>
           </div>
+          ${columnsCard}
           <div class="card card-pad stack">
             <h3>Empresa</h3>
             <label>Nombre de la empresa<input id="company-name" value="${esc(state.settings.companyName||APP_CONFIG.companyName)}" placeholder="${esc(APP_CONFIG.companyName)}"></label>
@@ -1493,7 +1534,8 @@
           {header:'Teléfono',key:'phone',width:16},
           {header:'Google Maps',key:'maps',width:16},
           {header:'Bolsas',key:'bags',width:10},
-          {header:'Ruta',key:'route',width:16}
+          {header:'Carreras',key:'career',width:12},
+          {header:'Observaciones',key:'notes',width:30}
         ];
         const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
         const headerRow=ws.getRow(1);
@@ -1512,7 +1554,8 @@
             phone:[c.phone1,c.phone2].filter(Boolean).join(' / ')||'—',
             maps:c.maps?'Abrir mapa':'—',
             bags:n(c.bags),
-            route:routeName(c.routeId)
+            career:n(c.career||1),
+            notes:c.notes||'—'
           });
           if(c.maps) row.getCell('maps').value={text:'Abrir mapa',hyperlink:c.maps};
           const fillColor=i%2===0?'FFF0FBF4':'FFFFFFFF';
@@ -1523,7 +1566,7 @@
           });
           row.getCell('maps').font={color:{argb:'FF0D6EFD'},underline:true};
         });
-        const totalRow=ws.addRow({order:'',cliente:`Total: ${activeClients.length} clientes`,address:'',phone:'',maps:'',bags:activeClients.reduce((a,c)=>a+n(c.bags),0),route:''});
+        const totalRow=ws.addRow({order:'',cliente:`Total: ${activeClients.length} clientes`,address:'',phone:'',maps:'',bags:activeClients.reduce((a,c)=>a+n(c.bags),0),career:activeClients.reduce((a,c)=>a+n(c.career||1),0),notes:''});
         totalRow.eachCell(cell=>{ cell.font={bold:true}; cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine}; });
         const buffer=await wb.xlsx.writeBuffer();
         const a=document.createElement('a');

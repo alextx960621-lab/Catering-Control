@@ -54,5 +54,19 @@
     }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, client };
+  // Llama a una función (RPC) creada en Supabase — se usa para el login de
+  // clientes y de staff, para que la verificación de carnet/teléfono/contraseña
+  // ocurra en el servidor y nunca haga falta descargar toda la tabla al navegador.
+  async function rpc(fnName, params) {
+    try {
+      const { data, error } = await client.rpc(fnName, params);
+      if (error) { console.error(`[supabase] Error llamando a ${fnName}:`, error.message); return null; }
+      return data;
+    } catch (err) {
+      console.error(`[supabase] Fallo de red llamando a ${fnName}:`, err);
+      return null;
+    }
+  }
+
+  window.SupabaseDB = { dbGet, dbSet, rpc, client };
 })();

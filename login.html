@@ -71,41 +71,37 @@ document.getElementById('brand-mark').innerHTML = APP_CONFIG.logoUrl
 })();
 /* ========================================================================== */
 
-const STAFF_USERS_KEY = `${APP_CONFIG.storagePrefix}-staff-users-v1`;
 const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
 const STAFF_APP_URL = './index.html';
 const CLIENT_PORTAL_URL = './cliente.html';
 const CLIENT_SESSION_KEY = `${APP_CONFIG.storagePrefix}-client-session-v1`;
-const OPERATIONS_KEY = `${APP_CONFIG.storagePrefix}-operaciones-v3`;
-const defaultUsers = [{id:'staff_admin',name:'Administrador',username:'admin',email:'admin@catering.local',password:'admin123',role:'admin',routeId:'',driverId:''}];
-
-// Lee la base de "clientes" desde Supabase; si no hay conexión, usa la copia local como respaldo.
-async function fetchOperaciones(){
-  try{
-    const remote=await window.SupabaseDB?.dbGet('clientes');
-    if(remote){ localStorage.setItem(OPERATIONS_KEY, JSON.stringify(remote)); return remote; }
-  }catch(_){}
-  try{return JSON.parse(localStorage.getItem(OPERATIONS_KEY));}catch(_){return null;}
-}
-// Lee la base de "personal" (usuarios de staff) desde Supabase; respaldo en localStorage.
-async function fetchStaffUsers(){
-  try{
-    const remote=await window.SupabaseDB?.dbGet('personal');
-    if(remote && Array.isArray(remote.staffUsers) && remote.staffUsers.length){
-      localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(remote.staffUsers));
-      return remote.staffUsers;
-    }
-  }catch(_){}
-  try{const local=JSON.parse(localStorage.getItem(STAFF_USERS_KEY)||'[]');if(local.length)return local;}catch(_){}
-  return defaultUsers;
-}
 const tabClient=document.getElementById('tab-client'), tabStaff=document.getElementById('tab-staff'), formClient=document.getElementById('form-client'), formStaff=document.getElementById('form-staff'), errorEl=document.getElementById('error-msg');
 function showError(msg){errorEl.textContent=msg;errorEl.classList.remove('d-none');}
 function clearError(){errorEl.classList.add('d-none');}
 function switchAccess(type){const client=type==='client';tabClient.classList.toggle('active',client);tabStaff.classList.toggle('active',!client);formClient.classList.toggle('active',client);formStaff.classList.toggle('active',!client);clearError();}
 tabClient.addEventListener('click',()=>switchAccess('client')); tabStaff.addEventListener('click',()=>switchAccess('staff'));
-formClient.addEventListener('submit',async e=>{e.preventDefault();clearError();const carnet=document.getElementById('client-carnet').value.trim().toLowerCase(),phone=document.getElementById('client-phone').value.replace(/\D/g,'');const operationalData=await fetchOperaciones();const normalizePhone=value=>String(value||'').replace(/\D/g,'');const client=operationalData?.clients?.find(c=>String(c.carnet||'').trim().toLowerCase()===carnet&&[c.phone1,c.phone2].map(normalizePhone).includes(phone));if(!client){showError('Carnet o teléfono no coinciden con un cliente registrado.');return;}sessionStorage.setItem(CLIENT_SESSION_KEY,JSON.stringify({id:client.id,name:client.name}));window.location.href=CLIENT_PORTAL_URL;});
-formStaff.addEventListener('submit',async e=>{e.preventDefault();clearError();const email=document.getElementById('staff-email').value.trim(),password=document.getElementById('staff-pass').value;const staff=await fetchStaffUsers();const person=staff.find(u=>u.email?.toLowerCase()===email.toLowerCase()&&u.password===password)||null;if(!person){showError('Correo o contraseña incorrectos.');return;}sessionStorage.setItem(STAFF_SESSION_KEY,JSON.stringify({id:person.id,name:person.name,role:person.role,routeId:person.routeId||'',driverId:person.driverId||''}));window.location.href=STAFF_APP_URL;});
+/* El carnet/teléfono y el correo/contraseña ya NO se verifican descargando toda
+   la tabla de clientes o de staff al navegador: se validan en el servidor con
+   las funciones login_cliente/login_staff (ver supabase-security-update.sql).
+   El navegador solo recibe el id/nombre/rol de la persona que coincidió. */
+formClient.addEventListener('submit',async e=>{
+  e.preventDefault();clearError();
+  const carnet=document.getElementById('client-carnet').value.trim(),phone=document.getElementById('client-phone').value.replace(/\D/g,'');
+  const rows=await window.SupabaseDB?.rpc('login_cliente',{p_carnet:carnet,p_phone:phone});
+  const client=Array.isArray(rows)?rows[0]:null;
+  if(!client){showError('Carnet o teléfono no coinciden con un cliente registrado.');return;}
+  sessionStorage.setItem(CLIENT_SESSION_KEY,JSON.stringify({id:client.id,name:client.name}));
+  window.location.href=CLIENT_PORTAL_URL;
+});
+formStaff.addEventListener('submit',async e=>{
+  e.preventDefault();clearError();
+  const email=document.getElementById('staff-email').value.trim(),password=document.getElementById('staff-pass').value;
+  const rows=await window.SupabaseDB?.rpc('login_staff',{p_email:email,p_password:password});
+  const person=Array.isArray(rows)?rows[0]:null;
+  if(!person){showError('Correo o contraseña incorrectos.');return;}
+  sessionStorage.setItem(STAFF_SESSION_KEY,JSON.stringify({id:person.id,name:person.name,role:person.role,routeId:person.routeId||'',driverId:person.driverId||''}));
+  window.location.href=STAFF_APP_URL;
+});
 if(sessionStorage.getItem(STAFF_SESSION_KEY)) window.location.href=STAFF_APP_URL;
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
