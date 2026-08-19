@@ -1344,7 +1344,7 @@
         const totals=`<tfoot>${totalRow(`Totales filtrados (${filteredActive.length} pedidos activos)`,filteredActive,'filtered')}${totalRow(`Totales generales (${activeOrders.length} pedidos activos)`,activeOrders,'general')}</tfoot>`;
         const printLabel=isDriverRole()?'Imprimir orden de ruta':'Imprimir dietas especiales';
         const routeField=isDriverRole()?`<label class="field">Ruta<input value="${esc(routeName(activeUser.routeId))}" disabled></label>`:`<label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label>`;
-        $('#dispatch-page').innerHTML=pageHead('Día de trabajo','La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`<button class="outline" data-action="export-diets">${printLabel}</button>${canManage()?'<button class="primary" data-action="process-day">Procesar día</button>':''}`)+
+        $('#dispatch-page').innerHTML=pageHead('Día de trabajo','La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`<button class="outline" data-action="export-diets">${printLabel}</button>${canManage()?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}`)+
           `<div class="toolbar"><label class="field">Día de trabajo<input type="date" id="work-date" value="${date}" ${isDriverRole()?'disabled':''}></label>${routeField}<label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${canManage()?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
           `<div class="sheet"><table id="dispatch-table">${colgroupHtml(columns.map(c=>[c.label,c.key]),'dispatch')}<thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
         $('#work-date').onchange=e=>{ if(!canManage())return; state.currentDate=e.target.value; day(e.target.value); save(); renderDispatch(); };
@@ -1487,6 +1487,20 @@
           item.stock=n(item.stock)-used;
           state.inventory.movements.unshift({id:uid('mov'),date,inventoryId:item.id,type:'delivery',quantity:-used,note:`Descuento automático: ${delivered} ${items.find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey}`});
         });
+      }
+      // Revierte exactamente los movimientos que applyInventoryForProcessedDay generó
+      // para esa fecha (type:'delivery'): repone el stock descontado y los elimina.
+      // Estos movimientos son los únicos con type:'delivery' — deleteInventoryMovement
+      // los protege explícitamente porque solo deben tocarse al procesar/desprocesar.
+      function revertInventoryForProcessedDay(date){
+        const kept=[];
+        state.inventory.movements.forEach(m=>{
+          if(m.type==='delivery'&&m.date===date){
+            const item=kitchenItem(m.inventoryId);
+            if(item)item.stock=n(item.stock)-n(m.quantity); // quantity es negativo: al restarlo, se repone
+          } else kept.push(m);
+        });
+        state.inventory.movements=kept;
       }
 
       function monthDates(month){const [y,m]=month.split('-').map(Number),end=new Date(y,m,0).getDate();return Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
@@ -1631,6 +1645,15 @@
         applyInventoryForProcessedDay(state.currentDate);
         d.processed=true;save();renderDispatch();notice('Día procesado e inventario actualizado.');
       }
+      function unprocessDay(){
+        if(!canManage()){notice('No tienes permiso para desprocesar el día.',true);return;}
+        const d=day();
+        if(!d.processed){notice('Este día no está procesado.',true);return;}
+        if(!confirm(`¿Desprocesar el día ${state.currentDate.split('-').reverse().join('/')}? Se revertirá el descuento de inventario y el conteo de días consumidos que se hicieron al procesarlo (puedes volver a procesarlo después).`))return;
+        state.clients.filter(c=>status(c)==='Activo').forEach(c=>c.consumedDays=Math.max(0,n(c.consumedDays)-1));
+        revertInventoryForProcessedDay(state.currentDate);
+        d.processed=false;save();renderDispatch();notice('Día desprocesado. El inventario y los días consumidos fueron restaurados.');
+      }
       function toggleDayPause(id){
         if(!canManage()) return;
         const c=state.clients.find(x=>x.id===id); if(!c) return;
@@ -1747,7 +1770,7 @@
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
       }
-      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"process-day":processDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();renderSettings();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:state,label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();renderSettings();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:state,label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
         const ACTION_PERMS={
           "add-client":canManage,"pause-client":canManage,"resume-client":canManage,"edit-client":canManage,"delete-client":canManage,
           "add-driver":canManage,"edit-driver":canManage,"delete-driver":canManage,
@@ -1758,7 +1781,7 @@
           "edit-inventory-movement":canManageInventory,"delete-inventory-movement":canManageInventory,
           "add-inventory-link":canManageInventory,"edit-inventory-link":canManageInventory,"delete-inventory-link":canManageInventory,
           "add-user":isAdmin,"edit-user":isAdmin,"delete-user":isAdmin,
-          "process-day":canManage,"toggle-day-pause":canManage,
+          "process-day":canManage,"unprocess-day":canManage,"toggle-day-pause":canManage,
           "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin
         };
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
