@@ -975,9 +975,32 @@
         if(dot)dot.className='sync-dot '+(kind==='saving'?'local':kind);
         if(text)text.textContent=kind==='saving'?'Guardando…':kind==='ok'?'Sincronizado':'Error de guardado';
       }
-      // Guarda en Supabase, repartido en sus 3 bases de datos independientes:
-      // db_clientes (clientes, planes, días de trabajo), db_personal (drivers,
-      // rutas, usuarios de staff y configuración) y db_inventario (inventario).
+      // Guarda en Supabase, repartido en sus bases de datos independientes:
+      // db_clientes (planes y días de trabajo), db_clientes_rows (UNA FILA POR
+      // CLIENTE — solo se suben los clientes que cambiaron desde el último
+      // guardado, no la lista completa), db_personal (drivers, rutas, usuarios
+      // de staff y configuración) y db_inventario (inventario).
+      let lastSavedClients=new Map(); // id -> JSON.stringify(cliente), refleja lo último confirmado en Supabase
+      function diffClients(){
+        const changed=[],currentIds=new Set();
+        for(const c of state.clients){
+          currentIds.add(c.id);
+          const json=JSON.stringify(c);
+          if(lastSavedClients.get(c.id)!==json) changed.push(c);
+        }
+        const deletedIds=[...lastSavedClients.keys()].filter(id=>!currentIds.has(id));
+        return {changed,deletedIds};
+      }
+      async function saveClientRows(){
+        const db=window.SupabaseDB,{changed,deletedIds}=diffClients();
+        const [okUpsert,okDelete]=await Promise.all([
+          db.dbUpsertClientRows(changed),
+          db.dbDeleteClientRows(deletedIds)
+        ]);
+        if(okUpsert) changed.forEach(c=>lastSavedClients.set(c.id,JSON.stringify(c)));
+        if(okDelete) deletedIds.forEach(id=>lastSavedClients.delete(id));
+        return okUpsert&&okDelete;
+      }
       function save(){
         localStorage.setItem(KEY, JSON.stringify(state));
         localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
@@ -986,12 +1009,13 @@
           try{
             const db=window.SupabaseDB;
             if(!db) throw new Error('Supabase no está disponible');
-            const [okClientes,okPersonal,okInventario]=await Promise.all([
-              db.dbSet('clientes',{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate}),
+            const [okClientes,okClientRows,okPersonal,okInventario]=await Promise.all([
+              db.dbSet('clientes',{plans:state.plans,days:state.days,currentDate:state.currentDate}),
+              saveClientRows(),
               db.dbSet('personal',{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers}),
               db.dbSet('inventario',{inventory:state.inventory})
             ]);
-            const ok=okClientes&&okPersonal&&okInventario;
+            const ok=okClientes&&okClientRows&&okPersonal&&okInventario;
             setDatabaseStatus(ok?'ok':'error');
             if(!ok) notice('Los cambios quedaron locales, pero no se guardaron completamente en Supabase.',true);
             return ok;
@@ -1004,16 +1028,20 @@
         try {
           const db=window.SupabaseDB;
           if(!db) throw new Error('Supabase no está disponible');
-          const [clientesData,personalData,inventarioData]=await Promise.all([
-            db.dbGet('clientes'), db.dbGet('personal'), db.dbGet('inventario')
+          const [clientesData,clientRows,personalData,inventarioData]=await Promise.all([
+            db.dbGet('clientes'), db.dbGetClientRows(), db.dbGet('personal'), db.dbGet('inventario')
           ]);
           let gotAny=false;
           if (clientesData) {
             gotAny=true;
-            state.clients = clientesData.clients ?? state.clients;
             state.plans = clientesData.plans ?? state.plans;
             state.days = clientesData.days ?? state.days;
             state.currentDate = clientesData.currentDate ?? state.currentDate;
+          }
+          if (clientRows) {
+            gotAny=true;
+            state.clients = clientRows;
+            lastSavedClients = new Map(clientRows.map(c=>[c.id, JSON.stringify(c)]));
           }
           if (personalData) {
             gotAny=true;

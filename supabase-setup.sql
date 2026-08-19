@@ -11,6 +11,14 @@ create table if not exists db_clientes (
   updated_at timestamptz not null default now()
 );
 
+-- Clientes: UNA FILA POR CLIENTE (no van dentro de db_clientes). Así, guardar
+-- un cambio en un cliente solo sube/baja esa fila, no la lista completa.
+create table if not exists db_clientes_rows (
+  id text primary key,
+  payload jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists db_personal (
   id text primary key default 'main',
   payload jsonb not null default '{}'::jsonb,
@@ -27,11 +35,15 @@ create table if not exists db_inventario (
 -- "publishable" (anon). Como se pidió, no hay cifrado ni autenticación
 -- adicional: cualquiera con la clave publishable puede leer y escribir.
 alter table db_clientes enable row level security;
+alter table db_clientes_rows enable row level security;
 alter table db_personal enable row level security;
 alter table db_inventario enable row level security;
 
 drop policy if exists "public access clientes" on db_clientes;
 create policy "public access clientes" on db_clientes for all using (true) with check (true);
+
+drop policy if exists "public access clientes filas" on db_clientes_rows;
+create policy "public access clientes filas" on db_clientes_rows for all using (true) with check (true);
 
 drop policy if exists "public access personal" on db_personal;
 create policy "public access personal" on db_personal for all using (true) with check (true);
@@ -61,13 +73,12 @@ as $$
 declare v_phone text := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
 begin
   return query
-  select c ->> 'id', c ->> 'name'
-  from db_clientes, jsonb_array_elements(coalesce(payload -> 'clients', '[]'::jsonb)) as c
-  where db_clientes.id = 'main'
-    and lower(trim(coalesce(c ->> 'carnet', ''))) = lower(trim(coalesce(p_carnet, '')))
+  select db_clientes_rows.id, payload ->> 'name'
+  from db_clientes_rows
+  where lower(trim(coalesce(payload ->> 'carnet', ''))) = lower(trim(coalesce(p_carnet, '')))
     and (
-      regexp_replace(coalesce(c ->> 'phone1', ''), '\D', '', 'g') = v_phone
-      or regexp_replace(coalesce(c ->> 'phone2', ''), '\D', '', 'g') = v_phone
+      regexp_replace(coalesce(payload ->> 'phone1', ''), '\D', '', 'g') = v_phone
+      or regexp_replace(coalesce(payload ->> 'phone2', ''), '\D', '', 'g') = v_phone
     )
   limit 1;
 end;

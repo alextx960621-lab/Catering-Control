@@ -68,5 +68,64 @@
     }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, rpc, client };
+  // ------------------------------------------------------------------------
+  // db_clientes_rows: UNA FILA POR CLIENTE (en vez de un solo bloque con
+  // todos los clientes adentro, como las otras 3 bases). Con esto, guardar
+  // un cambio en un cliente ya no sube/baja la lista completa: solo esa fila.
+  // ------------------------------------------------------------------------
+
+  // Trae todos los clientes (cada uno como objeto plano, con su id).
+  async function dbGetClientRows() {
+    try {
+      const { data, error } = await client.from('db_clientes_rows').select('id,payload');
+      if (error) { console.error('[supabase] Error leyendo db_clientes_rows:', error.message); return null; }
+      return (data || []).map(r => ({ ...r.payload, id: r.id }));
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo db_clientes_rows:', err);
+      return null;
+    }
+  }
+
+  // Guarda (upsert) solo los clientes que cambiaron. Puede ser 1 o varios;
+  // siempre es una sola llamada de red, sin importar cuántos sean.
+  async function dbUpsertClientRows(clientsArray) {
+    if (!clientsArray || !clientsArray.length) return true;
+    try {
+      const rows = clientsArray.map(c => ({ id: c.id, payload: c, updated_at: new Date().toISOString() }));
+      const { error } = await client.from('db_clientes_rows').upsert(rows, { onConflict: 'id' });
+      if (error) { console.error('[supabase] Error guardando db_clientes_rows:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red guardando db_clientes_rows:', err);
+      return false;
+    }
+  }
+
+  // Borra las filas de los clientes eliminados.
+  async function dbDeleteClientRows(ids) {
+    if (!ids || !ids.length) return true;
+    try {
+      const { error } = await client.from('db_clientes_rows').delete().in('id', ids);
+      if (error) { console.error('[supabase] Error borrando db_clientes_rows:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red borrando db_clientes_rows:', err);
+      return false;
+    }
+  }
+
+  // Trae solo la fila de un cliente puntual (mucho más liviano que traer
+  // la lista completa, ideal para el portal de autoservicio del cliente).
+  async function dbGetClientRow(id) {
+    try {
+      const { data, error } = await client.from('db_clientes_rows').select('id,payload').eq('id', id).maybeSingle();
+      if (error) { console.error('[supabase] Error leyendo db_clientes_rows:', error.message); return null; }
+      return data ? { ...data.payload, id: data.id } : null;
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo db_clientes_rows:', err);
+      return null;
+    }
+  }
+
+  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, client };
 })();
