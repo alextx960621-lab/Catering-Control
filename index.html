@@ -691,10 +691,19 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        flex: 1;
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .aside-title .brand { min-width: 0; overflow: hidden; }
+      .aside-title .brand strong {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
       }
       .aside-title small { display: none; }
-      .menu-toggle { display: block; }
+      .menu-toggle { display: block; flex-shrink: 0; }
       nav {
         display: none;
         width: 100%;
@@ -712,19 +721,21 @@
         justify-content: center;
       }
       .aside-bottom {
-        margin-top: 0;
-        padding: 6px 0 0;
+        margin: 0 0 0 auto;
+        padding: 0;
         border-top: 0;
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-end;
         gap: 8px;
+        flex: 0 0 auto;
         flex-wrap: nowrap;
       }
       .profile {
         font-size: 12px;
         min-width: 0;
-        flex: 1 1 auto;
+        max-width: 96px;
+        flex: 0 1 auto;
         overflow: hidden;
       }
       .profile > div { min-width: 0; }
