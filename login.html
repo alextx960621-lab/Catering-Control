@@ -15,6 +15,13 @@
     .brand-mark img { width:100%; height:100%; object-fit:contain; }
     .form-panel { display:none; }
     .form-panel.active { display:block; }
+    [data-theme="night"] body { background:radial-gradient(circle at 20% 20%,rgba(13,110,253,.25),transparent 34%),#121824; }
+    [data-theme="night"] .card { background:#1a2130; color:#e7ecf5; }
+    [data-theme="night"] .text-secondary { color:#9aa7bd!important; }
+    [data-theme="night"] .form-control { background:#121824; color:#e7ecf5; border-color:#2b3648; }
+    [data-theme="night"] .bg-body-tertiary { background:#121824!important; }
+    [data-theme="forest"] body { background:radial-gradient(circle at 20% 20%,rgba(25,135,84,.2),transparent 34%),#e1ebe2; }
+    [data-theme="forest"] .card { background:#f1f6f1; }
   </style>
 </head>
 <body class="d-flex align-items-center py-4">
@@ -23,7 +30,7 @@
       <div class="col-12 login-card">
         <section class="card shadow-lg border-0 rounded-4">
           <div class="card-body p-4 p-md-5">
-            <div class="d-flex align-items-center gap-3 mb-4"><div class="brand-mark d-flex align-items-center justify-content-center fs-4" id="brand-mark"></div><div><h1 class="h4 mb-0" id="brand-title">Catering Control</h1><p class="text-secondary small mb-0">Iniciar sesión</p></div>
+            <div class="d-flex align-items-center gap-3 mb-4"><div class="brand-mark d-flex align-items-center justify-content-center fs-4" id="brand-mark"></div><div class="flex-grow-1"><h1 class="h4 mb-0" id="brand-title">Catering Control</h1><p class="text-secondary small mb-0">Iniciar sesión</p></div><select class="form-select form-select-sm w-auto" id="theme-select" aria-label="Tema"><option value="light">Claro</option><option value="night">Nocturno</option><option value="forest">Bosque</option></select>
             </div>
 
             <nav class="nav nav-pills nav-fill bg-body-tertiary rounded-3 p-1 mb-4" aria-label="Tipo de acceso">
@@ -41,7 +48,12 @@
             <form id="form-staff" class="form-panel">
               <p class="text-secondary small">Acceso del equipo operativo.</p>
               <div class="mb-3"><label class="form-label" for="staff-email">Correo</label><input class="form-control" id="staff-email" type="email" autocomplete="username" required></div>
-              <div class="mb-3"><label class="form-label" for="staff-pass">Contraseña</label><input class="form-control" id="staff-pass" type="password" autocomplete="current-password" required></div>
+              <div class="mb-3"><label class="form-label" for="staff-pass">Contraseña</label>
+                <div class="input-group">
+                  <input class="form-control" id="staff-pass" type="password" autocomplete="current-password" required>
+                  <button class="btn btn-outline-secondary" type="button" id="toggle-staff-pass" aria-label="Mostrar contraseña">👁</button>
+                </div>
+              </div>
               <button class="btn btn-primary w-100" type="submit">Entrar al panel</button>
             </form>
             <div class="alert alert-danger mt-3 mb-0 d-none" id="error-msg" role="alert"></div>
@@ -75,7 +87,25 @@ const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
 const STAFF_APP_URL = './index.html';
 const CLIENT_PORTAL_URL = './cliente.html';
 const CLIENT_SESSION_KEY = `${APP_CONFIG.storagePrefix}-client-session-v1`;
+// Preferencia de tema personal (por navegador), compartida con el panel de
+// staff (index.html) para que la elección de acá se mantenga al entrar.
+const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
+const themeSelect = document.getElementById('theme-select');
+const savedTheme = localStorage.getItem(UI_THEME_KEY) || 'light';
+document.documentElement.dataset.theme = savedTheme;
+themeSelect.value = savedTheme;
+themeSelect.addEventListener('change', e => {
+  document.documentElement.dataset.theme = e.target.value;
+  localStorage.setItem(UI_THEME_KEY, e.target.value);
+});
 const tabClient=document.getElementById('tab-client'), tabStaff=document.getElementById('tab-staff'), formClient=document.getElementById('form-client'), formStaff=document.getElementById('form-staff'), errorEl=document.getElementById('error-msg');
+const toggleStaffPass=document.getElementById('toggle-staff-pass'), staffPassInput=document.getElementById('staff-pass');
+toggleStaffPass.addEventListener('click',()=>{
+  const showing=staffPassInput.type==='text';
+  staffPassInput.type=showing?'password':'text';
+  toggleStaffPass.textContent=showing?'👁':'🙈';
+  toggleStaffPass.setAttribute('aria-label',showing?'Mostrar contraseña':'Ocultar contraseña');
+});
 function showError(msg){errorEl.textContent=msg;errorEl.classList.remove('d-none');}
 function clearError(){errorEl.classList.add('d-none');}
 function switchAccess(type){const client=type==='client';tabClient.classList.toggle('active',client);tabStaff.classList.toggle('active',!client);formClient.classList.toggle('active',client);formStaff.classList.toggle('active',!client);clearError();}

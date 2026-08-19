@@ -811,6 +811,7 @@
           <div class="avatar" id="avatar">👤</div>
           <div><b id="current-name">Operaciones</b><small class="muted" id="current-role" style="display:block;font-size:10px;">Administrador</small></div>
         </div>
+        <button class="outline" id="logout-btn" title="Cerrar sesión">⏻ Salir</button>
         <div class="mobile-sync-group">
           <div class="sync-pill"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">Listo</span></div>
           <button class="outline" id="manual-sync-btn">🔄 Sincronizar</button>
@@ -845,6 +846,10 @@
       // planes, rutas y operaciones continúan dentro de KEY.
       const STAFF_USERS_KEY = `${APP_CONFIG.storagePrefix}-staff-users-v1`;
       const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
+      // Tema personal por navegador (todos los roles lo pueden elegir en
+      // Configuración). Si no hay preferencia personal, se usa el tema por
+      // defecto de la empresa (state.settings.theme, solo lo cambia admin).
+      const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
       const $ = (s, root=document) => root.querySelector(s);
       const $$ = (s, root=document) => [...root.querySelectorAll(s)];
       const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));
@@ -1079,7 +1084,7 @@
       }
       function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${colgroupHtml(headers,group)}<thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
       function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); }
-      function render(){ document.documentElement.dataset.theme=state.settings.theme; $('#current-name').textContent=activeUser.name || ROLE_LABELS[role()] || 'Usuario'; $('#current-role').textContent=ROLE_LABELS[role()] || 'Usuario'; $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-roles]').forEach(x=>x.hidden=!(x.dataset.roles||'').split(',').includes(role())); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); }
+      function render(){ document.documentElement.dataset.theme=localStorage.getItem(UI_THEME_KEY)||state.settings.theme; $('#current-name').textContent=activeUser.name || ROLE_LABELS[role()] || 'Usuario'; $('#current-role').textContent=ROLE_LABELS[role()] || 'Usuario'; $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-roles]').forEach(x=>x.hidden=!(x.dataset.roles||'').split(',').includes(role())); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); }
       function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,settings:renderSettings}[name]; if(fn) { fn(); enableTableTools(); } }
       function enableTableTools(){
         // Redimensionado de columnas al estilo Excel: se arrastra el borde
@@ -1389,18 +1394,23 @@
         // la tarjeta de "Columnas visibles". El resto (apariencia, empresa,
         // íconos, respaldo de datos) sigue siendo exclusivo de admin.
         const columnsCard=`<div class="card card-pad stack">
-            <h3>Columnas visibles</h3>
+            <h3>Tu tema</h3>
+            <p class="muted">Solo afecta a tu navegador, no a los demás usuarios.</p>
+            <label>Tema<select id="my-theme"><option value="light" ${(localStorage.getItem(UI_THEME_KEY)||'light')==='light'?'selected':''}>Claro</option><option value="night" ${localStorage.getItem(UI_THEME_KEY)==='night'?'selected':''}>Nocturno</option><option value="forest" ${localStorage.getItem(UI_THEME_KEY)==='forest'?'selected':''}>Bosque</option></select></label>
+            <h3 style="margin-top:10px">Columnas visibles</h3>
             <p class="muted">Afecta a la tabla de Día de trabajo. Allí también puedes arrastrar los encabezados para cambiar su orden.</p>
             <div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!state.settings.hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div>
           </div>`;
         if(!isAdmin()){
-          $('#settings-page').innerHTML=pageHead('Configuración','Elige qué columnas ver en la tabla de Día de trabajo.')+`<div class="two-col">${columnsCard}</div>`;
+          $('#settings-page').innerHTML=pageHead('Configuración','Elige tu tema y qué columnas ver en la tabla de Día de trabajo.')+`<div class="two-col">${columnsCard}</div>`;
+          $('#my-theme').onchange=e=>{localStorage.setItem(UI_THEME_KEY,e.target.value);render();};
           $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
           return;
         }
         $('#settings-page').innerHTML=pageHead('Configuración','Preferencias visuales, columnas y respaldo de datos.')+`<div class="two-col">
           <div class="card card-pad stack">
-            <h3>Apariencia</h3>
+            <h3>Apariencia (tema por defecto de la empresa)</h3>
+            <p class="muted">Se aplica a cualquier usuario que no haya elegido su propio tema en "Tu tema".</p>
             <label>Tema<select id="theme"><option value="light" ${state.settings.theme==='light'?'selected':''}>Claro</option><option value="night" ${state.settings.theme==='night'?'selected':''}>Nocturno</option><option value="forest" ${state.settings.theme==='forest'?'selected':''}>Bosque</option></select></label>
           </div>
           ${columnsCard}
@@ -1593,7 +1603,7 @@
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
         map[action]?.();});
       document.addEventListener('click',e=>{const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
-      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);normalize();save();render();notice('Respaldo importado.');}catch{notice('El respaldo no es válido.',true);}};r.readAsText(file);};
+      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#logout-btn').onclick=()=>{sessionStorage.removeItem(STAFF_SESSION_KEY);location.href='./login.html';};$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);normalize();save();render();notice('Respaldo importado.');}catch{notice('El respaldo no es válido.',true);}};r.readAsText(file);};
       document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
       if(!activeUser){ window.location.replace('./login.html'); return; }
