@@ -1029,6 +1029,29 @@
       // guardado, no la lista completa), db_personal (drivers, rutas, usuarios
       // de staff y configuración) y db_inventario (inventario).
       let lastSavedClients=new Map(); // id -> JSON.stringify(cliente), refleja lo último confirmado en Supabase
+      // db_clientes, db_personal y db_inventario son, cada uno, UN SOLO bloque
+      // (fila 'main') con varias claves adentro (p. ej. clientes: {plans,days,
+      // currentDate}). Antes, save() subía ese bloque completo tal cual estaba
+      // en memoria de ESTE dispositivo en cada guardado — así, si el dispositivo
+      // tenía datos desactualizados (p. ej. no se enteró todavía de que otro
+      // dispositivo procesó un día, o cambió la visibilidad de una columna),
+      // cualquier guardado sin relación (editar un driver, un plan, etc.)
+      // pisaba por completo esos cambios ajenos.
+      // lastSyncedClientes/Personal/Inventario guardan una foto de cada bloque
+      // tal como se confirmó la última vez con el servidor (al cargar o guardar
+      // con éxito). mergeTopLevel() compara esa foto contra lo que hay ahora en
+      // memoria: solo las claves que ESTE dispositivo modificó de verdad se
+      // suben; el resto de las claves se toma de la versión más reciente del
+      // servidor, para no perder cambios hechos desde otro dispositivo.
+      let lastSyncedClientes=null, lastSyncedPersonal=null, lastSyncedInventario=null;
+      function mergeTopLevel(serverPayload, localPayload, lastSynced){
+        const merged={...(serverPayload||{})};
+        Object.keys(localPayload).forEach(key=>{
+          const changed=!lastSynced || JSON.stringify(localPayload[key])!==JSON.stringify(lastSynced[key]);
+          if(changed) merged[key]=localPayload[key];
+        });
+        return merged;
+      }
       function diffClients(){
         const changed=[],currentIds=new Set();
         for(const c of state.clients){
@@ -1057,13 +1080,35 @@
           try{
             const db=window.SupabaseDB;
             if(!db) throw new Error('Supabase no está disponible');
+            const localClientes={plans:state.plans,days:state.days,currentDate:state.currentDate};
+            const localPersonal={drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers};
+            const localInventario={inventory:state.inventory};
+            const [serverClientes,serverPersonal,serverInventario]=await Promise.all([
+              db.dbGet('clientes'), db.dbGet('personal'), db.dbGet('inventario')
+            ]);
+            const mergedClientes=mergeTopLevel(serverClientes,localClientes,lastSyncedClientes);
+            const mergedPersonal=mergeTopLevel(serverPersonal,localPersonal,lastSyncedPersonal);
+            const mergedInventario=mergeTopLevel(serverInventario,localInventario,lastSyncedInventario);
+            // Refleja lo combinado también en este dispositivo, para que quede
+            // igual de al día que lo que se subió (evita que este mismo
+            // dispositivo, en su próximo guardado, vuelva a pisar algo).
+            state.plans=mergedClientes.plans; state.days=mergedClientes.days; state.currentDate=mergedClientes.currentDate;
+            state.drivers=mergedPersonal.drivers; state.routes=mergedPersonal.routes; state.settings=mergedPersonal.settings; staffUsers=mergedPersonal.staffUsers;
+            state.inventory=mergedInventario.inventory;
             const [okClientes,okClientRows,okPersonal,okInventario]=await Promise.all([
-              db.dbSet('clientes',{plans:state.plans,days:state.days,currentDate:state.currentDate}),
+              db.dbSet('clientes',mergedClientes),
               saveClientRows(),
-              db.dbSet('personal',{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers}),
-              db.dbSet('inventario',{inventory:state.inventory})
+              db.dbSet('personal',mergedPersonal),
+              db.dbSet('inventario',mergedInventario)
             ]);
             const ok=okClientes&&okClientRows&&okPersonal&&okInventario;
+            if(ok){
+              lastSyncedClientes=JSON.parse(JSON.stringify(mergedClientes));
+              lastSyncedPersonal=JSON.parse(JSON.stringify(mergedPersonal));
+              lastSyncedInventario=JSON.parse(JSON.stringify(mergedInventario));
+              localStorage.setItem(KEY, JSON.stringify(state));
+              localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
+            }
             setDatabaseStatus(ok?'ok':'error');
             if(!ok) notice('Los cambios quedaron locales, pero no se guardaron completamente en Supabase.',true);
             return ok;
@@ -1085,6 +1130,7 @@
             state.plans = clientesData.plans ?? state.plans;
             state.days = clientesData.days ?? state.days;
             state.currentDate = clientesData.currentDate ?? state.currentDate;
+            lastSyncedClientes = JSON.parse(JSON.stringify({plans:state.plans,days:state.days,currentDate:state.currentDate}));
           }
           if (clientRows) {
             gotAny=true;
@@ -1100,10 +1146,12 @@
               staffUsers = personalData.staffUsers;
               localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
             }
+            lastSyncedPersonal = JSON.parse(JSON.stringify({drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers}));
           }
           if (inventarioData) {
             gotAny=true;
             state.inventory = inventarioData.inventory ?? state.inventory;
+            lastSyncedInventario = JSON.parse(JSON.stringify({inventory:state.inventory}));
           }
           if (gotAny) localStorage.setItem(KEY, JSON.stringify(state));
           setDatabaseStatus('ok');
@@ -1324,17 +1372,18 @@
           {key:'career',label:'Carreras / entrega',cell:c=>n(c.career||1)},
           {key:'bags',label:'Bolsas',cell:c=>n(c.bags)},
           {key:'status',label:'Estado',cell:statusCell},
+          {key:'remaining',label:'Servicios restantes',cell:c=>n(c.paidDays)?Math.max(0,n(c.paidDays)-n(c.consumedDays)):'—'},
           {key:'returnDate',label:'Fecha de retorno',cell:c=>canManage()?editableField(c,'returnDate',c.returnDate||'','date'):esc(c.returnDate||'—')},
           {key:'id',label:'Acciones',cell:c=>canManage()?`<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button>`:'—'}
         ];
         const allKeys=definitions.map(x=>x.key), wanted=state.settings.dispatchColumnOrder;
         const arranged=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
         const columns=arranged.filter(x=>!state.settings.hiddenColumns.includes(x.key));
-        const numericKeys=new Set([...items.map(([key])=>key),'career','bags']);
+        const numericKeys=new Set([...items.map(([key])=>key),'career','bags','remaining']);
         const totalRow=(label,orders,variant)=>{
           let labelled=false;
           return `<tr class="table-totals ${variant}">${columns.map(col=>{
-            if(numericKeys.has(col.key)) return `<td>${orders.reduce((sum,c)=>sum+(col.key==='career'?n(c.career||1):col.key==='bags'?n(c.bags):itemValue(c,col.key)),0)}</td>`;
+            if(numericKeys.has(col.key)) return `<td>${orders.reduce((sum,c)=>sum+(col.key==='career'?n(c.career||1):col.key==='bags'?n(c.bags):col.key==='remaining'?(n(c.paidDays)?Math.max(0,n(c.paidDays)-n(c.consumedDays)):0):itemValue(c,col.key)),0)}</td>`;
             if(!labelled){ labelled=true; return `<td>${label}</td>`; }
             return '<td>—</td>';
           }).join('')}</tr>`;
@@ -1545,7 +1594,7 @@
       });bindUserFormRoleToggle();}
       function renderSettings(){
         if(!canAccessPage('settings')) return;
-        const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...items,['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['returnDate','Fecha de retorno'],['id','Acciones']];
+        const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...items,['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['remaining','Servicios restantes'],['returnDate','Fecha de retorno'],['id','Acciones']];
         const logo=state.settings.logoUrl;
         // Todos los roles pueden entrar a Configuración, pero solo ven y editan
         // la tarjeta de "Columnas visibles". El resto (apariencia, empresa,
