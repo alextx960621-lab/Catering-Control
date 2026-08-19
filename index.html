@@ -254,6 +254,12 @@
     .sync-dot.ok { background: var(--accent); }
     .sync-dot.error { background: var(--danger); }
     .sync-dot.local { background: var(--warning); }
+    /* En escritorio este wrapper es invisible para el layout (display:contents):
+       sus hijos (botón Salir, grupo de sincronización) siguen ocupando su
+       propia fila en el grid de .aside-bottom, igual que antes. En móvil se
+       convierte en una fila compacta (ver @media). */
+    .aside-bottom-actions { display: contents; }
+    .btn-text { display: inline; }
 
     main {
       min-width: 0;
@@ -709,19 +715,48 @@
         margin-top: 0;
         padding: 6px 0 0;
         border-top: 0;
-        flex-direction: row;
+        display: flex;
         align-items: center;
+        justify-content: space-between;
         gap: 8px;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
       }
-      .profile { font-size: 12px; }
+      .profile {
+        font-size: 12px;
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+      }
+      .profile > div { min-width: 0; }
+      .profile b, .profile small {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* En móvil el wrapper deja de ser "invisible" y pasa a ser una fila
+         compacta a la derecha del avatar/nombre, así todo cabe en una sola
+         línea en vez de apilarse (Salir, sincronización, etc). */
+      .aside-bottom-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: nowrap;
+        flex-shrink: 0;
+      }
       .mobile-sync-group {
         display: flex;
         align-items: center;
         gap: 6px;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
       }
-      .aside-bottom button { padding: 5px 9px; font-size: 12px; min-height: 30px; }
+      /* Con tan poco espacio, el texto de los botones y del estado de
+         sincronización se oculta y solo quedan los íconos + el punto de
+         color; el título (tooltip) conserva el texto para quien lo necesite. */
+      .btn-text, .sync-text-label { display: none; }
+      .aside-bottom button { padding: 6px 8px; font-size: 14px; min-height: 30px; }
+      .sync-pill { padding: 4px; }
+      .sync-dot { width: 9px; height: 9px; }
 
       main { padding: 12px; }
       .summary-grid {
@@ -811,10 +846,12 @@
           <div class="avatar" id="avatar">👤</div>
           <div><b id="current-name">Operaciones</b><small class="muted" id="current-role" style="display:block;font-size:10px;">Administrador</small></div>
         </div>
-        <button class="outline" id="logout-btn" title="Cerrar sesión">⏻ Salir</button>
-        <div class="mobile-sync-group">
-          <div class="sync-pill"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">Listo</span></div>
-          <button class="outline" id="manual-sync-btn">🔄 Sincronizar</button>
+        <div class="aside-bottom-actions">
+          <button class="outline" id="logout-btn" title="Cerrar sesión"><span aria-hidden="true">⏻</span><span class="btn-text"> Salir</span></button>
+          <div class="mobile-sync-group">
+            <div class="sync-pill" id="sync-pill" title="Estado de sincronización"><span class="sync-dot" id="sync-dot"></span><span id="sync-text" class="sync-text-label">Listo</span></div>
+            <button class="outline" id="manual-sync-btn" title="Sincronizar"><span aria-hidden="true">🔄</span><span class="btn-text"> Sincronizar</span></button>
+          </div>
         </div>
       </div>
     </aside>
@@ -1436,11 +1473,6 @@
           return;
         }
         $('#settings-page').innerHTML=pageHead('Configuración','Preferencias visuales, columnas y respaldo de datos.')+`<div class="two-col">
-          <div class="card card-pad stack">
-            <h3>Apariencia (tema por defecto de la empresa)</h3>
-            <p class="muted">Se aplica a cualquier usuario que no haya elegido su propio tema en "Tu tema".</p>
-            <label>Tema<select id="theme"><option value="light" ${state.settings.theme==='light'?'selected':''}>Claro</option><option value="night" ${state.settings.theme==='night'?'selected':''}>Nocturno</option><option value="forest" ${state.settings.theme==='forest'?'selected':''}>Bosque</option></select></label>
-          </div>
           ${columnsCard}
           <div class="card card-pad stack">
             <h3>Empresa</h3>
@@ -1498,7 +1530,6 @@
             <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="outline" data-action="export-json">Exportar JSON</button><button class="outline" data-action="import-json">Importar JSON</button></div>
           </div>
         </div>`;
-        $('#theme').onchange=e=>{state.settings.theme=e.target.value;save();render();};
         $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
         $('#company-name').onchange=async e=>{state.settings.companyName=e.target.value.trim();const saved=await save();applyBranding();notice(saved?'Nombre de la empresa actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
         $('#logo-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.logoUrl=await readImageAsDataURL(file,240,.85);const saved=await save();applyBranding();renderSettings();notice(saved?'Logo actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
