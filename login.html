@@ -20,8 +20,9 @@
     [data-theme="night"] .text-secondary { color:#9aa7bd!important; }
     [data-theme="night"] .form-control { background:#121824; color:#e7ecf5; border-color:#2b3648; }
     [data-theme="night"] .bg-body-tertiary { background:#121824!important; }
-    [data-theme="forest"] body { background:radial-gradient(circle at 20% 20%,rgba(25,135,84,.2),transparent 34%),#e1ebe2; }
-    [data-theme="forest"] .card { background:#f1f6f1; }
+    [data-theme="forest"] body { background:radial-gradient(circle at 20% 20%,rgba(25,135,84,.25),transparent 34%),#dcefdc; }
+    [data-theme="forest"] .card { background:#eef7ee; }
+    [data-theme="forest"] .bg-body-tertiary { background:#cde6cd!important; }
   </style>
 </head>
 <body class="d-flex align-items-center py-4">
@@ -30,12 +31,12 @@
       <div class="col-12 login-card">
         <section class="card shadow-lg border-0 rounded-4">
           <div class="card-body p-4 p-md-5">
-            <div class="d-flex align-items-start gap-3 mb-4">
+            <div class="d-flex align-items-center gap-3 mb-4">
               <div class="brand-mark d-flex align-items-center justify-content-center fs-4" id="brand-mark"></div>
               <div class="flex-grow-1"><h1 class="h4 mb-0" id="brand-title">Catering Control</h1><p class="text-secondary small mb-0">Iniciar sesión</p></div>
-              <div class="text-center flex-shrink-0">
-                <label class="form-label small text-secondary mb-1" for="theme-select">Tema</label>
-                <select class="form-select form-select-sm" id="theme-select" style="min-width:112px">
+              <div class="flex-shrink-0 d-flex align-items-center gap-2">
+                <label class="form-label small text-secondary mb-0" for="theme-select">Tema</label>
+                <select class="form-select form-select-sm" id="theme-select" style="width:auto">
                   <option value="light">Claro</option>
                   <option value="night">Nocturno</option>
                   <option value="forest">Bosque</option>
