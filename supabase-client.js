@@ -127,5 +127,37 @@
     }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, client };
+  // ------------------------------------------------------------------------
+  // db_audit_log: historial de cambios (quién hizo qué y cuándo). Es una
+  // tabla de solo AGREGAR filas — cada evento es una fila nueva, nunca se
+  // sobrescribe una fila con otra, así que no tiene el problema de
+  // "un dispositivo desactualizado borra lo que guardó otro".
+  // ------------------------------------------------------------------------
+
+  // Agrega una fila al historial. No hace falta esperar a que termine para
+  // seguir usando la app (se llama "en paralelo", sin bloquear al usuario).
+  async function dbInsertAudit(entry) {
+    try {
+      const { error } = await client.from('db_audit_log').insert(entry);
+      if (error) { console.error('[supabase] Error guardando en el historial:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red guardando en el historial:', err);
+      return false;
+    }
+  }
+
+  // Trae los últimos N eventos del historial, del más reciente al más viejo.
+  async function dbGetAuditLog(limit = 200) {
+    try {
+      const { data, error } = await client.from('db_audit_log').select('*').order('at', { ascending: false }).limit(limit);
+      if (error) { console.error('[supabase] Error leyendo el historial:', error.message); return null; }
+      return data || [];
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo el historial:', err);
+      return null;
+    }
+  }
+
+  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, client };
 })();

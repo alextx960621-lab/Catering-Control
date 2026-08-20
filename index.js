@@ -94,6 +94,7 @@
         payroll: ['admin','editor','driver'],
         inventory: ['admin','editor','kitchen'],
         users: ['admin'],
+        audit: ['admin'],
         settings: ['admin','editor','kitchen','driver']
       };
       const role = () => activeUser?.role || 'driver';
@@ -106,6 +107,18 @@
       // Puede administrar el inventario de cocina.
       const canManageInventory = () => ['admin','editor','kitchen'].includes(role());
       const canAccessPage = page => (NAV_PERMS[page] || []).includes(role());
+      // Registra un evento en el historial de auditoría (quién hizo qué,
+      // sobre qué registro y cuándo). Se dispara "en paralelo" — no bloquea
+      // la acción del usuario ni la interrumpe si falla el guardado del log.
+      function logAudit(action, entityType, entityLabel, entityId, details){
+        window.SupabaseDB?.dbInsertAudit({
+          actor_id: activeUser?.id || '',
+          actor_name: activeUser?.name || ROLE_LABELS[role()] || 'Usuario',
+          actor_role: role(),
+          action, entity_type: entityType, entity_label: entityLabel || '', entity_id: entityId || '',
+          details: details || {}
+        });
+      }
       function canEditDispatchField(c, field){
         if (canManage()) return true;
         if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && effectiveRouteId(c) === activeUser.routeId;
@@ -382,7 +395,7 @@
       function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${colgroupHtml(headers,group)}<thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
       function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); }
       function render(){ document.documentElement.dataset.theme=localStorage.getItem(UI_THEME_KEY)||state.settings.theme; $('#current-name').textContent=activeUser.name || ROLE_LABELS[role()] || 'Usuario'; $('#current-role').textContent=ROLE_LABELS[role()] || 'Usuario'; $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-roles]').forEach(x=>x.hidden=!(x.dataset.roles||'').split(',').includes(role())); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); }
-      function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,settings:renderSettings}[name]; if(fn) { fn(); enableTableTools(); } }
+      function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { fn(); enableTableTools(); } }
       function enableTableTools(){
         // Redimensionado de columnas al estilo Excel: se arrastra el borde
         // de la columna y se ajusta el elemento <col> correspondiente, lo
@@ -548,6 +561,7 @@
       }
       function openClient(id){
         let c=id?state.clients.find(x=>x.id===id):null;
+        const isNew=!c;
         showModal(c?'Editar cliente':'Añadir cliente',clientForm(c||{}),async f=>{
           const data=syncClientRouteAndDriver(Object.fromEntries(new FormData(f))); data.items=formItems(f);
           data.schedule=readScheduleRows(f);
@@ -556,6 +570,7 @@
           if(!saved)return false;
           renderClients();notice('Cliente guardado en la base de datos.');
           scrollToRow(c.id);
+          logAudit(isNew?'Cliente creado':'Cliente editado','client',c.name,c.id,{});
         });
         const form=$('#modal-form'), routeField=form?.elements.routeId, driverField=form?.elements.driverId;
         if(routeField) routeField.onchange=()=>{ driverField.value=driverForRoute(routeField.value)?.id || ''; };
@@ -573,6 +588,7 @@
           const saved=await save();if(!saved)return false;
           renderClients();notice(returnDate?'Pausa guardada con fecha de retorno.':'Pausa abierta guardada sin fecha de retorno.');
           scrollToRow(c.id);
+          logAudit('Cliente pausado','client',c.name,c.id,{desde:state.currentDate,retorno:returnDate||'sin definir'});
         });
         const toggle=$('#pause-with-return'),wrap=$('#pause-return-wrap'),input=$('#modal-form').elements.returnDate;
         toggle.onchange=()=>{wrap.hidden=!toggle.checked;input.disabled=!toggle.checked;if(!toggle.checked)input.value='';};
@@ -584,27 +600,29 @@
         const saved=await save();
         if(!saved){notice('No se pudo guardar la reactivación en la base de datos. Intenta nuevamente.',true);return;}
         renderClients();notice(`Servicio de ${c.name} activado.`);scrollToRow(c.id);
+        logAudit('Cliente reactivado','client',c.name,c.id,{});
       }
+
 
       function renderDrivers(){ if(!canAccessPage('drivers')) return; const q=(ui.search.drivers||'').toLowerCase();let list=state.drivers.filter(d=>!q||[d.firstName,d.lastName,d.carnet,d.phone,d.address,routeName(d.routeId)].join(' ').toLowerCase().includes(q));list=sort(list,'order','drivers');const rows=d=>`<tr><td>${n(d.order)||''}</td><td style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><b>${esc(d.firstName)} ${esc(d.lastName)}</b></td><td>${esc(d.carnet||'—')}</td><td>${esc(d.phone||'—')}</td><td>${esc(d.address||'—')}</td><td>${esc(routeName(d.routeId))}</td><td>${canManage()?`<button class="icon-btn" data-action="edit-driver" data-id="${d.id}">Editar</button><button class="icon-btn delete" data-action="delete-driver" data-id="${d.id}">×</button>`:'—'}</td></tr>`;$('#drivers-page').innerHTML=pageHead('Drivers','Personal de entrega registrado.',canManage()?'<button class="primary" data-action="add-driver">+ Añadir driver</button>':'')+`<div class="toolbar"><input id="drivers-search" class="search" placeholder="Buscar driver…" value="${esc(ui.search.drivers||'')}"></div>`+table(list,[['Orden','order'],['Nombre','firstName'],['Carnet','carnet'],['Teléfono','phone'],['Dirección domicilio','address'],['Ruta','route'],['Acciones','id']],rows,'drivers');bindSearch('drivers-search','drivers',renderDrivers);}
       function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label>Orden<input name="order" type="number" min="0" value="${esc(d.order)}"></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="outline" onclick="removeDriverPhoto('${d.id}')">Quitar foto</button>`:''}</div></label></div>`;}
       async function removeDriverPhoto(id){const d=driver(id);if(!d)return;d.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openDriver(id);}
-      function openDriver(id){const d=id?driver(id):null;showModal(d?'Editar driver':'Añadir driver',driverForm(d||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}if(d){Object.assign(d,data);state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);}else state.drivers.push({id:uid('d'),...data});const saved=await save();if(!saved)return false;renderDrivers();notice('Driver guardado.');});}
+      function openDriver(id){const isNew=!id;const d0=id?driver(id):null;showModal(d0?'Editar driver':'Añadir driver',driverForm(d0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}let d=d0;if(d){Object.assign(d,data);state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);}else{d={id:uid('d'),...data};state.drivers.push(d);}const saved=await save();if(!saved)return false;renderDrivers();notice('Driver guardado.');logAudit(isNew?'Driver creado':'Driver editado','driver',`${d.firstName||''} ${d.lastName||''}`.trim(),d.id,{});});}
       const ROUTE_TYPES={short:['Corta','done'],long:['Larga','pending'],verylong:['Muy larga','warn']};
       function routeTypeBadge(r){const [label,cl]=ROUTE_TYPES[r.type]||ROUTE_TYPES.short;return `<span class="badge ${cl}">${label}</span>`;}
       function renderRoutes(){ if(!canAccessPage('routes')) return; const q=(ui.search.routes||'').toLowerCase();let list=state.routes.filter(r=>!q||[r.name,r.description].join(' ').toLowerCase().includes(q));list=sort(list,'order','routes');const rows=r=>`<tr><td>${n(r.order)||''}</td><td><b>${esc(r.name)}</b>${r.open?' <span class="badge off">Abierta</span>':''}</td><td>${routeTypeBadge(r)}</td><td>${esc(r.description||'—')}</td><td>${state.clients.filter(c=>c.routeId===r.id).length}</td><td>${state.drivers.filter(d=>d.routeId===r.id).length}</td><td>${canManage()&&!r.open?`<button class="icon-btn" data-action="edit-route" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-route" data-id="${r.id}">×</button>`:'—'}</td></tr>`;$('#routes-page').innerHTML=pageHead('Rutas','Incluye una ruta abierta para drivers disponibles sin ruta de trabajo.',canManage()?'<button class="primary" data-action="add-route">+ Crear ruta</button>':'')+`<div class="toolbar"><input id="routes-search" class="search" placeholder="Buscar ruta…" value="${esc(ui.search.routes||'')}"></div>`+table(list,[['Orden','order'],['Ruta','name'],['Tipo','type'],['Descripción','description'],['Clientes','clients'],['Drivers','drivers'],['Acciones','id']],rows,'routes');bindSearch('routes-search','routes',renderRoutes);}
       function routeForm(r={}){return `<div class="form-grid"><label>Nombre de ruta *<input name="name" required value="${esc(r.name)}"></label><label>Orden<input type="number" min="0" name="order" value="${esc(r.order)}"></label><label>Tipo de ruta<select name="type"><option value="short" ${(r.type||'short')==='short'?'selected':''}>Corta</option><option value="long" ${r.type==='long'?'selected':''}>Larga</option><option value="verylong" ${r.type==='verylong'?'selected':''}>Muy larga</option></select></label><label class="wide">Descripción / zona<input name="description" value="${esc(r.description)}"></label></div>`;}
-      function openRoute(id){const r=id?route(id):null;showModal(r?'Editar ruta':'Crear ruta',routeForm(r||{}),f=>{const data=Object.fromEntries(new FormData(f));if(r)Object.assign(r,data);else state.routes.push({id:uid('r'),...data});save();renderRoutes();notice('Ruta guardada.');});}
+      function openRoute(id){const isNew=!id;const r0=id?route(id):null;showModal(r0?'Editar ruta':'Crear ruta',routeForm(r0||{}),f=>{const data=Object.fromEntries(new FormData(f));let r=r0;if(r)Object.assign(r,data);else{r={id:uid('r'),...data};state.routes.push(r);}save();renderRoutes();notice('Ruta guardada.');logAudit(isNew?'Ruta creada':'Ruta editada','route',r.name,r.id,{});});}
 
       function renderPlans(){ if(!canAccessPage('plans')) return; const rows=p=>`<tr><td style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;border-radius:8px;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><b>${esc(p.name)}</b></td><td>${esc(p.type||'General')}</td><td>${items.map(([k,l])=>`${l}: ${n(p.items?.[k])}`).join('<br>')}</td><td>${canManage()?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}</td></tr>`;$('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan.',canManage()?'<button class="primary" data-action="add-plan">+ Crear plan</button>':'')+table(state.plans,[['Plan','name'],['Tipo','type'],['Artículos incluidos','items'],['Acciones','id']],rows,'plans');}
       function planForm(p={}){return `<div class="form-grid"><label>Nombre *<input name="name" required value="${esc(p.name)}"></label><label>Tipo<input name="type" value="${esc(p.type||'General')}"></label><label class="wide">Foto del plan<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><input type="file" name="photoFile" accept="image/*">${p.id&&p.photoUrl?`<button type="button" class="outline" onclick="removePlanPhoto('${p.id}')">Quitar foto</button>`:''}</div></label><div class="wide"><label>Artículos incluidos</label>${itemFields(p.items)}</div></div>`;}
       async function removePlanPhoto(id){const p=plan(id);if(!p)return;p.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openPlan(id);}
-      function openPlan(id){const p=id?plan(id):null;showModal(p?'Editar plan':'Crear plan',planForm(p||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;data.items=formItems(f);if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}if(p)Object.assign(p,data);else state.plans.push({id:uid('p'),...data});const saved=await save();if(!saved)return false;renderPlans();notice('Plan guardado.');});}
+      function openPlan(id){const isNew=!id;const p0=id?plan(id):null;showModal(p0?'Editar plan':'Crear plan',planForm(p0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;data.items=formItems(f);if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}let p=p0;if(p)Object.assign(p,data);else{p={id:uid('p'),...data};state.plans.push(p);}const saved=await save();if(!saved)return false;renderPlans();notice('Plan guardado.');logAudit(isNew?'Plan creado':'Plan editado','plan',p.name,p.id,{});});}
 
       function kitchenItem(id){ return state.inventory.items.find(x=>x.id===id); }
       function clientItemQuantity(c,key){ const own=c.items && Object.keys(c.items).length ? c.items : plan(c.planId)?.items || {}; return n(own[key]); }
       function inventoryItemForm(item={}){ return `<div class="form-grid"><label>Producto de cocina *<input name="name" required value="${esc(item.name)}" placeholder="Ej.: Envase mediano"></label><label>Unidad *<input name="unit" required value="${esc(item.unit||'unidades')}" placeholder="unidades, kg, litros"></label><label>Stock inicial / actual<input name="stock" type="number" step="0.01" value="${n(item.stock)}"></label><label>Stock mínimo<input name="minimum" type="number" min="0" step="0.01" value="${n(item.minimum)}"></label></div>`; }
-      function openInventoryItem(id){ const item=id?kitchenItem(id):null; showModal(item?'Editar producto':'Añadir producto de cocina',inventoryItemForm(item||{}),async f=>{const data=Object.fromEntries(new FormData(f));if(item)Object.assign(item,data);else state.inventory.items.push({id:uid('inv'),...data});const saved=await save();if(!saved)return false;renderInventory();notice('Producto de inventario guardado.');}); }
+      function openInventoryItem(id){ const isNew=!id; const item0=id?kitchenItem(id):null; showModal(item0?'Editar producto':'Añadir producto de cocina',inventoryItemForm(item0||{}),async f=>{const data=Object.fromEntries(new FormData(f));let item=item0;if(item)Object.assign(item,data);else{item={id:uid('inv'),...data};state.inventory.items.push(item);}const saved=await save();if(!saved)return false;renderInventory();notice('Producto de inventario guardado.');logAudit(isNew?'Producto de inventario creado':'Producto de inventario editado','inventory-item',item.name,item.id,{});}); }
       function inventoryOptions(current=''){ return `<option value="">Seleccionar producto</option>`+state.inventory.items.map(x=>`<option value="${x.id}" ${x.id===current?'selected':''}>${esc(x.name)} (${esc(x.unit||'unidades')})</option>`).join(''); }
       function inventoryMovementForm(type,m={}){ const title=(m.id?'Editar ':'')+(type==='entry'?'Ingreso de producto':type==='waste'?'Salida por merma':'Salida por uso'); return {title,html:`<div class="form-grid"><label>Fecha<input name="date" type="date" value="${m.date||state.currentDate}"></label><label>Producto *<select name="inventoryId" required>${inventoryOptions(m.inventoryId)}</select></label><label>Cantidad *<input name="quantity" type="number" min="0.01" step="0.01" required value="${m.id?Math.abs(n(m.quantity)):''}"></label><label>Motivo / detalle<input name="note" required placeholder="Ej.: recepción proveedor" value="${esc(m.note)}"></label></div>`}; }
       function openInventoryMovement(type,id){
@@ -619,6 +637,7 @@
           else state.inventory.movements.unshift({id:uid('mov'),date:data.date,inventoryId:data.inventoryId,type,quantity:delta,note:data.note});
           const saved=await save(); if(!saved)return false;
           renderInventory();notice(existing?'Movimiento actualizado.':(type==='entry'?'Ingreso registrado.':'Salida de inventario registrada.'));
+          logAudit(existing?'Movimiento de inventario editado':'Movimiento de inventario registrado','inventory-movement',item.name,existing?.id||'',{tipo:type,cantidad:delta,motivo:data.note,fecha:data.date});
         });
       }
       async function deleteInventoryMovement(id){
@@ -628,11 +647,12 @@
         state.inventory.movements=state.inventory.movements.filter(x=>x.id!==id);
         const saved=await save(); renderInventory();
         notice(saved?'Movimiento eliminado y stock ajustado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved);
+        if(saved) logAudit('Movimiento de inventario eliminado','inventory-movement',item?.name||m.inventoryId,m.id,{tipo:m.type,cantidad:m.quantity,motivo:m.note});
       }
       function inventoryLinkForm(link={}){ return `<div class="form-grid"><label>Producto de cocina *<select name="inventoryId" required>${inventoryOptions(link.inventoryId)}</select></label><label>Artículo entregado al cliente *<select name="clientItemKey" required>${items.map(([key,label])=>`<option value="${key}" ${link.clientItemKey===key?'selected':''}>${label}</option>`).join('')}</select></label><label class="wide">Cantidad a descontar por cada artículo entregado *<input name="quantity" type="number" min="0.01" step="0.01" required value="${n(link.quantity)||1}"></label></div>`; }
-      function openInventoryLink(id){ const link=id?state.inventory.links.find(x=>x.id===id):null; showModal(link?'Editar vínculo de consumo':'Vincular consumo a artículo entregado',inventoryLinkForm(link||{}),async f=>{const data=Object.fromEntries(new FormData(f));if(link)Object.assign(link,data);else state.inventory.links.push({id:uid('link'),...data});const saved=await save();if(!saved)return false;renderInventory();notice('Vínculo de consumo guardado.');}); }
-      async function deleteInventoryItem(id){ const item=kitchenItem(id); if(!item || !confirm(`¿Eliminar ${item.name} del inventario?`))return; state.inventory.items=state.inventory.items.filter(x=>x.id!==id); state.inventory.links=state.inventory.links.filter(x=>x.inventoryId!==id); const saved=await save();renderInventory();notice(saved?'Producto eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); }
-      async function deleteInventoryLink(id){ if(!confirm('¿Eliminar este vínculo de consumo?'))return; state.inventory.links=state.inventory.links.filter(x=>x.id!==id);const saved=await save();renderInventory();notice(saved?'Vínculo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); }
+      function openInventoryLink(id){ const isNew=!id; const link0=id?state.inventory.links.find(x=>x.id===id):null; showModal(link0?'Editar vínculo de consumo':'Vincular consumo a artículo entregado',inventoryLinkForm(link0||{}),async f=>{const data=Object.fromEntries(new FormData(f));let link=link0;if(link)Object.assign(link,data);else{link={id:uid('link'),...data};state.inventory.links.push(link);}const saved=await save();if(!saved)return false;renderInventory();notice('Vínculo de consumo guardado.');logAudit(isNew?'Vínculo de consumo creado':'Vínculo de consumo editado','inventory-link',kitchenItem(link.inventoryId)?.name||link.inventoryId,link.id,{});}); }
+      async function deleteInventoryItem(id){ const item=kitchenItem(id); if(!item || !confirm(`¿Eliminar ${item.name} del inventario?`))return; state.inventory.items=state.inventory.items.filter(x=>x.id!==id); state.inventory.links=state.inventory.links.filter(x=>x.inventoryId!==id); const saved=await save();renderInventory();notice(saved?'Producto eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); if(saved) logAudit('Producto de inventario eliminado','inventory-item',item.name,id,{}); }
+      async function deleteInventoryLink(id){ const link=state.inventory.links.find(x=>x.id===id); if(!link||!confirm('¿Eliminar este vínculo de consumo?'))return; state.inventory.links=state.inventory.links.filter(x=>x.id!==id);const saved=await save();renderInventory();notice(saved?'Vínculo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); if(saved) logAudit('Vínculo de consumo eliminado','inventory-link',kitchenItem(link.inventoryId)?.name||link.inventoryId,id,{}); }
       function renderInventory(){
         if(!canAccessPage('inventory')) return;
         const itemRows=item=>{const links=state.inventory.links.filter(l=>l.inventoryId===item.id);const low=n(item.stock)<=n(item.minimum);return `<tr><td><b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}</td><td>${esc(item.unit||'unidades')}</td><td>${n(item.stock)}</td><td>${n(item.minimum)}</td><td>${links.length?links.map(l=>`${n(l.quantity)} × ${esc(items.find(([key])=>key===l.clientItemKey)?.[1]||l.clientItemKey)}`).join('<br>'):'—'}</td><td>${canManageInventory()?`<button class="icon-btn" data-action="edit-inventory-item" data-id="${item.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-item" data-id="${item.id}">×</button>`:'—'}</td></tr>`;};
@@ -671,6 +691,27 @@
       function renderPayroll(){ if(!canAccessPage('payroll')) return; const dates=monthDates(ui.month);let list=canManage()?state.drivers:state.drivers.filter(d=>d.id===activeUser.driverId);const rows=d=>{const values=dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=isAdmin()?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};$('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<input id="payroll-month" type="month" value="${ui.month}"></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet"><table class="payroll"><thead><tr><th>Driver / Ruta</th>${dates.map(d=>`<th>${Number(d.slice(-2))}</th>`).join('')}<th>Total</th><th>Día tarifa</th><th>Monto Bs</th></tr></thead><tbody>${list.map(rows).join('')||'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody></table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
 
       function renderUsers(){if(!canAccessPage('users'))return;const rows=u=>`<tr><td><b>${esc(u.username)}</b></td><td>${esc(u.name)}</td><td>${esc(u.email||'—')}</td><td>${badge(ROLE_LABELS[u.role]||u.role)}</td><td>${u.role==='driver'?esc(routeName(u.routeId)):'—'}</td><td><button class="icon-btn" data-action="edit-user" data-id="${u.id}">Editar</button>${u.id!==activeUser.id?`<button class="icon-btn delete" data-action="delete-user" data-id="${u.id}">×</button>`:''}</td></tr>`;$('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Roles: Administrador, Editor, Cocina y Driver.', '<button class="primary" data-action="add-user">+ Crear usuario</button>')+table(staffUsers,[['Usuario','username'],['Nombre','name'],['Correo','email'],['Rol','role'],['Ruta asignada','route'],['Acciones','id']],rows,'users');}
+      // Historial de auditoría: se trae de Supabase (tabla db_audit_log, de solo
+      // agregar filas) y se guarda en caché en memoria (auditEntries) para no
+      // volver a pedirlo en cada tecla de la búsqueda — solo se refresca al
+      // entrar a la página o al tocar "Actualizar".
+      let auditEntries=null;
+      async function renderAudit(forceRefresh){
+        if(!canAccessPage('audit')) return;
+        const actions='<button class="outline" data-action="refresh-audit">🔄 Actualizar</button>';
+        if(forceRefresh||auditEntries===null){
+          $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+'<p class="muted">Cargando historial…</p>';
+          const rows=await window.SupabaseDB?.dbGetAuditLog(300);
+          auditEntries=rows||[];
+          if(!rows){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo.',actions)+'<p class="muted">No se pudo cargar el historial. Verifica que la tabla db_audit_log exista (corre supabase-audit-log-migration.sql) y vuelve a intentar.</p>'; return; }
+        }
+        const q=(ui.search.audit||'').toLowerCase();
+        let list=auditEntries.filter(e=>!q||[e.actor_name,e.actor_role,e.action,e.entity_type,e.entity_label].join(' ').toLowerCase().includes(q));
+        list=sort(list,'at','audit');
+        const rows=e=>`<tr><td>${new Date(e.at).toLocaleString('es-BO',{dateStyle:'short',timeStyle:'short'})}</td><td>${esc(e.actor_name||'—')}<br><small class="muted">${esc(ROLE_LABELS[e.actor_role]||e.actor_role||'')}</small></td><td>${esc(e.action)}</td><td>${esc(e.entity_label||e.entity_type||'—')}</td><td>${Object.keys(e.details||{}).length?esc(Object.entries(e.details).map(([k,v])=>`${k}: ${v}`).join(' · ')):'—'}</td></tr>`;
+        $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+`<div class="toolbar"><input id="audit-search" class="search" placeholder="Buscar por persona, acción o registro…" value="${esc(ui.search.audit||'')}"><span class="spacer"></span><span class="muted">${list.length} eventos</span></div>`+table(list,[['Fecha','at'],['Quién','actor_name'],['Acción','action'],['Registro','entity_label'],['Detalle','details']],rows,'audit');
+        bindSearch('audit-search','audit',renderAudit);
+      }
       function userForm(u={}){const d=u.driverId?driver(u.driverId):{};const showDriver=u.role==='driver';return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'}></label><label>Rol<select name="role" id="user-role-select"><option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="kitchen" ${u.role==='kitchen'?'selected':''}>Cocina</option><option value="driver" ${(!u.role||u.role==='driver')?'selected':''}>Driver</option></select></label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Carnet${showDriver?' *':''}<input name="carnet" value="${esc(d.carnet)}" ${showDriver?'required':''}></label><label class="driver-field" ${showDriver?'':'hidden'}>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="driver-field wide" ${showDriver?'':'hidden'}>Dirección de domicilio<input name="address" value="${esc(d.address)}"></label><p class="muted wide driver-field-hint" ${showDriver?'hidden':''}>Administrador, Editor y Cocina no necesitan ficha de driver ni ruta asignada.</p></div>`;}
       function bindUserFormRoleToggle(){
         const select=$('#user-role-select'); if(!select) return;
@@ -681,7 +722,7 @@
           const carnet=$('.driver-field input[name="carnet"]'); if(carnet) carnet.required=showDriver;
         };
       }
-      function openUser(id){let u=id?staffUsers.find(x=>x.id===id):null;showModal(u?'Editar usuario':'Crear usuario',userForm(u||{}),async f=>{
+      function openUser(id){let u=id?staffUsers.find(x=>x.id===id):null;const isNewUser=!u;showModal(u?'Editar usuario':'Crear usuario',userForm(u||{}),async f=>{
         const data=Object.fromEntries(new FormData(f));
         if(staffUsers.some(x=>x.username===data.username&&x.id!==u?.id)){notice('Ese usuario ya existe.',true);return false;}
         if(staffUsers.some(x=>x.email.toLowerCase()===data.email.toLowerCase()&&x.id!==u?.id)){notice('Ese correo ya está registrado.',true);return false;}
@@ -706,6 +747,7 @@
         const saved=await save();if(!saved)return false;
         renderUsers();
         notice(data.role==='driver'?'Usuario, acceso y ficha de driver guardados en la base de datos.':'Usuario guardado en la base de datos.');
+        logAudit(isNewUser?'Usuario creado':'Usuario editado','user',`${u.name} (${u.username})`,u.id,{rol:u.role});
       });bindUserFormRoleToggle();}
       function renderSettings(){
         if(!canAccessPage('settings')) return;
@@ -798,16 +840,86 @@
         $$('[data-item-icon]').forEach(input=>input.onchange=async e=>{const file=e.target.files[0];if(!file)return;const key=input.dataset.itemIcon;try{state.settings.itemIcons[key]=await readImageAsDataURL(file,160,.8);const saved=await save();renderSettings();notice(saved?'Ícono actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}});
       }
       function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
-      async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);}
+      async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
+      // Constancia del día procesado: genera un Excel y un JSON con exactamente
+      // los datos que se modificaron/enviaron ese día (clientes atendidos,
+      // artículos entregados, inventario descontado y tarifas), para tener
+      // respaldo de qué se procesó y a quién se le envió.
+      async function exportProcessedDaySnapshot(date){
+        const activeClients=state.clients.filter(c=>status(c,date)==='Activo');
+        const clientesAtendidos=activeClients.map(c=>{
+          const pitems=c.items||plan(c.planId)?.items||{};
+          return {
+            id:c.id,
+            nombre:c.name,
+            direccion:effectiveAddress(c,date)||'',
+            telefono:[c.phone1,c.phone2].filter(Boolean).join(' / '),
+            plan:planName(c.planId),
+            articulos:items.filter(([k])=>n(pitems[k])>0).map(([k,l])=>`${l}: ${n(pitems[k])}`).join(' | ')||'—',
+            driver:driverName(effectiveDriverId(c,date)),
+            ruta:routeName(effectiveRouteId(c,date)),
+            observaciones:[c.notes,c.specialDiet].filter(Boolean).join(' — ')
+          };
+        });
+        const movimientosDelDia=state.inventory.movements.filter(m=>m.date===date&&m.type==='delivery').map(m=>({
+          producto:kitchenItem(m.inventoryId)?.name||m.inventoryId,
+          cantidadDescontada:-n(m.quantity),
+          unidad:kitchenItem(m.inventoryId)?.unit||'',
+          nota:m.note||''
+        }));
+        const tarifas=Object.entries(day(date).rates||{}).map(([driverId,rate])=>({driver:driverName(driverId),tarifa:n(rate)}));
+        const snapshot={
+          fecha:date,
+          empresa:state.settings.companyName||APP_CONFIG.companyName,
+          generadoEl:new Date().toISOString(),
+          totalClientesAtendidos:clientesAtendidos.length,
+          clientesAtendidos,
+          inventarioDescontado:movimientosDelDia,
+          tarifasDrivers:tarifas
+        };
+        // JSON
+        const jsonBlob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
+        const aJson=document.createElement('a');
+        aJson.href=URL.createObjectURL(jsonBlob); aJson.download=`dia-procesado-${date}.json`; aJson.click();
+        setTimeout(()=>URL.revokeObjectURL(aJson.href),1000);
+        // Excel (si la librería no cargó, nos quedamos con el JSON igual)
+        if(!window.ExcelJS) return;
+        const wb=new ExcelJS.Workbook();
+        wb.creator=state.settings.companyName||APP_CONFIG.companyName;
+        const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
+        const ws=wb.addWorksheet('Clientes atendidos',{views:[{state:'frozen',ySplit:1}]});
+        ws.columns=[
+          {header:'Cliente',key:'nombre',width:26},{header:'Dirección',key:'direccion',width:32},
+          {header:'Teléfono',key:'telefono',width:18},{header:'Plan',key:'plan',width:16},
+          {header:'Artículos entregados',key:'articulos',width:40},{header:'Driver',key:'driver',width:18},
+          {header:'Ruta',key:'ruta',width:16},{header:'Observaciones',key:'observaciones',width:28}
+        ];
+        ws.getRow(1).eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        clientesAtendidos.forEach((c,i)=>{const row=ws.addRow(c);row.eachCell(cell=>{cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:i%2===0?'FFF3F6FB':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};cell.alignment={vertical:'top',wrapText:true};});});
+        if(movimientosDelDia.length){
+          const ws2=wb.addWorksheet('Inventario descontado',{views:[{state:'frozen',ySplit:1}]});
+          ws2.columns=[{header:'Producto',key:'producto',width:28},{header:'Cantidad descontada',key:'cantidadDescontada',width:20},{header:'Unidad',key:'unidad',width:14},{header:'Nota',key:'nota',width:36}];
+          ws2.getRow(1).eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF15A77F'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+          movimientosDelDia.forEach((m,i)=>{const row=ws2.addRow(m);row.eachCell(cell=>{cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:i%2===0?'FFF0FBF4':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});});
+        }
+        const buffer=await wb.xlsx.writeBuffer();
+        const aXlsx=document.createElement('a');
+        aXlsx.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+        aXlsx.download=`dia-procesado-${date}.xlsx`; aXlsx.click();
+        setTimeout(()=>URL.revokeObjectURL(aXlsx.href),1000);
+      }
       function processDay(){
         if(!canManage()){notice('No tienes permiso para procesar el día.',true);return;}
         const d=day();
         if(!d.laborable){notice('Un día no laborable no procesa pedidos ni descuenta inventario.',true);return;}
         if(d.processed){notice('Este día ya fue procesado.',true);return;}
         if(!confirm(`¿Procesar el día ${state.currentDate.split('-').reverse().join('/')}?`))return;
+        const activeCount=state.clients.filter(c=>status(c)==='Activo').length;
         state.clients.filter(c=>status(c)==='Activo').forEach(c=>c.consumedDays=n(c.consumedDays)+1);
         applyInventoryForProcessedDay(state.currentDate);
-        d.processed=true;save();renderDispatch();notice('Día procesado e inventario actualizado.');
+        d.processed=true;save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel y JSON)…');
+        logAudit('Día procesado','day',state.currentDate,state.currentDate,{clientesAtendidos:activeCount});
+        exportProcessedDaySnapshot(state.currentDate);
       }
       function unprocessDay(){
         if(!canManage()){notice('No tienes permiso para desprocesar el día.',true);return;}
@@ -817,6 +929,7 @@
         state.clients.filter(c=>status(c)==='Activo').forEach(c=>c.consumedDays=Math.max(0,n(c.consumedDays)-1));
         revertInventoryForProcessedDay(state.currentDate);
         d.processed=false;save();renderDispatch();notice('Día desprocesado. El inventario y los días consumidos fueron restaurados.');
+        logAudit('Día desprocesado','day',state.currentDate,state.currentDate,{});
       }
       function toggleDayPause(id){
         if(!canManage()) return;
@@ -934,7 +1047,7 @@
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
       }
-      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();renderSettings();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:state,label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();renderSettings();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
         const ACTION_PERMS={
           "add-client":canManage,"pause-client":canManage,"resume-client":canManage,"edit-client":canManage,"delete-client":canManage,
           "add-driver":canManage,"edit-driver":canManage,"delete-driver":canManage,
@@ -946,12 +1059,39 @@
           "add-inventory-link":canManageInventory,"edit-inventory-link":canManageInventory,"delete-inventory-link":canManageInventory,
           "add-user":isAdmin,"edit-user":isAdmin,"delete-user":isAdmin,
           "process-day":canManage,"unprocess-day":canManage,"toggle-day-pause":canManage,
-          "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin
+          "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin,"refresh-audit":isAdmin
         };
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
         map[action]?.();});
       document.addEventListener('click',e=>{const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
-      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#logout-btn').onclick=()=>{sessionStorage.removeItem(STAFF_SESSION_KEY);location.href='./login.html';};$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);normalize();save();render();notice('Respaldo importado.');}catch{notice('El respaldo no es válido.',true);}};r.readAsText(file);};
+      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#logout-btn').onclick=()=>{sessionStorage.removeItem(STAFF_SESSION_KEY);location.href='./login.html';};$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{
+        const file=e.target.files[0];if(!file)return;
+        const r=new FileReader();
+        r.onload=async()=>{
+          let parsed;
+          try{ parsed=JSON.parse(r.result); }
+          catch{ notice('El archivo no es un JSON válido.',true); e.target.value=''; return; }
+          if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)){ notice('El archivo no tiene el formato esperado.',true); e.target.value=''; return; }
+          // Solo se restauran las claves que el archivo realmente trae — así un
+          // respaldo parcial (p. ej. exportado con alcance "Clientes") no borra
+          // el resto de los datos (drivers, inventario, usuarios, etc.), que
+          // antes se perdían porque el restore reemplazaba TODO el estado.
+          const knownStateKeys=['clients','plans','days','currentDate','drivers','routes','settings','inventory'];
+          const foundStateKeys=knownStateKeys.filter(k=>k in parsed);
+          const hasStaffUsers=Array.isArray(parsed.staffUsers)&&parsed.staffUsers.length>0;
+          if(!foundStateKeys.length&&!hasStaffUsers){ notice('El archivo no contiene datos reconocibles de Catering Control.',true); e.target.value=''; return; }
+          const resumen=[...foundStateKeys,...(hasStaffUsers?['staffUsers']:[])].join(', ');
+          if(!confirm(`Vas a restaurar: ${resumen}.\n\nEsto reemplaza esos datos en este dispositivo y, al guardar, también en Supabase (para los demás dispositivos). ¿Continuar?`)){ e.target.value=''; return; }
+          foundStateKeys.forEach(k=>{ state[k]=parsed[k]; });
+          if(hasStaffUsers) staffUsers=parsed.staffUsers;
+          normalize();
+          const saved=await save();
+          render();
+          notice(saved?'Respaldo restaurado y guardado en Supabase.':'Se restauró localmente, pero no se pudo guardar en Supabase. Intenta sincronizar de nuevo.',!saved);
+          e.target.value='';
+        };
+        r.readAsText(file);
+      };
       document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
       if(!activeUser){ window.location.replace('./login.html'); return; }
