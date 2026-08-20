@@ -1,0 +1,819 @@
+    /* ===== RESET & VARIABLES ===== */
+    :root {
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-2: #f0f4fa;
+      --text: #172033;
+      --muted: #657188;
+      --line: #dbe2ee;
+      --primary: #3867f4;
+      --primary-ink: #fff;
+      --accent: #15a77f;
+      --danger: #e24c4b;
+      --warning: #f4a940;
+      --shadow: 0 14px 36px rgba(21,35,62,.10);
+      --radius: 12px;
+      --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color-scheme: light;
+      /* Bootstrap usa estas variables internamente (tablas, bordes, texto).
+         Las igualamos a nuestras variables de tema para que TODO lo que
+         viene de Bootstrap cambie de color junto con el tema, incluido el
+         modo nocturno; si no, Bootstrap sigue usando su texto oscuro fijo
+         y las letras quedan invisibles sobre fondo oscuro. */
+      --bs-body-color: var(--text);
+      --bs-body-bg: var(--bg);
+      --bs-border-color: var(--line);
+      --bs-secondary-color: var(--muted);
+      --bs-emphasis-color: var(--text);
+      --bs-heading-color: var(--text);
+      --bs-link-color: var(--primary);
+      --bs-tertiary-bg: var(--surface-2);
+    }
+    [data-theme="night"] {
+      --bg: #121824;
+      --surface: #1b2433;
+      --surface-2: #222e40;
+      --text: #edf2fa;
+      --muted: #a9b6c9;
+      --line: #324158;
+      --primary: #7296ff;
+      --primary-ink: #0f1726;
+      --accent: #51cfaa;
+      --danger: #ff7775;
+      --warning: #ffc466;
+      --shadow: 0 14px 36px rgba(0,0,0,.3);
+      color-scheme: dark;
+    }
+    [data-theme="forest"] {
+      --bg: #dcefdc;
+      --surface: #f2faf1;
+      --surface-2: #cde6cd;
+      --text: #163821;
+      --muted: #4f7259;
+      --line: #a9d2ab;
+      color-scheme: light;
+      --primary: #1f7a4d;
+      --primary-ink: #fff;
+      --accent: #9c5f20;
+      --danger: #c34545;
+      --warning: #bd7b1d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.35 var(--font);
+      transition: background .2s, color .2s;
+    }
+    button, input, select, textarea { font: inherit; }
+    button {
+      border: 0;
+      cursor: pointer;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-weight: 650;
+      color: var(--text);
+      background: var(--surface-2);
+      min-height: 36px;
+      transition: background .15s, transform .1s, box-shadow .15s;
+    }
+    button:hover { filter: brightness(.97); transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    button.primary {
+      background: var(--primary);
+      color: var(--primary-ink);
+    }
+    button.danger { background: var(--danger); color: #fff; }
+    button.outline {
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: .52;
+      transform: none !important;
+    }
+    input, select, textarea {
+      width: 100%;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px 10px;
+      outline: none;
+      min-height: 36px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    select option { color: var(--text); background: var(--surface); }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+    }
+    textarea { resize: vertical; min-height: 70px; }
+
+    /* ===== LOGIN ===== */
+    #login {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--bg);
+    }
+    .login-card {
+      width: min(440px, 100%);
+      padding: 28px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .brand {
+      display: flex;
+      gap: 11px;
+      align-items: center;
+    }
+    .brand-mark {
+      background: var(--primary);
+      color: var(--primary-ink);
+      font-size: 22px;
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .brand-mark img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+    h1, h2, h3, p { margin-top: 0; }
+    .muted { color: var(--muted); }
+    .stack { display: grid; gap: 12px; }
+    label { display: grid; gap: 5px; font-weight: 650; font-size: 12px; }
+
+    /* ===== APP LAYOUT ===== */
+    #app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+    }
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 18px 12px;
+      background: var(--surface);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: background .2s;
+    }
+    .aside-title {
+      padding: 6px 10px 16px;
+    }
+    .aside-title small {
+      color: var(--muted);
+      display: block;
+      margin: 4px 0 0 54px;
+    }
+    /* Botón hamburguesa (visible en móvil) */
+    .menu-toggle {
+      display: none;
+      background: transparent;
+      font-size: 24px;
+      padding: 4px 8px;
+      min-height: auto;
+      color: var(--text);
+    }
+    nav {
+      display: grid;
+      gap: 4px;
+    }
+    nav button {
+      display: flex;
+      text-align: left;
+      gap: 11px;
+      align-items: center;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 10px;
+      font-weight: 500;
+    }
+    nav button.active,
+    nav button:hover {
+      color: var(--primary);
+      background: color-mix(in srgb, var(--primary) 10%, transparent);
+    }
+    .nav-icon { width: 21px; text-align: center; font-size: 16px; }
+    .aside-bottom {
+      margin-top: auto;
+      padding: 12px 10px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 8px;
+    }
+    .profile {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .avatar {
+      width: 31px; height: 31px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: var(--primary);
+      color: var(--primary-ink);
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .sync-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .sync-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--muted);
+      flex: 0 0 auto;
+    }
+    .sync-dot.ok { background: var(--accent); }
+    .sync-dot.error { background: var(--danger); }
+    .sync-dot.local { background: var(--warning); }
+    /* En escritorio este wrapper es invisible para el layout (display:contents):
+       sus hijos (botón Salir, grupo de sincronización) siguen ocupando su
+       propia fila en el grid de .aside-bottom, igual que antes. En móvil se
+       convierte en una fila compacta (ver @media). */
+    .aside-bottom-actions { display: contents; }
+    .btn-text { display: inline; }
+
+    main {
+      min-width: 0;
+      padding: 26px;
+      background: var(--bg);
+      transition: background .2s;
+    }
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .page-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .page-head h1 { font-size: 25px; margin: 0 0 5px; }
+    .page-head p { color: var(--muted); margin: 0; }
+    .head-actions, .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .toolbar {
+      margin-bottom: 13px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 10px;
+    }
+    .toolbar .search { width: 230px; }
+    .toolbar .field { width: 175px; }
+    .toolbar .spacer { flex: 1; }
+
+    .card {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: 0 2px 5px rgba(20,35,55,.025);
+    }
+    .card-pad { padding: 17px; }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(135px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .metric {
+      padding: 14px;
+    }
+    .metric strong {
+      font-size: 24px;
+      display: block;
+      margin-top: 4px;
+    }
+    .metric small { color: var(--muted); }
+
+    .sheet {
+      overflow: auto;
+      max-height: calc(100vh - 244px);
+      min-height: 340px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      -webkit-overflow-scrolling: touch;
+    }
+    table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: max-content;
+      min-width: 100%;
+      table-layout: fixed;
+    }
+    .sheet table.table {
+      width: max-content;
+      min-width: 100%;
+      table-layout: fixed;
+      margin-bottom: 0;
+    }
+    .sheet table.table > :not(caption) > * > * { box-shadow: none; color: inherit; }
+    th, td {
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 8px 10px;
+      vertical-align: middle;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--surface-2);
+      text-align: left;
+      font-size: 11px;
+      letter-spacing: .02em;
+      color: var(--muted);
+      text-transform: uppercase;
+      user-select: none;
+    }
+    th[data-sort] { cursor: pointer; }
+    th[data-sort]:hover { color: var(--primary); }
+    th:last-child, td:last-child { border-right: 0; }
+    tr:last-child td { border-bottom: 0; }
+    /* Filas alternadas (zebra) para que sea más fácil seguir cada fila con
+       la vista, como en una hoja de cálculo. Las filas de totales (tfoot)
+       quedan fuera porque ya tienen su propio estilo (.table-totals). */
+    .sheet table.table tbody tr:nth-child(even) td,
+    #dispatch-table tbody tr:nth-child(even) td {
+      background: var(--surface-2);
+    }
+    tbody tr:hover td {
+      background: color-mix(in srgb, var(--primary) 4%, transparent);
+    }
+    tr.dragging td { opacity: .4; }
+
+    .resize-handle {
+      position: absolute;
+      right: -3px;
+      top: 0;
+      width: 7px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 4;
+    }
+    th { position: sticky; }
+    th .resize-handle:hover { background: var(--primary); }
+
+    .editable-cell input,
+    .editable-cell select {
+      padding: 4px 5px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface);
+      min-width: 64px;
+      font-size: 12px;
+    }
+    .editable-cell select { width: 135px; }
+    .handle {
+      color: var(--muted);
+      cursor: grab;
+      font-size: 16px;
+      text-align: center;
+      width: 30px;
+      position: relative;
+    }
+    .row-resize-handle {
+      position: absolute;
+      left: 0; right: 0; bottom: -3px;
+      height: 7px;
+      cursor: row-resize;
+      z-index: 5;
+    }
+    .row-resize-handle:hover { background: var(--primary); opacity: .35; }
+    .id-cell { color: var(--muted); font-size: 12px; }
+    .actions { display: flex; gap: 5px; }
+    .icon-btn {
+      padding: 5px 7px;
+      background: transparent;
+      color: var(--primary);
+      min-height: auto;
+    }
+    .icon-btn.delete { color: var(--danger); }
+    .sort-ind {
+      font-size: 9px;
+      margin-left: 3px;
+      opacity: .7;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .badge.active { color: #087354; background: #dff7ed; }
+    .badge.paused { color: #8d5a02; background: #fff2d9; }
+    .badge.pending { color: #7551ad; background: #eee5ff; }
+    .badge.done { color: #697589; background: #e8edf4; }
+    .badge.off { color: #778293; background: #edf0f5; }
+    .badge.warn { color: #8d5a02; background: #fff2d9; }
+    [data-theme="night"] .badge.active { color: #8cf0ce; background: #164c3b; }
+    [data-theme="night"] .badge.paused { color: #ffd58e; background: #5e4318; }
+    [data-theme="night"] .badge.pending { color: #d5b9ff; background: #423061; }
+    [data-theme="night"] .badge.done { color: #c7d0e0; background: #2b3648; }
+    [data-theme="night"] .badge.off { color: #b9c3d4; background: #26303f; }
+    [data-theme="night"] .badge.warn { color: #ffd58e; background: #5e4318; }
+
+    .route-totals {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 11px;
+      background: var(--surface-2);
+      border-top: 1px solid var(--line);
+      position: sticky;
+      bottom: 0;
+      left: 0;
+      width: max-content;
+      min-width: 100%;
+    }
+    .route-total {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 7px;
+      padding: 5px 8px;
+      font-size: 12px;
+    }
+    .table-totals td {
+      background: var(--surface-2);
+      border-top: 2px solid var(--line);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .table-totals.general td { color: var(--primary); }
+    .table-totals.filtered td { border-top-width: 1px; }
+    .pause-day-btn {
+      display: block;
+      margin-top: 5px;
+      padding: 3px 6px;
+      min-height: auto;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .empty {
+      padding: 42px 20px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 18px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .form-grid .wide { grid-column: 1 / -1; }
+    .items-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 9px;
+      padding: 12px;
+      background: var(--surface-2);
+      border-radius: 99px;
+    }
+    .items-grid label { font-size: 11px; }
+    .items-grid input { padding: 6px; min-height: auto; }
+
+    dialog {
+      border: 0;
+      padding: 0;
+      background: transparent;
+      width: min(760px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      max-height: calc(100dvh - 24px);
+    }
+    dialog::backdrop {
+      background: rgba(11, 21, 38, .48);
+      backdrop-filter: blur(2px);
+    }
+    .app-modal {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      max-height: calc(100vh - 24px);
+      max-height: calc(100dvh - 24px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .app-modal-head {
+      padding: 16px 19px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      flex: 0 0 auto;
+    }
+    .app-modal-head h2 { font-size: 17px; margin: 0; }
+    .app-modal-body {
+      padding: 18px 19px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .app-modal-foot {
+      padding: 14px 19px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex: 0 0 auto;
+      background: var(--surface);
+    }
+    .close {
+      padding: 3px 8px;
+      font-size: 20px;
+      min-height: auto;
+    }
+
+    .notice {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 20;
+      background: #172033;
+      color: #fff;
+      padding: 11px 15px;
+      border-radius: 99px;
+      box-shadow: var(--shadow);
+      transform: translateY(90px);
+      opacity: 0;
+      transition: .25s;
+      max-width: 320px;
+    }
+    .notice.show { transform: none; opacity: 1; }
+    .notice.error { background: var(--danger); }
+
+    .legend {
+      display: flex;
+      gap: 9px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .toggle-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+    .toggle-list label {
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .toggle-list input { width: auto; min-height: auto; }
+    /* Los inputs de tipo archivo no respetan el ancho de su contenedor por
+       defecto: el botón nativo del navegador se dimensiona según su propio
+       texto ("Elegir archivo" + nombre del archivo elegido), lo que en
+       pantallas angostas (celular) provoca que se desborde y desalinee el
+       resto de la tarjeta, especialmente en Configuración. Forzamos a que
+       ocupe como máximo el ancho disponible. */
+    input[type="file"] {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+    }
+
+    .payroll td, .payroll th { text-align: center; padding: 7px; min-width: 52px; }
+    .payroll th:first-child, .payroll td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      min-width: 170px;
+      text-align: left;
+      background: var(--surface);
+    }
+    .payroll th:first-child { z-index: 3; background: var(--surface-2); }
+    .payroll td:last-child, .payroll th:last-child,
+    .payroll td:nth-last-child(2), .payroll th:nth-last-child(2) {
+      font-weight: 800;
+      background: var(--surface-2);
+      min-width: 78px;
+    }
+
+    .info-box {
+      border-left: 3px solid var(--primary);
+      padding: 10px 12px;
+      background: color-mix(in srgb, var(--primary) 8%, transparent);
+      color: var(--muted);
+      border-radius: 0 7px 7px 0;
+      font-size: 12px;
+    }
+    .pause-panel {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--line));
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+    }
+    .pause-panel p { margin: 0; color: var(--muted); font-size: 13px; }
+    .pause-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      font-weight: 700;
+    }
+    .pause-option input { width: auto; min-height: auto; margin-top: 3px; }
+    .rate-row input { padding: 5px 6px; }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 850px) {
+      #app {
+        grid-template-columns: 1fr;
+      }
+      aside {
+        height: auto;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        padding: 8px 12px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        flex-direction: row;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .aside-title {
+        padding: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .aside-title .brand { min-width: 0; overflow: hidden; }
+      .aside-title .brand strong {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+      }
+      .aside-title small { display: none; }
+      .menu-toggle { display: block; flex-shrink: 0; }
+      nav {
+        display: none;
+        width: 100%;
+        flex-direction: column;
+        gap: 2px;
+        padding: 12px 0 4px;
+        border-top: 1px solid var(--line);
+        margin-top: 8px;
+      }
+      nav.open { display: flex; }
+      nav button {
+        padding: 8px 10px;
+        font-size: 14px;
+        white-space: nowrap;
+        justify-content: center;
+      }
+      .aside-bottom {
+        margin: 0;
+        padding: 0;
+        border-top: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        flex: 1 1 auto;
+        flex-wrap: nowrap;
+      }
+      .profile {
+        font-size: 12px;
+        min-width: 0;
+        max-width: 96px;
+        flex: 0 1 auto;
+        overflow: hidden;
+      }
+      .profile > div { min-width: 0; }
+      .profile b, .profile small {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* En móvil el wrapper deja de ser "invisible" y pasa a ser una fila
+         compacta a la derecha del avatar/nombre, así todo cabe en una sola
+         línea en vez de apilarse (Salir, sincronización, etc). */
+      .aside-bottom-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: nowrap;
+        flex-shrink: 0;
+      }
+      .mobile-sync-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: nowrap;
+      }
+      /* Con tan poco espacio, el texto de los botones y del estado de
+         sincronización se oculta y solo quedan los íconos + el punto de
+         color; el título (tooltip) conserva el texto para quien lo necesite. */
+      .btn-text, .sync-text-label { display: none; }
+      .aside-bottom button { padding: 6px 8px; font-size: 14px; min-height: 30px; }
+      .sync-pill { padding: 4px; }
+      .sync-dot { width: 9px; height: 9px; }
+
+      main { padding: 12px; }
+      .summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+      .metric { padding: 10px; }
+      .metric strong { font-size: 18px; }
+      .toolbar {
+        padding: 8px;
+        gap: 8px;
+      }
+      .toolbar .search, .toolbar .field { width: 100%; }
+      .two-col { grid-template-columns: 1fr; }
+      .page-head {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .page-head h1 { font-size: 20px; }
+      .sheet { max-height: calc(100vh - 280px); }
+      .form-grid { grid-template-columns: 1fr; }
+      .items-grid { grid-template-columns: repeat(2, 1fr); border-radius: 10px; }
+      /* Fija la columna de Acciones a la derecha para que los botones de
+         Editar/Pausar/Eliminar siempre sean alcanzables sin desplazar toda
+         la tabla horizontalmente, incluso con el teléfono en vertical. */
+      .sheet table.table th:last-child,
+      .sheet table.table td:last-child,
+      #dispatch-table th:last-child,
+      #dispatch-table td:last-child {
+        position: sticky;
+        right: 0;
+        z-index: 3;
+        background: var(--surface);
+        box-shadow: -6px 0 8px -6px rgba(0,0,0,.18);
+      }
+      .sheet table.table th:last-child { z-index: 4; background: var(--surface-2); }
+      #dispatch-table th:last-child { z-index: 4; background: var(--surface-2); }
+    }
+    @media (max-width: 480px) {
+      .summary-grid { grid-template-columns: 1fr 1fr; }
+      .toolbar .field { width: 100%; }
+      .login-card { padding: 20px; }
+      input[type="file"] { font-size: 11px; }
+      /* La tarjeta "Íconos de artículos" de Configuración usa columnas de
+         mínimo 150px; en teléfonos angostos eso ya no alcanza para el
+         thumbnail + texto + input de archivo, así que pasa a una sola
+         columna para que nada se corte ni se superponga. */
+      #settings-page .toggle-list[style*="minmax"] {
+        grid-template-columns: 1fr !important;
+      }
+    }
+    /* Fila recién creada/editada: se resalta y hace scroll automático hacia
+       ella para que sea visible de inmediato, incluso si queda "debajo" del
+       resto de la tabla. */
+    tr[data-id] { scroll-margin-top: 90px; }
+    @keyframes rowFlash {
+      0% { background: color-mix(in srgb, var(--accent) 38%, transparent); }
+      100% { background: transparent; }
+    }
+    tr.row-flash td { animation: rowFlash 2.1s ease-out; }

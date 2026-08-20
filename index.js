@@ -1,0 +1,960 @@
+
+    (() => {
+      'use strict';
+      /* La configuración de la empresa vive en config.js (un solo archivo
+         para toda la app: marca + credenciales de Supabase). */
+      const APP_CONFIG = window.APP_CONFIG;
+      const KEY = `${APP_CONFIG.storagePrefix}-operaciones-v3`;
+      // Esta base almacena exclusivamente cuentas del equipo. Los clientes,
+      // planes, rutas y operaciones continúan dentro de KEY.
+      const STAFF_USERS_KEY = `${APP_CONFIG.storagePrefix}-staff-users-v1`;
+      const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
+      // Tema personal por navegador (todos los roles lo pueden elegir en
+      // Configuración). Si no hay preferencia personal, se usa el tema por
+      // defecto de la empresa (state.settings.theme, solo lo cambia admin).
+      const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
+      const $ = (s, root=document) => root.querySelector(s);
+      const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+      const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));
+      const n = v => Number(v) || 0;
+      const uid = p => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
+      const today = () => new Date().toISOString().slice(0,10);
+      const items = [['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
+      // Comprime y redimensiona una imagen antes de guardarla como base64,
+      // para que subir logos/íconos/fotos no infle la base de datos ni ralentice la web.
+      function readImageAsDataURL(file, maxDim = 480, quality = 0.82) {
+        return new Promise((resolve, reject) => {
+          if (!file || !file.type?.startsWith('image/')) { reject(new Error('Archivo no válido')); return; }
+          const img = new Image();
+          const reader = new FileReader();
+          reader.onload = () => {
+            img.onload = () => {
+              const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+              const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+              const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+              canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+              resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.onerror = () => reject(new Error('No se pudo leer la imagen'));
+            img.src = reader.result;
+          };
+          reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+          reader.readAsDataURL(file);
+        });
+      }
+      // Aplica el nombre y logo de la empresa (guardados en Configuración) al
+      // encabezado. Si no hay nada configurado, usa el valor por defecto.
+      function applyBranding(){
+        const name = state?.settings?.companyName?.trim() || APP_CONFIG.companyName;
+        const logo = state?.settings?.logoUrl || '';
+        const nameEl = $('#brand-name'); if (nameEl) nameEl.textContent = name;
+        const markEl = $('#brand-mark'); if (markEl) markEl.innerHTML = logo ? `<img loading="lazy" decoding="async" src="${logo}" alt="${esc(name)}">` : '🍽';
+        document.title = `${name} · Operaciones`;
+      }
+      // Nota de seguridad: este usuario admin por defecto ya NO tiene la
+      // contraseña en texto plano aquí. Solo existe como respaldo visual para
+      // esta pantalla de Usuarios antes de que se haya guardado nada en la
+      // base de datos; el login real se valida en el servidor (login_staff en
+      // supabase-security-update.sql), no contra este objeto.
+      const defaultStaffUser = {id:'staff_admin',name:'Administrador',username:'admin',email:'admin@catering.local',role:'admin',routeId:'',driverId:''};
+      function readStaffUsers(){
+        try { const stored=JSON.parse(localStorage.getItem(STAFF_USERS_KEY)); if(Array.isArray(stored) && stored.length) return stored; } catch (_) {}
+        localStorage.setItem(STAFF_USERS_KEY,JSON.stringify([defaultStaffUser]));
+        return [defaultStaffUser];
+      }
+      // El guardado y borrado de usuarios de staff viaja dentro de la tabla
+      // "personal" de Supabase junto con drivers/rutas/configuración, cada
+      // vez que se llama a save().
+      let activeUser = null;
+      let staffUsers = readStaffUsers();
+      /* ==========================================================================
+         ROLES Y PERMISOS
+         - admin:   acceso total (incluye Usuarios, Configuración y tarifas de sueldo).
+         - editor:  igual que admin en el día a día (clientes, drivers, rutas,
+                    planes, día de trabajo, inventario, procesar día) pero SIN
+                    acceso a Usuarios, Configuración ni a editar tarifas de sueldo.
+         - kitchen: solo Día de trabajo (lectura, para imprimir dietas) e Inventario
+                    (control de stock, ingresos, mermas y vínculos de consumo).
+         - driver:  solo su ruta y sus clientes asignados. Puede editar el campo
+                    "Orden" (y Google Maps/teléfonos) de sus propios clientes en el
+                    Día de trabajo, ve solo la fila de su sueldo en Sueldos, y tiene
+                    un botón para descargar su "Orden de ruta" en Excel.
+         Nota de seguridad: esto es un control de UI para que cada persona vea y
+         edite solo lo que le corresponde en el uso normal de la app. No reemplaza
+         seguridad de servidor: la clave publishable de Supabase, tal como está
+         configurada, permite leer y escribir a quien la tenga.
+         ========================================================================== */
+      const ROLE_LABELS = {admin:'Administrador', editor:'Editor', kitchen:'Cocina', driver:'Driver'};
+      const NAV_PERMS = {
+        dispatch: ['admin','editor','kitchen','driver'],
+        clients: ['admin','editor','driver'],
+        drivers: ['admin','editor'],
+        routes: ['admin','editor'],
+        plans: ['admin','editor'],
+        payroll: ['admin','editor','driver'],
+        inventory: ['admin','editor','kitchen'],
+        users: ['admin'],
+        settings: ['admin','editor','kitchen','driver']
+      };
+      const role = () => activeUser?.role || 'driver';
+      const isAdmin = () => role() === 'admin';
+      const isDriverRole = () => role() === 'driver';
+      const isKitchenRole = () => role() === 'kitchen';
+      // Acceso operativo completo (crear/editar/eliminar clientes, drivers, rutas,
+      // planes; procesar el día; editar campos del Día de trabajo).
+      const canManage = () => role() === 'admin' || role() === 'editor';
+      // Puede administrar el inventario de cocina.
+      const canManageInventory = () => ['admin','editor','kitchen'].includes(role());
+      const canAccessPage = page => (NAV_PERMS[page] || []).includes(role());
+      function canEditDispatchField(c, field){
+        if (canManage()) return true;
+        if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && effectiveRouteId(c) === activeUser.routeId;
+        return false;
+      }
+      let ui = { page:'dispatch', search:{}, sort:{}, route:'', month:today().slice(0,7) };
+      let state;
+
+      const seed = () => ({
+        currentDate: today(), days: {},
+        routes: [
+          {id:'r_open', name:'Ruta abierta', description:'Drivers disponibles en empresa sin ruta de trabajo', open:true, order:0},
+          {id:'r_centro', name:'Centro', description:'Centro y zona norte', order:1},
+          {id:'r_sur', name:'Sur', description:'Zona sur', order:2}
+        ],
+        plans: [
+          {id:'p_balance', name:'Balance', type:'General', items:{shots:1,proteins:1,juices:1,breakfast:1,snack1:1,lunch:1,snack2:1,dinner:1}},
+          {id:'p_light', name:'Light', type:'General', items:{shots:0,proteins:1,juices:1,breakfast:1,snack1:0,lunch:1,snack2:0,dinner:1}}
+        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}, whatsappNumber:'', instagramUrl:'', instagramHandle:'', adImageUrl:'', renewalWarningDays:3}
+      });
+      function normalize() {
+        state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
+        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3;
+        if (!state.routes.some(r => r.open)) state.routes.unshift({id:'r_open',name:'Ruta abierta',description:'Drivers disponibles sin ruta de trabajo',open:true,order:0});
+        state.clients.forEach(c => { c.items ||= {}; c.order ??= ''; c.status ||= 'Activo'; c.returnDate ??= c.estimatedReturn || ''; c.paidDays ??= 0; c.consumedDays ??= 0; });
+      }
+      let operationsSaveQueue=Promise.resolve(true);
+      function setDatabaseStatus(kind){
+        const dot=$('#sync-dot'),text=$('#sync-text');
+        if(dot)dot.className='sync-dot '+(kind==='saving'?'local':kind);
+        if(text)text.textContent=kind==='saving'?'Guardando…':kind==='ok'?'Sincronizado':'Error de guardado';
+      }
+      // Guarda en Supabase, repartido en sus bases de datos independientes:
+      // db_clientes (planes y días de trabajo), db_clientes_rows (UNA FILA POR
+      // CLIENTE — solo se suben los clientes que cambiaron desde el último
+      // guardado, no la lista completa), db_personal (drivers, rutas, usuarios
+      // de staff y configuración) y db_inventario (inventario).
+      let lastSavedClients=new Map(); // id -> JSON.stringify(cliente), refleja lo último confirmado en Supabase
+      // db_clientes, db_personal y db_inventario son, cada uno, UN SOLO bloque
+      // (fila 'main') con varias claves adentro (p. ej. clientes: {plans,days,
+      // currentDate}). Antes, save() subía ese bloque completo tal cual estaba
+      // en memoria de ESTE dispositivo en cada guardado — así, si el dispositivo
+      // tenía datos desactualizados (p. ej. no se enteró todavía de que otro
+      // dispositivo procesó un día, o cambió la visibilidad de una columna),
+      // cualquier guardado sin relación (editar un driver, un plan, etc.)
+      // pisaba por completo esos cambios ajenos.
+      // lastSyncedClientes/Personal/Inventario guardan una foto de cada bloque
+      // tal como se confirmó la última vez con el servidor (al cargar o guardar
+      // con éxito). mergeTopLevel() compara esa foto contra lo que hay ahora en
+      // memoria: solo las claves que ESTE dispositivo modificó de verdad se
+      // suben; el resto de las claves se toma de la versión más reciente del
+      // servidor, para no perder cambios hechos desde otro dispositivo.
+      let lastSyncedClientes=null, lastSyncedPersonal=null, lastSyncedInventario=null;
+      function mergeTopLevel(serverPayload, localPayload, lastSynced){
+        const merged={...(serverPayload||{})};
+        Object.keys(localPayload).forEach(key=>{
+          const changed=!lastSynced || JSON.stringify(localPayload[key])!==JSON.stringify(lastSynced[key]);
+          if(changed) merged[key]=localPayload[key];
+        });
+        return merged;
+      }
+      function diffClients(){
+        const changed=[],currentIds=new Set();
+        for(const c of state.clients){
+          currentIds.add(c.id);
+          const json=JSON.stringify(c);
+          if(lastSavedClients.get(c.id)!==json) changed.push(c);
+        }
+        const deletedIds=[...lastSavedClients.keys()].filter(id=>!currentIds.has(id));
+        return {changed,deletedIds};
+      }
+      async function saveClientRows(){
+        const db=window.SupabaseDB,{changed,deletedIds}=diffClients();
+        const [okUpsert,okDelete]=await Promise.all([
+          db.dbUpsertClientRows(changed),
+          db.dbDeleteClientRows(deletedIds)
+        ]);
+        if(okUpsert) changed.forEach(c=>lastSavedClients.set(c.id,JSON.stringify(c)));
+        if(okDelete) deletedIds.forEach(id=>lastSavedClients.delete(id));
+        return okUpsert&&okDelete;
+      }
+      function save(){
+        localStorage.setItem(KEY, JSON.stringify(state));
+        localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
+        setDatabaseStatus('saving');
+        operationsSaveQueue=operationsSaveQueue.then(async()=>{
+          try{
+            const db=window.SupabaseDB;
+            if(!db) throw new Error('Supabase no está disponible');
+            const localClientes={plans:state.plans,days:state.days,currentDate:state.currentDate};
+            const localPersonal={drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers};
+            const localInventario={inventory:state.inventory};
+            const [serverClientes,serverPersonal,serverInventario]=await Promise.all([
+              db.dbGet('clientes'), db.dbGet('personal'), db.dbGet('inventario')
+            ]);
+            const mergedClientes=mergeTopLevel(serverClientes,localClientes,lastSyncedClientes);
+            const mergedPersonal=mergeTopLevel(serverPersonal,localPersonal,lastSyncedPersonal);
+            const mergedInventario=mergeTopLevel(serverInventario,localInventario,lastSyncedInventario);
+            // Refleja lo combinado también en este dispositivo, para que quede
+            // igual de al día que lo que se subió (evita que este mismo
+            // dispositivo, en su próximo guardado, vuelva a pisar algo).
+            state.plans=mergedClientes.plans; state.days=mergedClientes.days; state.currentDate=mergedClientes.currentDate;
+            state.drivers=mergedPersonal.drivers; state.routes=mergedPersonal.routes; state.settings=mergedPersonal.settings; staffUsers=mergedPersonal.staffUsers;
+            state.inventory=mergedInventario.inventory;
+            const [okClientes,okClientRows,okPersonal,okInventario]=await Promise.all([
+              db.dbSet('clientes',mergedClientes),
+              saveClientRows(),
+              db.dbSet('personal',mergedPersonal),
+              db.dbSet('inventario',mergedInventario)
+            ]);
+            const ok=okClientes&&okClientRows&&okPersonal&&okInventario;
+            if(ok){
+              lastSyncedClientes=JSON.parse(JSON.stringify(mergedClientes));
+              lastSyncedPersonal=JSON.parse(JSON.stringify(mergedPersonal));
+              lastSyncedInventario=JSON.parse(JSON.stringify(mergedInventario));
+              localStorage.setItem(KEY, JSON.stringify(state));
+              localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
+            }
+            setDatabaseStatus(ok?'ok':'error');
+            if(!ok) notice('Los cambios quedaron locales, pero no se guardaron completamente en Supabase.',true);
+            return ok;
+          }catch(_){setDatabaseStatus('error');notice('Los cambios quedaron locales, pero no se guardaron en la base de datos.',true);return false;}
+        });
+        return operationsSaveQueue;
+      }
+      function load(){ try { state=JSON.parse(localStorage.getItem(KEY)); } catch { state=null; } normalize(); localStorage.setItem(KEY,JSON.stringify(state)); }
+      async function loadFromServer(){
+        try {
+          const db=window.SupabaseDB;
+          if(!db) throw new Error('Supabase no está disponible');
+          const [clientesData,clientRows,personalData,inventarioData]=await Promise.all([
+            db.dbGet('clientes'), db.dbGetClientRows(), db.dbGet('personal'), db.dbGet('inventario')
+          ]);
+          let gotAny=false;
+          if (clientesData) {
+            gotAny=true;
+            state.plans = clientesData.plans ?? state.plans;
+            state.days = clientesData.days ?? state.days;
+            state.currentDate = clientesData.currentDate ?? state.currentDate;
+            lastSyncedClientes = JSON.parse(JSON.stringify({plans:state.plans,days:state.days,currentDate:state.currentDate}));
+          }
+          if (clientRows) {
+            gotAny=true;
+            state.clients = clientRows;
+            lastSavedClients = new Map(clientRows.map(c=>[c.id, JSON.stringify(c)]));
+          }
+          if (personalData) {
+            gotAny=true;
+            state.drivers = personalData.drivers ?? state.drivers;
+            state.routes = personalData.routes ?? state.routes;
+            state.settings = personalData.settings ?? state.settings;
+            if (Array.isArray(personalData.staffUsers) && personalData.staffUsers.length) {
+              staffUsers = personalData.staffUsers;
+              localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
+            }
+            lastSyncedPersonal = JSON.parse(JSON.stringify({drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers}));
+          }
+          if (inventarioData) {
+            gotAny=true;
+            state.inventory = inventarioData.inventory ?? state.inventory;
+            lastSyncedInventario = JSON.parse(JSON.stringify({inventory:state.inventory}));
+          }
+          if (gotAny) localStorage.setItem(KEY, JSON.stringify(state));
+          setDatabaseStatus('ok');
+          return gotAny;
+        } catch (_) { setDatabaseStatus('error'); return false; }
+      }
+      function day(date=state.currentDate){ return state.days[date] ||= {laborable:true, processed:false, rates:{}}; }
+      function route(id){ return state.routes.find(x=>x.id===id); }
+      function plan(id){ return state.plans.find(x=>x.id===id); }
+      function driver(id){ return state.drivers.find(x=>x.id===id); }
+      function routeName(id){ return route(id)?.name || 'Sin ruta'; }
+      function planName(id){ return plan(id)?.name || 'Sin plan'; }
+      function driverName(id){ const d=driver(id); return d ? `${d.firstName} ${d.lastName}` : 'Sin asignar'; }
+      function driverForRoute(routeId){ return state.drivers.find(d=>d.routeId===routeId); }
+      function syncClientRouteAndDriver(data){
+        const selectedDriver=driver(data.driverId);
+        if(selectedDriver?.routeId) data.routeId=selectedDriver.routeId;
+        else if(data.routeId) data.driverId=driverForRoute(data.routeId)?.id || '';
+        return data;
+      }
+      // --- Horario por días de la semana ---------------------------------
+      // Un cliente puede tener franjas (c.schedule) que definen, para ciertos
+      // días de la semana (0=Domingo…6=Sábado, según Date.getDay()), una ruta,
+      // driver y/o dirección distintos a los valores base del cliente. Si no
+      // hay franjas o ninguna coincide con el día consultado, se usan los
+      // campos base (routeId/driverId/address1) tal como siempre. El cambio
+      // entre franjas es automático: no requiere ninguna acción manual.
+      const WEEKDAYS=[{v:1,l:'Lun'},{v:2,l:'Mar'},{v:3,l:'Mié'},{v:4,l:'Jue'},{v:5,l:'Vie'},{v:6,l:'Sáb'},{v:0,l:'Dom'}];
+      function weekdayOf(date=state.currentDate){ return new Date(date+'T00:00:00').getDay(); }
+      function scheduleEntryFor(c,date=state.currentDate){
+        const wd=weekdayOf(date);
+        return (c.schedule||[]).find(e=>(e.days||[]).includes(wd)) || null;
+      }
+      function effectiveRouteId(c,date=state.currentDate){ return scheduleEntryFor(c,date)?.routeId || c.routeId; }
+      function effectiveDriverId(c,date=state.currentDate){ return scheduleEntryFor(c,date)?.driverId || c.driverId; }
+      function effectiveAddress(c,date=state.currentDate){
+        const e=scheduleEntryFor(c,date), key=(e?.address==='address2')?'address2':'address1';
+        return c[key]||c.address1||'';
+      }
+      function scheduleSummary(c){
+        if(!c.schedule?.length) return '';
+        return c.schedule.map(e=>{
+          const days=WEEKDAYS.filter(w=>(e.days||[]).includes(w.v)).map(w=>w.l).join('/')||'—';
+          const r=e.routeId?routeName(e.routeId):'ruta base';
+          return `${days}: ${esc(r)}`;
+        }).join(' · ');
+      }
+      function scheduleRowHtml(e={},idx){
+        const days=e.days||[];
+        return `<div class="schedule-row" data-idx="${idx}" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${WEEKDAYS.map(w=>`<label style="display:flex;flex-direction:column;align-items:center;font-size:11px;gap:2px"><span>${w.l}</span><input type="checkbox" class="sched-day" value="${w.v}" ${days.includes(w.v)?'checked':''}></label>`).join('')}</div>
+          <select class="sched-route">${options(state.routes,e.routeId,'Ruta base')}</select>
+          <select class="sched-driver">${options(state.drivers,e.driverId,'Driver base',d=>`${d.firstName} ${d.lastName}`)}</select>
+          <select class="sched-address"><option value="address1" ${(!e.address||e.address==='address1')?'selected':''}>Dirección 1</option><option value="address2" ${e.address==='address2'?'selected':''}>Dirección 2</option></select>
+          <button type="button" class="icon-btn delete sched-remove" title="Quitar franja">×</button>
+        </div>`;
+      }
+      function initScheduleEditor(form, rows){
+        const container=form.querySelector('#client-schedule-rows'), addBtn=form.querySelector('#add-schedule-row');
+        if(!container||!addBtn) return;
+        let list=(rows||[]).map(r=>({...r}));
+        const bindRemove=()=>container.querySelectorAll('.schedule-row').forEach(row=>{
+          row.querySelector('.sched-remove').onclick=()=>{ list.splice(Number(row.dataset.idx),1); render(); };
+        });
+        function render(){
+          container.innerHTML=list.length?list.map((e,i)=>scheduleRowHtml(e,i)).join(''):'<p class="muted" style="margin:0 0 8px">Sin franjas: todos los días usa la ruta y dirección base del cliente.</p>';
+          bindRemove();
+        }
+        render();
+        addBtn.onclick=()=>{ list.push({days:[],routeId:'',driverId:'',address:'address1'}); render(); };
+        form._getSchedule=()=>[...container.querySelectorAll('.schedule-row')].map(row=>({
+          days:[...row.querySelectorAll('.sched-day:checked')].map(cb=>Number(cb.value)),
+          routeId:row.querySelector('.sched-route').value,
+          driverId:row.querySelector('.sched-driver').value,
+          address:row.querySelector('.sched-address').value
+        })).filter(e=>e.days.length>0);
+      }
+      function readScheduleRows(f){ return f._getSchedule ? f._getSchedule() : []; }
+      function status(c,date=state.currentDate){
+        if (!day(date).laborable) return 'No laborable';
+        if (c.returnDate && date>=c.returnDate) return 'Activo';
+        // Pausas solicitadas desde el portal del cliente. Una fecha de retorno
+        // hace que el estado vuelva a Activo automáticamente ese día.
+        if (c.pauseStart && date >= c.pauseStart && (!c.returnDate || date < c.returnDate)) return 'Pausado';
+        if (c.pauseDates?.includes(date)) return 'Pausado';
+        if (c.startDate && c.startDate > date) return 'Programado';
+        if (n(c.paidDays) && n(c.consumedDays)>=n(c.paidDays)) return 'Retorno pendiente';
+        return c.status || 'Activo';
+      }
+      function badge(s){ const cl=({Activo:'active',Pausado:'paused','Retorno pendiente':'pending',Programado:'pending','No laborable':'off'})[s] || 'done'; return `<span class="badge ${cl}">${esc(s)}</span>`; }
+      function syncReturnDates(date=state.currentDate){
+        let changed=false;
+        state.clients.forEach(c=>{
+          if(c.returnDate && date>=c.returnDate && c.status!=='Activo'){
+            c.status='Activo'; c.pauseStart=''; changed=true;
+          }
+        });
+        if(changed) save();
+      }
+      function notice(text, error=false){ const el=$('#notice'); el.textContent=text; el.className='notice show'+(error?' error':''); clearTimeout(notice.t); notice.t=setTimeout(()=>el.className='notice',2600); }
+      function pageHead(title, subtitle, actions=''){ return `<div class="page-head"><div><h1>${title}</h1><p>${subtitle}</p></div><div class="head-actions">${actions}</div></div>`; }
+      function options(list,current,placeholder='Seleccionar…',label=x=>x.name){ return `<option value="">${placeholder}</option>`+list.map(x=>`<option value="${esc(x.id)}" ${x.id===current?'selected':''}>${esc(label(x))}</option>`).join(''); }
+      function itemFields(values={}){ return `<div class="items-grid">${items.map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<label>${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:16px;height:16px;object-fit:cover;border-radius:4px;vertical-align:-3px;margin-right:4px">`:''}${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`;}).join('')}</div>`; }
+      function formItems(f){ return Object.fromEntries(items.map(([key])=>[key,n(f.elements[key]?.value)])); }
+      function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; return [...list].sort((a,b)=>String(value(a,key)).localeCompare(String(value(b,key)),undefined,{numeric:true})*s.dir); }
+      function value(x,key){ if(key==='route') return routeName(x.routeId); if(key==='driver') return driverName(x.driverId); if(key==='plan') return planName(x.planId); return x[key] ?? ''; }
+      function th(label,key,group){ const s=ui.sort[group]; const drag=group==='dispatch'?' draggable="true" title="Arrastra para reordenar la columna"':''; return `<th data-sort="${key}" data-group="${group}"${drag}>${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
+      function defaultColWidth(label){ return Math.min(240, Math.max(70, String(label).length*8+56)); }
+      function colgroupHtml(cols, group){
+        const saved = state.settings.columnWidths?.[group] || {};
+        return `<colgroup>${cols.map(([label,key])=>`<col data-col-key="${esc(key)}" style="width:${n(saved[key])||defaultColWidth(label)}px">`).join('')}</colgroup>`;
+      }
+      function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${colgroupHtml(headers,group)}<thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
+      function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); }
+      function render(){ document.documentElement.dataset.theme=localStorage.getItem(UI_THEME_KEY)||state.settings.theme; $('#current-name').textContent=activeUser.name || ROLE_LABELS[role()] || 'Usuario'; $('#current-role').textContent=ROLE_LABELS[role()] || 'Usuario'; $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-roles]').forEach(x=>x.hidden=!(x.dataset.roles||'').split(',').includes(role())); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); }
+      function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,settings:renderSettings}[name]; if(fn) { fn(); enableTableTools(); } }
+      function enableTableTools(){
+        // Redimensionado de columnas al estilo Excel: se arrastra el borde
+        // de la columna y se ajusta el elemento <col> correspondiente, lo
+        // que cambia el ancho de TODA la columna (encabezado + celdas) a la
+        // vez. El ancho mínimo es muy bajo a propósito: así se puede achicar
+        // una columna incluso más que la palabra que contiene, y el texto se
+        // recorta con "…" en vez de forzar que la columna crezca (ver CSS
+        // "text-overflow: ellipsis" en th/td). El ancho final se guarda en
+        // state.settings.columnWidths para que sobreviva a los re-render.
+        $$('.sheet table').forEach(tbl=>{
+          const cols=$$('colgroup col',tbl);
+          $$('.resize-handle',tbl).forEach((handle,index)=>{
+            const headCell=handle.parentElement, col=cols[index];
+            if(!col) return;
+            handle.onmousedown=e=>{
+              e.preventDefault(); e.stopPropagation();
+              const initial=col.getBoundingClientRect().width, start=e.clientX;
+              const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.clientX-start)); col.style.width=width+'px'; };
+              const up=()=>{
+                document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+                const group=headCell.dataset.group, key=headCell.dataset.sort;
+                if(group && key){
+                  state.settings.columnWidths[group] ||= {};
+                  state.settings.columnWidths[group][key]=parseInt(col.style.width,10);
+                  save();
+                }
+              };
+              document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+            };
+            // Soporte táctil (tablet/celular): mismo comportamiento con touch events.
+            handle.ontouchstart=e=>{
+              e.stopPropagation();
+              const touch=e.touches[0], initial=col.getBoundingClientRect().width, start=touch.clientX;
+              const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.touches[0].clientX-start)); col.style.width=width+'px'; };
+              const up=()=>{
+                document.removeEventListener('touchmove',move); document.removeEventListener('touchend',up);
+                const group=headCell.dataset.group, key=headCell.dataset.sort;
+                if(group && key){
+                  state.settings.columnWidths[group] ||= {};
+                  state.settings.columnWidths[group][key]=parseInt(col.style.width,10);
+                  save();
+                }
+              };
+              document.addEventListener('touchmove',move,{passive:true}); document.addEventListener('touchend',up);
+            };
+          });
+        });
+        // Reordenar columnas del Día de trabajo mediante arrastre. El orden se
+        // guarda para que se conserve después de recargar la página.
+        const dispatchTable=$('#dispatch-page .sheet table');
+        if(dispatchTable){
+          let sourceKey='';
+          $$('thead th[data-group="dispatch"]',dispatchTable).forEach(head=>{
+            head.ondragstart=e=>{ sourceKey=head.dataset.sort; e.dataTransfer.effectAllowed='move'; };
+            head.ondragover=e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; };
+            head.ondrop=e=>{
+              e.preventDefault(); const targetKey=head.dataset.sort;
+              if(!sourceKey || sourceKey===targetKey) return;
+              const all=['order','name','route','driver','plan',...items.map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'];
+              const order=state.settings.dispatchColumnOrder.length?[...state.settings.dispatchColumnOrder]:all;
+              all.forEach(key=>{if(!order.includes(key))order.push(key);});
+              const from=order.indexOf(sourceKey), to=order.indexOf(targetKey);
+              order.splice(to,0,order.splice(from,1)[0]);
+              state.settings.dispatchColumnOrder=order; save(); renderDispatch();
+            };
+          });
+        }
+      }
+
+      function renderDispatch(){
+        syncReturnDates(state.currentDate);
+        const date=state.currentDate, d=day(date), q=(ui.search.dispatch||'').toLowerCase(), rf=isDriverRole()?activeUser.routeId:ui.route, sf=ui.dispatchStatus||'all';
+        const matchesBase=c=>(!rf || effectiveRouteId(c,date)===rf) && (!q || [c.name,c.carnet,c.address1,c.phone1,c.phone2,c.specialDiet,c.notes].join(' ').toLowerCase().includes(q));
+        const matchesStatus=c=>sf==='all' || status(c,date)===sf;
+        const routeScoped=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c,date)===activeUser.routeId):state.clients;
+        const activeOrders=routeScoped.filter(c=>status(c,date)==='Activo');
+        let list=routeScoped.filter(c=>matchesBase(c) && matchesStatus(c));
+        list=sort(list,'order','dispatch');
+        const editableField=(c,field,val,type='text')=>`<input class="day-edit" data-id="${c.id}" data-field="${field}" type="${type}" value="${esc(val)}" ${canEditDispatchField(c,field)?'':'disabled'}>`;
+        const itemValue=(c,key)=>{
+          const ownItems=c.items && Object.keys(c.items).length ? c.items : plan(c.planId)?.items || {};
+          return n(ownItems[key]);
+        };
+        const statusCell=c=>{
+          const current=status(c,date), pausedToday=c.pauseDates?.includes(date);
+          const canToggle=current==='Activo' || pausedToday;
+          return `${badge(current)}${canManage()&&canToggle?`<button class="outline pause-day-btn" data-action="toggle-day-pause" data-id="${c.id}">${pausedToday?'Reanudar hoy':'Pausar hoy'}</button>`:''}`;
+        };
+        const definitions=[
+          {key:'order',label:'Orden',cell:c=>editableField(c,'order',c.order,'number')},
+          {key:'name',label:'Cliente',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">${esc(c.carnet||'Sin carnet')}</small>`},
+          {key:'route',label:'Ruta',cell:c=>esc(routeName(effectiveRouteId(c,date)))},
+          {key:'driver',label:'Driver',cell:c=>esc(driverName(effectiveDriverId(c,date)))},
+          {key:'plan',label:'Plan',cell:c=>{const p=plan(c.planId);return `${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:18px;height:18px;object-fit:cover;border-radius:4px;vertical-align:-4px;margin-right:4px">`:''}${esc(planName(c.planId))}`;}},
+          ...items.map(([key,label])=>({key,label,cell:c=>itemValue(c,key)})),
+          {key:'address1',label:'Dirección',cell:c=>{const addr=effectiveAddress(c,date),other=addr===c.address2?c.address1:c.address2;return `${esc(addr||'—')}<br><small>${esc(other||'')}</small>`;}},
+          {key:'maps',label:'Google Maps',cell:c=>`${c.maps?`<a href="${esc(c.maps)}" target="_blank" rel="noopener">Abrir mapa</a>`:'—'}<br>${editableField(c,'maps',c.maps||'')}`},
+          {key:'phone1',label:'Teléfono 1',cell:c=>editableField(c,'phone1',c.phone1||'')},
+          {key:'phone2',label:'Teléfono 2',cell:c=>editableField(c,'phone2',c.phone2||'')},
+          {key:'notes',label:'Observaciones',cell:c=>esc(c.notes||'—')},
+          {key:'specialDiet',label:'Dieta especial',cell:c=>esc(c.specialDiet||'—')},
+          {key:'career',label:'Carreras / entrega',cell:c=>n(c.career||1)},
+          {key:'bags',label:'Bolsas',cell:c=>n(c.bags)},
+          {key:'status',label:'Estado',cell:statusCell},
+          {key:'remaining',label:'Servicios restantes',cell:c=>n(c.paidDays)?Math.max(0,n(c.paidDays)-n(c.consumedDays)):'—'},
+          {key:'returnDate',label:'Fecha de retorno',cell:c=>canManage()?editableField(c,'returnDate',c.returnDate||'','date'):esc(c.returnDate||'—')},
+          {key:'id',label:'Acciones',cell:c=>canManage()?`<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button>`:'—'}
+        ];
+        const allKeys=definitions.map(x=>x.key), wanted=state.settings.dispatchColumnOrder;
+        const arranged=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
+        const columns=arranged.filter(x=>!state.settings.hiddenColumns.includes(x.key));
+        const numericKeys=new Set([...items.map(([key])=>key),'career','bags','remaining']);
+        const totalRow=(label,orders,variant)=>{
+          let labelled=false;
+          return `<tr class="table-totals ${variant}">${columns.map(col=>{
+            if(numericKeys.has(col.key)) return `<td>${orders.reduce((sum,c)=>sum+(col.key==='career'?n(c.career||1):col.key==='bags'?n(c.bags):col.key==='remaining'?(n(c.paidDays)?Math.max(0,n(c.paidDays)-n(c.consumedDays)):0):itemValue(c,col.key)),0)}</td>`;
+            if(!labelled){ labelled=true; return `<td>${label}</td>`; }
+            return '<td>—</td>';
+          }).join('')}</tr>`;
+        };
+        const rows=c=>`<tr data-id="${c.id}">${columns.map(col=>`<td>${col.cell(c)}</td>`).join('')}</tr>`;
+        const filteredActive=list.filter(c=>status(c,date)==='Activo');
+        const totals=`<tfoot>${totalRow(`Totales filtrados (${filteredActive.length} pedidos activos)`,filteredActive,'filtered')}${totalRow(`Totales generales (${activeOrders.length} pedidos activos)`,activeOrders,'general')}</tfoot>`;
+        const printLabel=isDriverRole()?'Imprimir orden de ruta':'Imprimir dietas especiales';
+        const routeField=isDriverRole()?`<label class="field">Ruta<input value="${esc(routeName(activeUser.routeId))}" disabled></label>`:`<label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label>`;
+        $('#dispatch-page').innerHTML=pageHead('Día de trabajo','La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`<button class="outline" data-action="export-diets">${printLabel}</button>${canManage()?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}`)+
+          `<div class="toolbar"><label class="field">Día de trabajo<input type="date" id="work-date" value="${date}" ${isDriverRole()?'disabled':''}></label>${routeField}<label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${canManage()?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
+          `<div class="sheet"><table id="dispatch-table">${colgroupHtml(columns.map(c=>[c.label,c.key]),'dispatch')}<thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
+        $('#work-date').onchange=e=>{ if(!canManage())return; state.currentDate=e.target.value; day(e.target.value); save(); renderDispatch(); };
+        $('#dispatch-route').onchange=e=>{ui.route=e.target.value;renderDispatch();}; $('#dispatch-status').onchange=e=>{ui.dispatchStatus=e.target.value;renderDispatch();}; $('#work-status').onchange=e=>{if(!canManage())return;day().laborable=e.target.value==='work';save();renderDispatch();}; bindSearch('dispatch-search','dispatch',renderDispatch);
+        $$('.day-edit').forEach(i=>i.onchange=()=>{const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return; if(!canEditDispatchField(c,i.dataset.field))return; c[i.dataset.field]=i.value; save(); if(i.dataset.field==='returnDate'){syncReturnDates(state.currentDate);renderDispatch();notice('Fecha de retorno actualizada. El pedido volverá a Activo en esa fecha.');}});
+        enableTableTools();
+      }
+      function bindSearch(id,key,fn){
+        const el=$('#'+id);
+        if(!el) return;
+        el.oninput=e=>{
+          const cursor=e.target.selectionStart;
+          ui.search[key]=e.target.value;
+          fn();
+          // La tabla se redibuja al filtrar; se restaura el foco para poder escribir
+          // una frase completa y no quedarse bloqueado después de la primera letra.
+          const fresh=$('#'+id);
+          fresh?.focus();
+          fresh?.setSelectionRange(cursor,cursor);
+        };
+      }
+      function renderClients(){
+        if(!canAccessPage('clients')) return;
+        const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c)===activeUser.routeId):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
+        const rows=c=>{const p=plan(c.planId);return `<tr data-id="${c.id}"><td>${n(c.order)||''}</td><td><b>${esc(c.name)}</b><br><small class="muted">CI: ${esc(c.carnet||'—')}</small></td><td>${esc(routeName(c.routeId))}${c.schedule?.length?` <span class="badge off" title="${esc(scheduleSummary(c))}">Variable</span>`:''}</td><td>${esc(c.address1||'—')}</td><td>${esc(c.phone1||'—')}</td><td>${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:20px;height:20px;object-fit:cover;border-radius:5px;vertical-align:-5px;margin-right:4px">`:''}${esc(planName(c.planId))}</td><td>${esc(driverName(c.driverId))}</td><td>${badge(status(c))}</td><td>${n(c.paidDays)}</td><td>${n(c.consumedDays)}</td><td>${esc(c.specialDiet||'—')}</td><td>${canManage()?`${status(c)==='Pausado'?`<button class="icon-btn" data-action="resume-client" data-id="${c.id}">Activar</button>`:`<button class="icon-btn" data-action="pause-client" data-id="${c.id}">Pausar</button>`}<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button><button class="icon-btn delete" data-action="delete-client" data-id="${c.id}">×</button>`:'—'}</td></tr>`;};
+        $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canManage()?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+table(list,[['Orden','order'],['Cliente / carnet','name'],['Ruta','route'],['Dirección','address1'],['Teléfono','phone1'],['Plan','plan'],['Driver','driver'],['Estado','status'],['Días pagados','paidDays'],['Consumidos','consumedDays'],['Dieta especial','specialDiet'],['Acciones','id']],rows,'clients'); bindSearch('clients-search','clients',renderClients);
+      }
+      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno<input name="returnDate" type="date" value="${esc(c.returnDate)}"></label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide"><label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button></div></div>`; }
+      function scrollToRow(id){
+        requestAnimationFrame(()=>{
+          const row=document.querySelector(`tr[data-id="${id}"]`);
+          if(!row)return;
+          row.scrollIntoView({behavior:'smooth',block:'center',inline:'center'});
+          row.classList.add('row-flash');
+          setTimeout(()=>row.classList.remove('row-flash'),2100);
+        });
+      }
+      function openClient(id){
+        let c=id?state.clients.find(x=>x.id===id):null;
+        showModal(c?'Editar cliente':'Añadir cliente',clientForm(c||{}),async f=>{
+          const data=syncClientRouteAndDriver(Object.fromEntries(new FormData(f))); data.items=formItems(f);
+          data.schedule=readScheduleRows(f);
+          if(c)Object.assign(c,data);else{c={id:uid('c'),...data};state.clients.push(c);}
+          const saved=await save();
+          if(!saved)return false;
+          renderClients();notice('Cliente guardado en la base de datos.');
+          scrollToRow(c.id);
+        });
+        const form=$('#modal-form'), routeField=form?.elements.routeId, driverField=form?.elements.driverId;
+        if(routeField) routeField.onchange=()=>{ driverField.value=driverForRoute(routeField.value)?.id || ''; };
+        if(driverField) driverField.onchange=()=>{ const d=driver(driverField.value); if(d?.routeId) routeField.value=d.routeId; };
+        initScheduleEditor(form, c?.schedule||[]);
+      }
+      function openClientPause(id){
+        const c=state.clients.find(x=>x.id===id);if(!c)return;
+        const html=`<div class="form-grid"><div class="wide pause-panel"><label class="pause-option"><input type="checkbox" name="pauseService" checked><span>Pausar servicio desde el día de trabajo actual</span></label><p>La pausa puede quedar abierta. Si deseas programar el regreso, activa la fecha de retorno.</p><label class="pause-option"><input type="checkbox" id="pause-with-return"><span>Agregar fecha de retorno (opcional)</span></label><label id="pause-return-wrap" hidden>Fecha de retorno<input type="date" name="returnDate" min="${state.currentDate}" value=""></label></div></div>`;
+        showModal(`Pausar a ${c.name}`,html,async f=>{
+          if(!f.elements.pauseService.checked)return false;
+          const returnDate=f.elements.returnDate.value;
+          if(returnDate&&returnDate<=state.currentDate){notice('La fecha de retorno debe ser posterior al inicio de la pausa.',true);return false;}
+          c.status='Pausado';c.pauseStart=state.currentDate;c.returnDate=returnDate;c.pauseDates=[];
+          const saved=await save();if(!saved)return false;
+          renderClients();notice(returnDate?'Pausa guardada con fecha de retorno.':'Pausa abierta guardada sin fecha de retorno.');
+          scrollToRow(c.id);
+        });
+        const toggle=$('#pause-with-return'),wrap=$('#pause-return-wrap'),input=$('#modal-form').elements.returnDate;
+        toggle.onchange=()=>{wrap.hidden=!toggle.checked;input.disabled=!toggle.checked;if(!toggle.checked)input.value='';};
+        input.disabled=true;
+      }
+      async function resumeClient(id){
+        const c=state.clients.find(x=>x.id===id);if(!c)return;
+        c.status='Activo';c.pauseStart='';c.returnDate='';c.pauseDates=[];
+        const saved=await save();
+        if(!saved){notice('No se pudo guardar la reactivación en la base de datos. Intenta nuevamente.',true);return;}
+        renderClients();notice(`Servicio de ${c.name} activado.`);scrollToRow(c.id);
+      }
+
+      function renderDrivers(){ if(!canAccessPage('drivers')) return; const q=(ui.search.drivers||'').toLowerCase();let list=state.drivers.filter(d=>!q||[d.firstName,d.lastName,d.carnet,d.phone,d.address,routeName(d.routeId)].join(' ').toLowerCase().includes(q));list=sort(list,'order','drivers');const rows=d=>`<tr><td>${n(d.order)||''}</td><td style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><b>${esc(d.firstName)} ${esc(d.lastName)}</b></td><td>${esc(d.carnet||'—')}</td><td>${esc(d.phone||'—')}</td><td>${esc(d.address||'—')}</td><td>${esc(routeName(d.routeId))}</td><td>${canManage()?`<button class="icon-btn" data-action="edit-driver" data-id="${d.id}">Editar</button><button class="icon-btn delete" data-action="delete-driver" data-id="${d.id}">×</button>`:'—'}</td></tr>`;$('#drivers-page').innerHTML=pageHead('Drivers','Personal de entrega registrado.',canManage()?'<button class="primary" data-action="add-driver">+ Añadir driver</button>':'')+`<div class="toolbar"><input id="drivers-search" class="search" placeholder="Buscar driver…" value="${esc(ui.search.drivers||'')}"></div>`+table(list,[['Orden','order'],['Nombre','firstName'],['Carnet','carnet'],['Teléfono','phone'],['Dirección domicilio','address'],['Ruta','route'],['Acciones','id']],rows,'drivers');bindSearch('drivers-search','drivers',renderDrivers);}
+      function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label>Orden<input name="order" type="number" min="0" value="${esc(d.order)}"></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="outline" onclick="removeDriverPhoto('${d.id}')">Quitar foto</button>`:''}</div></label></div>`;}
+      async function removeDriverPhoto(id){const d=driver(id);if(!d)return;d.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openDriver(id);}
+      function openDriver(id){const d=id?driver(id):null;showModal(d?'Editar driver':'Añadir driver',driverForm(d||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}if(d){Object.assign(d,data);state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);}else state.drivers.push({id:uid('d'),...data});const saved=await save();if(!saved)return false;renderDrivers();notice('Driver guardado.');});}
+      const ROUTE_TYPES={short:['Corta','done'],long:['Larga','pending'],verylong:['Muy larga','warn']};
+      function routeTypeBadge(r){const [label,cl]=ROUTE_TYPES[r.type]||ROUTE_TYPES.short;return `<span class="badge ${cl}">${label}</span>`;}
+      function renderRoutes(){ if(!canAccessPage('routes')) return; const q=(ui.search.routes||'').toLowerCase();let list=state.routes.filter(r=>!q||[r.name,r.description].join(' ').toLowerCase().includes(q));list=sort(list,'order','routes');const rows=r=>`<tr><td>${n(r.order)||''}</td><td><b>${esc(r.name)}</b>${r.open?' <span class="badge off">Abierta</span>':''}</td><td>${routeTypeBadge(r)}</td><td>${esc(r.description||'—')}</td><td>${state.clients.filter(c=>c.routeId===r.id).length}</td><td>${state.drivers.filter(d=>d.routeId===r.id).length}</td><td>${canManage()&&!r.open?`<button class="icon-btn" data-action="edit-route" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-route" data-id="${r.id}">×</button>`:'—'}</td></tr>`;$('#routes-page').innerHTML=pageHead('Rutas','Incluye una ruta abierta para drivers disponibles sin ruta de trabajo.',canManage()?'<button class="primary" data-action="add-route">+ Crear ruta</button>':'')+`<div class="toolbar"><input id="routes-search" class="search" placeholder="Buscar ruta…" value="${esc(ui.search.routes||'')}"></div>`+table(list,[['Orden','order'],['Ruta','name'],['Tipo','type'],['Descripción','description'],['Clientes','clients'],['Drivers','drivers'],['Acciones','id']],rows,'routes');bindSearch('routes-search','routes',renderRoutes);}
+      function routeForm(r={}){return `<div class="form-grid"><label>Nombre de ruta *<input name="name" required value="${esc(r.name)}"></label><label>Orden<input type="number" min="0" name="order" value="${esc(r.order)}"></label><label>Tipo de ruta<select name="type"><option value="short" ${(r.type||'short')==='short'?'selected':''}>Corta</option><option value="long" ${r.type==='long'?'selected':''}>Larga</option><option value="verylong" ${r.type==='verylong'?'selected':''}>Muy larga</option></select></label><label class="wide">Descripción / zona<input name="description" value="${esc(r.description)}"></label></div>`;}
+      function openRoute(id){const r=id?route(id):null;showModal(r?'Editar ruta':'Crear ruta',routeForm(r||{}),f=>{const data=Object.fromEntries(new FormData(f));if(r)Object.assign(r,data);else state.routes.push({id:uid('r'),...data});save();renderRoutes();notice('Ruta guardada.');});}
+
+      function renderPlans(){ if(!canAccessPage('plans')) return; const rows=p=>`<tr><td style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;border-radius:8px;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><b>${esc(p.name)}</b></td><td>${esc(p.type||'General')}</td><td>${items.map(([k,l])=>`${l}: ${n(p.items?.[k])}`).join('<br>')}</td><td>${canManage()?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}</td></tr>`;$('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan.',canManage()?'<button class="primary" data-action="add-plan">+ Crear plan</button>':'')+table(state.plans,[['Plan','name'],['Tipo','type'],['Artículos incluidos','items'],['Acciones','id']],rows,'plans');}
+      function planForm(p={}){return `<div class="form-grid"><label>Nombre *<input name="name" required value="${esc(p.name)}"></label><label>Tipo<input name="type" value="${esc(p.type||'General')}"></label><label class="wide">Foto del plan<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><input type="file" name="photoFile" accept="image/*">${p.id&&p.photoUrl?`<button type="button" class="outline" onclick="removePlanPhoto('${p.id}')">Quitar foto</button>`:''}</div></label><div class="wide"><label>Artículos incluidos</label>${itemFields(p.items)}</div></div>`;}
+      async function removePlanPhoto(id){const p=plan(id);if(!p)return;p.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openPlan(id);}
+      function openPlan(id){const p=id?plan(id):null;showModal(p?'Editar plan':'Crear plan',planForm(p||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;data.items=formItems(f);if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}if(p)Object.assign(p,data);else state.plans.push({id:uid('p'),...data});const saved=await save();if(!saved)return false;renderPlans();notice('Plan guardado.');});}
+
+      function kitchenItem(id){ return state.inventory.items.find(x=>x.id===id); }
+      function clientItemQuantity(c,key){ const own=c.items && Object.keys(c.items).length ? c.items : plan(c.planId)?.items || {}; return n(own[key]); }
+      function inventoryItemForm(item={}){ return `<div class="form-grid"><label>Producto de cocina *<input name="name" required value="${esc(item.name)}" placeholder="Ej.: Envase mediano"></label><label>Unidad *<input name="unit" required value="${esc(item.unit||'unidades')}" placeholder="unidades, kg, litros"></label><label>Stock inicial / actual<input name="stock" type="number" step="0.01" value="${n(item.stock)}"></label><label>Stock mínimo<input name="minimum" type="number" min="0" step="0.01" value="${n(item.minimum)}"></label></div>`; }
+      function openInventoryItem(id){ const item=id?kitchenItem(id):null; showModal(item?'Editar producto':'Añadir producto de cocina',inventoryItemForm(item||{}),async f=>{const data=Object.fromEntries(new FormData(f));if(item)Object.assign(item,data);else state.inventory.items.push({id:uid('inv'),...data});const saved=await save();if(!saved)return false;renderInventory();notice('Producto de inventario guardado.');}); }
+      function inventoryOptions(current=''){ return `<option value="">Seleccionar producto</option>`+state.inventory.items.map(x=>`<option value="${x.id}" ${x.id===current?'selected':''}>${esc(x.name)} (${esc(x.unit||'unidades')})</option>`).join(''); }
+      function inventoryMovementForm(type,m={}){ const title=(m.id?'Editar ':'')+(type==='entry'?'Ingreso de producto':type==='waste'?'Salida por merma':'Salida por uso'); return {title,html:`<div class="form-grid"><label>Fecha<input name="date" type="date" value="${m.date||state.currentDate}"></label><label>Producto *<select name="inventoryId" required>${inventoryOptions(m.inventoryId)}</select></label><label>Cantidad *<input name="quantity" type="number" min="0.01" step="0.01" required value="${m.id?Math.abs(n(m.quantity)):''}"></label><label>Motivo / detalle<input name="note" required placeholder="Ej.: recepción proveedor" value="${esc(m.note)}"></label></div>`}; }
+      function openInventoryMovement(type,id){
+        const existing=id?state.inventory.movements.find(x=>x.id===id):null;
+        const form=inventoryMovementForm(type,existing||{});
+        showModal(form.title,form.html,async f=>{
+          const data=Object.fromEntries(new FormData(f)), item=kitchenItem(data.inventoryId); if(!item)return false;
+          const qty=n(data.quantity), delta=type==='entry'?qty:-qty;
+          if(existing){ const oldItem=kitchenItem(existing.inventoryId); if(oldItem)oldItem.stock=n(oldItem.stock)-n(existing.quantity); }
+          item.stock=n(item.stock)+delta;
+          if(existing){ Object.assign(existing,{date:data.date,inventoryId:data.inventoryId,type,quantity:delta,note:data.note}); }
+          else state.inventory.movements.unshift({id:uid('mov'),date:data.date,inventoryId:data.inventoryId,type,quantity:delta,note:data.note});
+          const saved=await save(); if(!saved)return false;
+          renderInventory();notice(existing?'Movimiento actualizado.':(type==='entry'?'Ingreso registrado.':'Salida de inventario registrada.'));
+        });
+      }
+      async function deleteInventoryMovement(id){
+        const m=state.inventory.movements.find(x=>x.id===id); if(!m||m.type==='delivery')return;
+        if(!confirm('¿Eliminar este movimiento? Se revertirá su efecto sobre el stock.'))return;
+        const item=kitchenItem(m.inventoryId); if(item)item.stock=n(item.stock)-n(m.quantity);
+        state.inventory.movements=state.inventory.movements.filter(x=>x.id!==id);
+        const saved=await save(); renderInventory();
+        notice(saved?'Movimiento eliminado y stock ajustado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved);
+      }
+      function inventoryLinkForm(link={}){ return `<div class="form-grid"><label>Producto de cocina *<select name="inventoryId" required>${inventoryOptions(link.inventoryId)}</select></label><label>Artículo entregado al cliente *<select name="clientItemKey" required>${items.map(([key,label])=>`<option value="${key}" ${link.clientItemKey===key?'selected':''}>${label}</option>`).join('')}</select></label><label class="wide">Cantidad a descontar por cada artículo entregado *<input name="quantity" type="number" min="0.01" step="0.01" required value="${n(link.quantity)||1}"></label></div>`; }
+      function openInventoryLink(id){ const link=id?state.inventory.links.find(x=>x.id===id):null; showModal(link?'Editar vínculo de consumo':'Vincular consumo a artículo entregado',inventoryLinkForm(link||{}),async f=>{const data=Object.fromEntries(new FormData(f));if(link)Object.assign(link,data);else state.inventory.links.push({id:uid('link'),...data});const saved=await save();if(!saved)return false;renderInventory();notice('Vínculo de consumo guardado.');}); }
+      async function deleteInventoryItem(id){ const item=kitchenItem(id); if(!item || !confirm(`¿Eliminar ${item.name} del inventario?`))return; state.inventory.items=state.inventory.items.filter(x=>x.id!==id); state.inventory.links=state.inventory.links.filter(x=>x.inventoryId!==id); const saved=await save();renderInventory();notice(saved?'Producto eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); }
+      async function deleteInventoryLink(id){ if(!confirm('¿Eliminar este vínculo de consumo?'))return; state.inventory.links=state.inventory.links.filter(x=>x.id!==id);const saved=await save();renderInventory();notice(saved?'Vínculo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); }
+      function renderInventory(){
+        if(!canAccessPage('inventory')) return;
+        const itemRows=item=>{const links=state.inventory.links.filter(l=>l.inventoryId===item.id);const low=n(item.stock)<=n(item.minimum);return `<tr><td><b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}</td><td>${esc(item.unit||'unidades')}</td><td>${n(item.stock)}</td><td>${n(item.minimum)}</td><td>${links.length?links.map(l=>`${n(l.quantity)} × ${esc(items.find(([key])=>key===l.clientItemKey)?.[1]||l.clientItemKey)}`).join('<br>'):'—'}</td><td>${canManageInventory()?`<button class="icon-btn" data-action="edit-inventory-item" data-id="${item.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-item" data-id="${item.id}">×</button>`:'—'}</td></tr>`;};
+        const linkRows=link=>`<tr><td>${esc(kitchenItem(link.inventoryId)?.name||'Producto eliminado')}</td><td>${esc(items.find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey)}</td><td>${n(link.quantity)}</td><td>${canManageInventory()?`<button class="icon-btn" data-action="edit-inventory-link" data-id="${link.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-link" data-id="${link.id}">×</button>`:'—'}</td></tr>`;
+        const recent=state.inventory.movements.slice(0,12);
+        const movementRows=m=>`<tr><td>${esc(m.date)}</td><td>${esc(kitchenItem(m.inventoryId)?.name||'Producto eliminado')}</td><td>${m.quantity>0?`+${n(m.quantity)}`:n(m.quantity)}</td><td>${m.type==='entry'?'Ingreso':m.type==='waste'?'Merma':m.type==='delivery'?'Entrega procesada':'Uso'}</td><td>${esc(m.note||'—')}</td><td>${canManageInventory()&&m.type!=='delivery'?`<button class="icon-btn" data-action="edit-inventory-movement" data-id="${m.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-movement" data-id="${m.id}">×</button>`:'—'}</td></tr>`;
+        const actions=canManageInventory()?`<button class="primary" data-action="add-inventory-item">+ Producto de cocina</button><button class="outline" data-action="add-inventory-entry">+ Ingreso</button><button class="outline" data-action="add-inventory-use">− Uso</button><button class="outline" data-action="add-inventory-waste">− Merma</button><button class="outline" data-action="add-inventory-link">Vincular consumo</button>`:'';
+        $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina. Los vínculos descuentan insumos automáticamente al procesar pedidos activos.',actions)+`<div class="two-col"><div class="card card-pad"><h3 style="margin-bottom:12px">Productos de cocina</h3>${table(state.inventory.items,[['Producto','name'],['Unidad','unit'],['Stock','stock'],['Mínimo','minimum'],['Se descuenta con','links'],['Acciones','id']],itemRows,'inventory')}</div><div class="card card-pad"><h3 style="margin-bottom:12px">Vínculos de consumo</h3>${table(state.inventory.links,[['Producto de cocina','inventoryId'],['Artículo entregado','clientItemKey'],['Cantidad por entrega','quantity'],['Acciones','id']],linkRows,'inventory-links')}</div></div><div class="card card-pad" style="margin-top:18px"><h3 style="margin-bottom:12px">Últimos movimientos</h3>${table(recent,[['Fecha','date'],['Producto','inventoryId'],['Cantidad','quantity'],['Tipo','type'],['Detalle','note'],['Acciones','id']],movementRows,'inventory-movements')}</div>`;
+      }
+      function applyInventoryForProcessedDay(date){
+        const active=state.clients.filter(c=>status(c,date)==='Activo');
+        state.inventory.links.forEach(link=>{
+          const item=kitchenItem(link.inventoryId); if(!item)return;
+          const delivered=active.reduce((sum,c)=>sum+clientItemQuantity(c,link.clientItemKey),0), used=delivered*n(link.quantity);
+          if(!used)return;
+          item.stock=n(item.stock)-used;
+          state.inventory.movements.unshift({id:uid('mov'),date,inventoryId:item.id,type:'delivery',quantity:-used,note:`Descuento automático: ${delivered} ${items.find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey}`});
+        });
+      }
+      // Revierte exactamente los movimientos que applyInventoryForProcessedDay generó
+      // para esa fecha (type:'delivery'): repone el stock descontado y los elimina.
+      // Estos movimientos son los únicos con type:'delivery' — deleteInventoryMovement
+      // los protege explícitamente porque solo deben tocarse al procesar/desprocesar.
+      function revertInventoryForProcessedDay(date){
+        const kept=[];
+        state.inventory.movements.forEach(m=>{
+          if(m.type==='delivery'&&m.date===date){
+            const item=kitchenItem(m.inventoryId);
+            if(item)item.stock=n(item.stock)-n(m.quantity); // quantity es negativo: al restarlo, se repone
+          } else kept.push(m);
+        });
+        state.inventory.movements=kept;
+      }
+
+      function monthDates(month){const [y,m]=month.split('-').map(Number),end=new Date(y,m,0).getDate();return Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
+      function renderPayroll(){ if(!canAccessPage('payroll')) return; const dates=monthDates(ui.month);let list=canManage()?state.drivers:state.drivers.filter(d=>d.id===activeUser.driverId);const rows=d=>{const values=dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=isAdmin()?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};$('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<input id="payroll-month" type="month" value="${ui.month}"></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet"><table class="payroll"><thead><tr><th>Driver / Ruta</th>${dates.map(d=>`<th>${Number(d.slice(-2))}</th>`).join('')}<th>Total</th><th>Día tarifa</th><th>Monto Bs</th></tr></thead><tbody>${list.map(rows).join('')||'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody></table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
+
+      function renderUsers(){if(!canAccessPage('users'))return;const rows=u=>`<tr><td><b>${esc(u.username)}</b></td><td>${esc(u.name)}</td><td>${esc(u.email||'—')}</td><td>${badge(ROLE_LABELS[u.role]||u.role)}</td><td>${u.role==='driver'?esc(routeName(u.routeId)):'—'}</td><td><button class="icon-btn" data-action="edit-user" data-id="${u.id}">Editar</button>${u.id!==activeUser.id?`<button class="icon-btn delete" data-action="delete-user" data-id="${u.id}">×</button>`:''}</td></tr>`;$('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Roles: Administrador, Editor, Cocina y Driver.', '<button class="primary" data-action="add-user">+ Crear usuario</button>')+table(staffUsers,[['Usuario','username'],['Nombre','name'],['Correo','email'],['Rol','role'],['Ruta asignada','route'],['Acciones','id']],rows,'users');}
+      function userForm(u={}){const d=u.driverId?driver(u.driverId):{};const showDriver=u.role==='driver';return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'}></label><label>Rol<select name="role" id="user-role-select"><option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="kitchen" ${u.role==='kitchen'?'selected':''}>Cocina</option><option value="driver" ${(!u.role||u.role==='driver')?'selected':''}>Driver</option></select></label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Carnet${showDriver?' *':''}<input name="carnet" value="${esc(d.carnet)}" ${showDriver?'required':''}></label><label class="driver-field" ${showDriver?'':'hidden'}>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="driver-field wide" ${showDriver?'':'hidden'}>Dirección de domicilio<input name="address" value="${esc(d.address)}"></label><p class="muted wide driver-field-hint" ${showDriver?'hidden':''}>Administrador, Editor y Cocina no necesitan ficha de driver ni ruta asignada.</p></div>`;}
+      function bindUserFormRoleToggle(){
+        const select=$('#user-role-select'); if(!select) return;
+        select.onchange=()=>{
+          const showDriver=select.value==='driver';
+          $$('.driver-field').forEach(el=>el.hidden=!showDriver);
+          const hint=$('.driver-field-hint'); if(hint) hint.hidden=showDriver;
+          const carnet=$('.driver-field input[name="carnet"]'); if(carnet) carnet.required=showDriver;
+        };
+      }
+      function openUser(id){let u=id?staffUsers.find(x=>x.id===id):null;showModal(u?'Editar usuario':'Crear usuario',userForm(u||{}),async f=>{
+        const data=Object.fromEntries(new FormData(f));
+        if(staffUsers.some(x=>x.username===data.username&&x.id!==u?.id)){notice('Ese usuario ya existe.',true);return false;}
+        if(staffUsers.some(x=>x.email.toLowerCase()===data.email.toLowerCase()&&x.id!==u?.id)){notice('Ese correo ya está registrado.',true);return false;}
+        // La contraseña nunca se guarda en texto plano: se hashea en el
+        // servidor (Supabase) antes de escribirla en la base de datos.
+        let passwordHash=u?.passwordHash||'';
+        if(data.password){
+          passwordHash=await window.SupabaseDB?.rpc('hash_password',{p_password:data.password});
+          if(!passwordHash){notice('No se pudo generar la contraseña de forma segura. Intenta nuevamente.',true);return false;}
+        } else if(!u){
+          notice('La contraseña es obligatoria para un usuario nuevo.',true);return false;
+        }
+        let driverId=u?.driverId;
+        if(data.role==='driver'){
+          let d=driver(driverId);const parts=data.name.trim().split(/\s+/);
+          const driverData={firstName:parts.shift()||data.name,lastName:parts.join(' ')||'',carnet:data.carnet,phone:data.phone,address:data.address,routeId:data.routeId};
+          if(d)Object.assign(d,driverData);else{d={id:uid('d'),...driverData};state.drivers.push(d);}
+          driverId=d.id;
+        }
+        const userData={username:data.username,email:data.email,passwordHash,name:data.name,role:data.role,routeId:data.role==='driver'?data.routeId:'',driverId:data.role==='driver'?driverId:''};
+        if(u){Object.assign(u,userData);delete u.password;}else{u={id:uid('u'),...userData};staffUsers.push(u);}
+        const saved=await save();if(!saved)return false;
+        renderUsers();
+        notice(data.role==='driver'?'Usuario, acceso y ficha de driver guardados en la base de datos.':'Usuario guardado en la base de datos.');
+      });bindUserFormRoleToggle();}
+      function renderSettings(){
+        if(!canAccessPage('settings')) return;
+        const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...items,['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['remaining','Servicios restantes'],['returnDate','Fecha de retorno'],['id','Acciones']];
+        const logo=state.settings.logoUrl;
+        // Todos los roles pueden entrar a Configuración, pero solo ven y editan
+        // la tarjeta de "Columnas visibles". El resto (apariencia, empresa,
+        // íconos, respaldo de datos) sigue siendo exclusivo de admin.
+        const columnsCard=`<div class="card card-pad stack">
+            <h3>Tu tema</h3>
+            <p class="muted">Solo afecta a tu navegador, no a los demás usuarios.</p>
+            <label>Tema<select id="my-theme"><option value="light" ${(localStorage.getItem(UI_THEME_KEY)||'light')==='light'?'selected':''}>Claro</option><option value="night" ${localStorage.getItem(UI_THEME_KEY)==='night'?'selected':''}>Nocturno</option><option value="forest" ${localStorage.getItem(UI_THEME_KEY)==='forest'?'selected':''}>Bosque</option></select></label>
+            <h3 style="margin-top:10px">Columnas visibles</h3>
+            <p class="muted">Afecta a la tabla de Día de trabajo. Allí también puedes arrastrar los encabezados para cambiar su orden.</p>
+            <div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!state.settings.hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div>
+          </div>`;
+        if(!isAdmin()){
+          $('#settings-page').innerHTML=pageHead('Configuración','Elige tu tema y qué columnas ver en la tabla de Día de trabajo.')+`<div class="two-col">${columnsCard}</div>`;
+          $('#my-theme').onchange=e=>{localStorage.setItem(UI_THEME_KEY,e.target.value);render();};
+          $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
+          return;
+        }
+        $('#settings-page').innerHTML=pageHead('Configuración','Preferencias visuales, columnas y respaldo de datos.')+`<div class="two-col">
+          ${columnsCard}
+          <div class="card card-pad stack">
+            <h3>Empresa</h3>
+            <label>Nombre de la empresa<input id="company-name" value="${esc(state.settings.companyName||APP_CONFIG.companyName)}" placeholder="${esc(APP_CONFIG.companyName)}"></label>
+            <label>Logo
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${logo?`<img loading="lazy" decoding="async" src="${logo}" alt="Logo" style="width:100%;height:100%;object-fit:contain">`:'🍽'}</div>
+                <input type="file" id="logo-file" accept="image/*">
+                ${logo?'<button type="button" class="outline" data-action="remove-logo">Quitar logo</button>':''}
+              </div>
+            </label>
+            <label>Número de WhatsApp<input id="whatsapp-number" value="${esc(state.settings.whatsappNumber)}" placeholder="${esc(APP_CONFIG.whatsappNumber||'Ej: 59171234567')}"></label>
+            <p class="muted" style="margin-top:-6px">Solo números, con código de país, sin espacios ni signos. Se usa en los botones de contacto del portal del cliente.</p>
+            <label>Link de Instagram<input id="instagram-url" value="${esc(state.settings.instagramUrl)}" placeholder="${esc(APP_CONFIG.instagramUrl||'https://instagram.com/tu_empresa')}"></label>
+            <label>Usuario de Instagram (@handle)<input id="instagram-handle" value="${esc(state.settings.instagramHandle)}" placeholder="${esc(APP_CONFIG.instagramHandle||'@tu_empresa')}"></label>
+          </div>
+          <div class="card card-pad stack">
+            <h3>Publicidad del portal de clientes</h3>
+            <p class="muted">Esta imagen se muestra a todos los clientes en su portal, justo antes de "Tu plan actual". Ideal para promociones o novedades.</p>
+            <label>Imagen publicitaria
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="width:88px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${state.settings.adImageUrl?`<img loading="lazy" decoding="async" src="${state.settings.adImageUrl}" alt="Publicidad" style="width:100%;height:100%;object-fit:cover">`:'📣'}</div>
+                <input type="file" id="ad-image-file" accept="image/*">
+                ${state.settings.adImageUrl?'<button type="button" class="outline" data-action="remove-ad-image">Quitar imagen</button>':''}
+              </div>
+            </label>
+            <h3 style="margin-top:10px">Aviso de renovación</h3>
+            <p class="muted">Cuando a un cliente le queden estos días o menos, verá un cartel rojo invitándolo a renovar su plan.</p>
+            <label>Días restantes para mostrar el aviso<input id="renewal-warning-days" type="number" min="0" max="30" value="${n(state.settings.renewalWarningDays)}"></label>
+          </div>
+          <div class="card card-pad stack">
+            <h3>Íconos de artículos</h3>
+            <p class="muted">Sube una imagen para cada artículo del menú (aparece junto a las cantidades en planes y clientes).</p>
+            <div class="toggle-list" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${items.map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px">
+              <div style="width:34px;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12px;font-weight:650;margin-bottom:4px">${label}</div>
+                <input type="file" accept="image/*" data-item-icon="${key}" style="font-size:11px">
+              </div>
+              ${icon?`<button type="button" class="icon-btn" data-action="remove-item-icon" data-id="${key}" title="Quitar">✕</button>`:''}
+            </div>`;}).join('')}</div>
+          </div>
+          <div class="card card-pad stack">
+            <h3>Datos</h3>
+            <p class="muted">Clientes, operaciones y usuarios del equipo se sincronizan con la base de datos en cada guardado.</p>
+            <p class="muted">Los días laborables/no laborables se administran directamente desde Día de trabajo.</p>
+            <label>Exportar
+              <select id="export-scope">
+                <option value="all">Todo (respaldo completo)</option>
+                <option value="clientes">Solo Clientes (clientes, planes, días)</option>
+                <option value="personal">Solo Personal (drivers, rutas, usuarios)</option>
+                <option value="inventario">Solo Inventario</option>
+              </select>
+            </label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="outline" data-action="export-json">Exportar JSON</button><button class="outline" data-action="import-json">Importar JSON</button></div>
+          </div>
+        </div>`;
+        $('#my-theme').onchange=e=>{localStorage.setItem(UI_THEME_KEY,e.target.value);render();};
+        $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
+        $('#company-name').onchange=async e=>{state.settings.companyName=e.target.value.trim();const saved=await save();applyBranding();notice(saved?'Nombre de la empresa actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
+        $('#logo-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.logoUrl=await readImageAsDataURL(file,240,.85);const saved=await save();applyBranding();renderSettings();notice(saved?'Logo actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
+        $('#whatsapp-number').onchange=async e=>{state.settings.whatsappNumber=e.target.value.trim().replace(/[^\d]/g,'');e.target.value=state.settings.whatsappNumber;const saved=await save();notice(saved?'Número de WhatsApp actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
+        $('#instagram-url').onchange=async e=>{state.settings.instagramUrl=e.target.value.trim();const saved=await save();notice(saved?'Link de Instagram actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
+        $('#instagram-handle').onchange=async e=>{state.settings.instagramHandle=e.target.value.trim();const saved=await save();notice(saved?'Usuario de Instagram actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
+        $('#ad-image-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.adImageUrl=await readImageAsDataURL(file,960,.85);const saved=await save();renderSettings();notice(saved?'Imagen publicitaria actualizada.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
+        $('#renewal-warning-days').onchange=async e=>{state.settings.renewalWarningDays=Math.max(0,n(e.target.value));e.target.value=state.settings.renewalWarningDays;const saved=await save();notice(saved?'Aviso de renovación actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
+        $$('[data-item-icon]').forEach(input=>input.onchange=async e=>{const file=e.target.files[0];if(!file)return;const key=input.dataset.itemIcon;try{state.settings.itemIcons[key]=await readImageAsDataURL(file,160,.8);const saved=await save();renderSettings();notice(saved?'Ícono actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}});
+      }
+      function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
+      async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);}
+      function processDay(){
+        if(!canManage()){notice('No tienes permiso para procesar el día.',true);return;}
+        const d=day();
+        if(!d.laborable){notice('Un día no laborable no procesa pedidos ni descuenta inventario.',true);return;}
+        if(d.processed){notice('Este día ya fue procesado.',true);return;}
+        if(!confirm(`¿Procesar el día ${state.currentDate.split('-').reverse().join('/')}?`))return;
+        state.clients.filter(c=>status(c)==='Activo').forEach(c=>c.consumedDays=n(c.consumedDays)+1);
+        applyInventoryForProcessedDay(state.currentDate);
+        d.processed=true;save();renderDispatch();notice('Día procesado e inventario actualizado.');
+      }
+      function unprocessDay(){
+        if(!canManage()){notice('No tienes permiso para desprocesar el día.',true);return;}
+        const d=day();
+        if(!d.processed){notice('Este día no está procesado.',true);return;}
+        if(!confirm(`¿Desprocesar el día ${state.currentDate.split('-').reverse().join('/')}? Se revertirá el descuento de inventario y el conteo de días consumidos que se hicieron al procesarlo (puedes volver a procesarlo después).`))return;
+        state.clients.filter(c=>status(c)==='Activo').forEach(c=>c.consumedDays=Math.max(0,n(c.consumedDays)-1));
+        revertInventoryForProcessedDay(state.currentDate);
+        d.processed=false;save();renderDispatch();notice('Día desprocesado. El inventario y los días consumidos fueron restaurados.');
+      }
+      function toggleDayPause(id){
+        if(!canManage()) return;
+        const c=state.clients.find(x=>x.id===id); if(!c) return;
+        c.pauseDates ||= [];
+        const i=c.pauseDates.indexOf(state.currentDate);
+        if(i>=0){ c.pauseDates.splice(i,1); notice('Pedido reanudado para este día.'); }
+        else { c.pauseDates.push(state.currentDate); notice('Pedido pausado solo para este día.'); }
+        save(); renderDispatch();
+      }
+      async function exportDiets(){
+        if(isDriverRole()) return exportRouteOrder();
+        const date=state.currentDate;
+        const activeClients=state.clients.filter(c=>status(c,date)==='Activo');
+        if(!window.ExcelJS){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
+        const wb=new ExcelJS.Workbook();
+        wb.creator=state.settings.companyName||APP_CONFIG.companyName;
+        const ws=wb.addWorksheet('Dietas especiales',{views:[{state:'frozen',ySplit:1}]});
+        ws.columns=[
+          {header:'Cliente',key:'cliente',width:26},
+          {header:'Plan',key:'plan',width:18},
+          {header:'Artículos incluidos',key:'items',width:46},
+          {header:'Observaciones / dieta especial',key:'notes',width:38}
+        ];
+        const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
+        const headerRow=ws.getRow(1);
+        headerRow.height=22;
+        headerRow.eachCell(cell=>{
+          cell.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+          cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0D6EFD'}};
+          cell.alignment={vertical:'middle',horizontal:'left'};
+          cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
+        });
+        activeClients.forEach((c,i)=>{
+          const pitems=c.items||plan(c.planId)?.items||{};
+          const row=ws.addRow({
+            cliente:c.name,
+            plan:planName(c.planId),
+            items:items.filter(([k])=>n(pitems[k])>0).map(([k,l])=>`${l}: ${n(pitems[k])}`).join(' | ')||'—',
+            notes:[c.notes,c.specialDiet].filter(Boolean).join(' — ')||'—'
+          });
+          const fillColor=i%2===0?'FFF3F6FB':'FFFFFFFF';
+          row.eachCell(cell=>{
+            cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:fillColor}};
+            cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
+            cell.alignment={vertical:'top',horizontal:'left',wrapText:true};
+          });
+        });
+        if(!activeClients.length){ notice('No hay clientes activos para exportar hoy.',true); return; }
+        const buffer=await wb.xlsx.writeBuffer();
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+        a.download=`dietas-especiales-${date}.xlsx`;
+        a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+        notice('Archivo Excel generado.');
+      }
+      // Excel de reparto para el driver: sus clientes activos, en el orden que él
+      // mismo definió en el Día de trabajo, con los datos que necesita en ruta.
+      async function exportRouteOrder(){
+        const date=state.currentDate, r=route(activeUser.routeId);
+        let activeClients=state.clients.filter(c=>effectiveRouteId(c,date)===activeUser.routeId && status(c,date)==='Activo');
+        activeClients=[...activeClients].sort((a,b)=>(n(a.order)||9999)-(n(b.order)||9999));
+        if(!window.ExcelJS){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
+        if(!activeClients.length){ notice('No hay clientes activos en tu ruta para exportar hoy.',true); return; }
+        const wb=new ExcelJS.Workbook();
+        wb.creator=state.settings.companyName||APP_CONFIG.companyName;
+        const ws=wb.addWorksheet('Orden de ruta',{views:[{state:'frozen',ySplit:1}]});
+        ws.columns=[
+          {header:'Orden',key:'order',width:8},
+          {header:'Cliente',key:'cliente',width:26},
+          {header:'Dirección',key:'address',width:34},
+          {header:'Teléfono',key:'phone',width:16},
+          {header:'Google Maps',key:'maps',width:16},
+          {header:'Bolsas',key:'bags',width:10},
+          {header:'Carreras',key:'career',width:12},
+          {header:'Observaciones',key:'notes',width:30}
+        ];
+        const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
+        const headerRow=ws.getRow(1);
+        headerRow.height=22;
+        headerRow.eachCell(cell=>{
+          cell.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+          cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF198754'}};
+          cell.alignment={vertical:'middle',horizontal:'left'};
+          cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
+        });
+        activeClients.forEach((c,i)=>{
+          const row=ws.addRow({
+            order:n(c.order)||'',
+            cliente:c.name,
+            address:effectiveAddress(c,date)||'—',
+            phone:[c.phone1,c.phone2].filter(Boolean).join(' / ')||'—',
+            maps:c.maps?'Abrir mapa':'—',
+            bags:n(c.bags),
+            career:n(c.career||1),
+            notes:c.notes||'—'
+          });
+          if(c.maps) row.getCell('maps').value={text:'Abrir mapa',hyperlink:c.maps};
+          const fillColor=i%2===0?'FFF0FBF4':'FFFFFFFF';
+          row.eachCell(cell=>{
+            cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:fillColor}};
+            cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
+            cell.alignment={vertical:'top',horizontal:'left',wrapText:true};
+          });
+          row.getCell('maps').font={color:{argb:'FF0D6EFD'},underline:true};
+        });
+        const totalRow=ws.addRow({order:'',cliente:`Total: ${activeClients.length} clientes`,address:'',phone:'',maps:'',bags:activeClients.reduce((a,c)=>a+n(c.bags),0),career:activeClients.reduce((a,c)=>a+n(c.career||1),0),notes:''});
+        totalRow.eachCell(cell=>{ cell.font={bold:true}; cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine}; });
+        const buffer=await wb.xlsx.writeBuffer();
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+        a.download=`orden-de-ruta-${(r?.name||'ruta').toLowerCase().replace(/\s+/g,'-')}-${date}.xlsx`;
+        a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+        notice('Archivo Excel generado.');
+      }
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();renderSettings();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:state,label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+        const ACTION_PERMS={
+          "add-client":canManage,"pause-client":canManage,"resume-client":canManage,"edit-client":canManage,"delete-client":canManage,
+          "add-driver":canManage,"edit-driver":canManage,"delete-driver":canManage,
+          "add-route":canManage,"edit-route":canManage,"delete-route":canManage,
+          "add-plan":canManage,"edit-plan":canManage,"delete-plan":canManage,
+          "add-inventory-item":canManageInventory,"edit-inventory-item":canManageInventory,"delete-inventory-item":canManageInventory,
+          "add-inventory-entry":canManageInventory,"add-inventory-use":canManageInventory,"add-inventory-waste":canManageInventory,
+          "edit-inventory-movement":canManageInventory,"delete-inventory-movement":canManageInventory,
+          "add-inventory-link":canManageInventory,"edit-inventory-link":canManageInventory,"delete-inventory-link":canManageInventory,
+          "add-user":isAdmin,"edit-user":isAdmin,"delete-user":isAdmin,
+          "process-day":canManage,"unprocess-day":canManage,"toggle-day-pause":canManage,
+          "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin
+        };
+        if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
+        map[action]?.();});
+      document.addEventListener('click',e=>{const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
+      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#logout-btn').onclick=()=>{sessionStorage.removeItem(STAFF_SESSION_KEY);location.href='./login.html';};$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);normalize();save();render();notice('Respaldo importado.');}catch{notice('El respaldo no es válido.',true);}};r.readAsText(file);};
+      document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
+      try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
+      if(!activeUser){ window.location.replace('./login.html'); return; }
+      load(); applyBranding(); loadFromServer().then(() => { normalize(); render(); applyBranding(); }); render(); activate('dispatch');
+    })();
+  

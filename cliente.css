@@ -1,0 +1,11 @@
+    body{background:var(--page-bg,#f5f7fb)}.portal{max-width:1080px}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#0d6efd,#198754);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:.75rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.hidden{display:none!important}
+    [data-theme="night"]{--page-bg:#121824}
+    [data-theme="forest"]{--page-bg:#dcefdc}
+    [data-theme="forest"] .metric{background:#cde6cd}
+    [data-theme="forest"] .navbar.bg-body{background:#eef7ee!important}
+    .ad-banner img{width:100%;max-height:220px;object-fit:cover}
+    .renewal-banner{background:linear-gradient(120deg,#e4002b,#ff4b3e);color:#fff;overflow:hidden;position:relative}
+    .renewal-banner .ribbon{background:rgba(255,255,255,.18);border-radius:999px;display:inline-flex;align-items:center;gap:.4rem;padding:.25rem .75rem;font-weight:700;letter-spacing:.02em}
+    .renewal-banner .bounce{display:inline-block;animation:renewal-bounce 1.4s ease-in-out infinite}
+    .renewal-banner .btn-light{font-weight:700}
+    @keyframes renewal-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
