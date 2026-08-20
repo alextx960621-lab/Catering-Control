@@ -1,4 +1,3 @@
-
 /* La configuración de la empresa vive en config.js (un solo archivo
    para toda la app: marca + credenciales de Supabase).
    Este archivo se carga con <script src="./login.js" defer>, así que el
@@ -28,7 +27,15 @@ updateWhatsappButton(APP_CONFIG.whatsappNumber);
     const name = personal?.settings?.companyName?.trim();
     const logo = personal?.settings?.logoUrl;
     if (name) { document.getElementById('brand-title').textContent = name; document.title = `${name} · Iniciar sesión`; }
-    if (logo) { document.getElementById('brand-mark').innerHTML = `<img src="${logo}" alt="${name || APP_CONFIG.companyName}">`; }
+    // Antes solo se actualizaba el logo cuando 'logo' tenía un valor: si en
+    // Configuración se quitó el logo (settings.logoUrl quedó en ''), esta
+    // condición era falsa y no hacía nada — dejando en pantalla el logo
+    // anterior (el de APP_CONFIG.logoUrl con el que arrancó la página, o el
+    // último que se había dibujado). Ahora, igual que en index.html, se
+    // vuelve al ícono 🍽 por defecto cuando no hay logo configurado.
+    document.getElementById('brand-mark').innerHTML = logo
+      ? `<img src="${logo}" alt="${name || APP_CONFIG.companyName}" onerror="this.parentElement.textContent='🍽'">`
+      : '🍽';
     if (personal?.settings?.whatsappNumber) updateWhatsappButton(personal.settings.whatsappNumber);
   } catch (_) {}
 })();
