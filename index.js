@@ -401,7 +401,16 @@
       function options(list,current,placeholder='Seleccionar…',label=x=>x.name){ return `<option value="">${placeholder}</option>`+list.map(x=>`<option value="${esc(x.id)}" ${x.id===current?'selected':''}>${esc(label(x))}</option>`).join(''); }
       function itemFields(values={}){ return `<div class="items-grid">${items.map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<label>${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:16px;height:16px;object-fit:cover;border-radius:4px;vertical-align:-3px;margin-right:4px">`:''}${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`;}).join('')}</div>`; }
       function formItems(f){ return Object.fromEntries(items.map(([key])=>[key,n(f.elements[key]?.value)])); }
-      function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; return [...list].sort((a,b)=>String(value(a,key)).localeCompare(String(value(b,key)),undefined,{numeric:true})*s.dir); }
+      // Antes esta función ordenaba SIEMPRE por el 'key' que le pasaba cada
+      // pantalla (p. ej. 'order' en Clientes/Drivers/Rutas), sin importar en
+      // qué encabezado hiciera clic el usuario: el clic sí guardaba la
+      // columna elegida en ui.sort[group].key y la flechita ▲/▼ aparecía en
+      // ese encabezado, pero el orden real de las filas seguía usando el
+      // 'order' de siempre — por eso parecía que las columnas "no filtraban".
+      // Ahora se ordena por la columna guardada en ui.sort[group].key (la que
+      // realmente se clickeó); si todavía no se clickeó ninguna, se usa el
+      // 'key' recibido como orden por defecto.
+      function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; const sortKey=s.key; return [...list].sort((a,b)=>String(value(a,sortKey)).localeCompare(String(value(b,sortKey)),undefined,{numeric:true})*s.dir); }
       function value(x,key){ if(key==='route') return routeName(x.routeId); if(key==='driver') return driverName(x.driverId); if(key==='plan') return planName(x.planId); return x[key] ?? ''; }
       function th(label,key,group){ const s=ui.sort[group]; const drag=group==='dispatch'?' draggable="true" title="Arrastra para reordenar la columna"':''; return `<th data-sort="${key}" data-group="${group}"${drag}>${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
       function defaultColWidth(label){ return Math.min(240, Math.max(70, String(label).length*8+56)); }
