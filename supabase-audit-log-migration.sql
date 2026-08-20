@@ -42,3 +42,13 @@ alter table db_audit_log enable row level security;
 -- funcione con la publishable key tal como está armada la app hoy).
 drop policy if exists "public access audit log" on db_audit_log;
 create policy "public access audit log" on db_audit_log for all using (true) with check (true);
+
+-- IMPORTANTE: la política RLS de arriba solo dice "qué filas puede ver/tocar
+-- cada rol", pero no alcanza si el rol no tiene permiso a nivel de tabla.
+-- Cuando una tabla se crea con el Table Editor de Supabase, el dashboard le
+-- agrega automáticamente estos permisos a anon/authenticated; cuando se crea
+-- por SQL Editor (como esta), hay que darlos a mano — si no, PostgREST
+-- devuelve "permission denied for table db_audit_log" y la app muestra
+-- "No se pudo cargar el historial" aunque la tabla y la política ya existan.
+grant select, insert on db_audit_log to anon, authenticated;
+grant usage, select on sequence db_audit_log_id_seq to anon, authenticated;

@@ -1,4 +1,5 @@
-(() => {
+
+    (() => {
       'use strict';
       /* La configuración de la empresa vive en config.js (un solo archivo
          para toda la app: marca + credenciales de Supabase). */
@@ -852,20 +853,37 @@
       // haber sido atendido.
       async function exportProcessedDaySnapshot(date,clientIds){
         const activeClients=clientIds?state.clients.filter(c=>clientIds.includes(c.id)):state.clients.filter(c=>status(c,date)==='Activo');
-        const clientesAtendidos=activeClients.map(c=>{
+        // Fila numérica por cliente para la hoja "Clientes atendidos", que se
+        // agrupa y totaliza por ruta más abajo.
+        const clientRow=c=>{
           const pitems=c.items||plan(c.planId)?.items||{};
           return {
-            id:c.id,
             nombre:c.name,
-            direccion:effectiveAddress(c,date)||'',
-            telefono:[c.phone1,c.phone2].filter(Boolean).join(' / '),
-            plan:planName(c.planId),
-            articulos:items.filter(([k])=>n(pitems[k])>0).map(([k,l])=>`${l}: ${n(pitems[k])}`).join(' | ')||'—',
-            driver:driverName(effectiveDriverId(c,date)),
-            ruta:routeName(effectiveRouteId(c,date)),
-            observaciones:[c.notes,c.specialDiet].filter(Boolean).join(' — ')
+            bolsas:n(c.bags),
+            shots:n(pitems.shots),
+            jugos:n(pitems.juices),
+            proteinas:n(pitems.proteins),
+            desayuno:n(pitems.breakfast),
+            merienda1:n(pitems.snack1),
+            almuerzo:n(pitems.lunch),
+            merienda2:n(pitems.snack2),
+            cena:n(pitems.dinner),
+            restantes:n(c.paidDays)?Math.max(0,n(c.paidDays)-n(c.consumedDays)):0,
+            carreras:n(c.career||1)
           };
+        };
+        const NUMERIC_KEYS=['bolsas','shots','jugos','proteinas','desayuno','merienda1','almuerzo','merienda2','cena','restantes','carreras'];
+        // Agrupa por ruta (efectiva del día) respetando el orden en que las
+        // rutas están cargadas en Rutas; los clientes sin ruta reconocible
+        // quedan en un grupo "Sin ruta" al final.
+        const groupsById=new Map();
+        activeClients.forEach(c=>{
+          const rid=effectiveRouteId(c,date)||'__none__';
+          if(!groupsById.has(rid))groupsById.set(rid,{name:rid==='__none__'?'Sin ruta':routeName(rid),clients:[]});
+          groupsById.get(rid).clients.push(c);
         });
+        const orderedIds=[...state.routes.map(r=>r.id),'__none__'].filter(id=>groupsById.has(id));
+        const routeGroups=orderedIds.map(id=>groupsById.get(id));
         const movimientosDelDia=state.inventory.movements.filter(m=>m.date===date&&m.type==='delivery').map(m=>({
           producto:kitchenItem(m.inventoryId)?.name||m.inventoryId,
           cantidadDescontada:-n(m.quantity),
@@ -887,13 +905,27 @@
         const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
         const ws=wb.addWorksheet('Clientes atendidos',{views:[{state:'frozen',ySplit:1}]});
         ws.columns=[
-          {header:'Cliente',key:'nombre',width:26},{header:'Dirección',key:'direccion',width:32},
-          {header:'Teléfono',key:'telefono',width:18},{header:'Plan',key:'plan',width:16},
-          {header:'Artículos entregados',key:'articulos',width:40},{header:'Driver',key:'driver',width:18},
-          {header:'Ruta',key:'ruta',width:16},{header:'Observaciones',key:'observaciones',width:28}
+          {header:'Nombre',key:'nombre',width:26},{header:'Ruta',key:'ruta',width:16},
+          {header:'Bolsas',key:'bolsas',width:9},{header:'Shots',key:'shots',width:9},
+          {header:'Jugos',key:'jugos',width:9},{header:'Proteínas',key:'proteinas',width:11},
+          {header:'Desayuno',key:'desayuno',width:11},{header:'Merienda 1',key:'merienda1',width:12},
+          {header:'Almuerzo',key:'almuerzo',width:11},{header:'Merienda 2',key:'merienda2',width:12},
+          {header:'Cena',key:'cena',width:9},{header:'Servicios restantes',key:'restantes',width:17},
+          {header:'Carreras',key:'carreras',width:11}
         ];
-        ws.getRow(1).eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
-        clientesAtendidos.forEach((c,i)=>{const row=ws.addRow(c);row.eachCell(cell=>{cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:i%2===0?'FFF3F6FB':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};cell.alignment={vertical:'top',wrapText:true};});});
+        const CARRERAS_FILL={argb:'FFFFC857'}; // ámbar: resalta la columna Carreras en toda la hoja
+        ws.getRow(1).eachCell((cell,colNumber)=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===13?'FFB8860B':'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        const sumField=(clients,key)=>clients.reduce((a,c)=>a+clientRow(c)[key],0);
+        const styleDataRow=(row,i)=>row.eachCell((cell,colNumber)=>{cell.fill={type:'pattern',pattern:'solid',fgColor:colNumber===13?CARRERAS_FILL.argb:{argb:i%2===0?'FFF3F6FB':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};cell.alignment={vertical:'top'};});
+        const styleTotalRow=(row,argb)=>row.eachCell((cell,colNumber)=>{cell.font={bold:true};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===13?'FFB8860B':argb}};if(colNumber===13)cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        routeGroups.forEach(group=>{
+          group.clients.forEach((c,i)=>{const row=ws.addRow({...clientRow(c),ruta:group.name});styleDataRow(row,i);});
+          const totalRow=ws.addRow({nombre:`Total ${group.name}`,ruta:'',...Object.fromEntries(NUMERIC_KEYS.map(k=>[k,sumField(group.clients,k)]))});
+          styleTotalRow(totalRow,'FFE3E7EE');
+        });
+        const grandTotalRow=ws.addRow({nombre:'TOTAL GENERAL',ruta:'',...Object.fromEntries(NUMERIC_KEYS.map(k=>[k,sumField(activeClients,k)]))});
+        styleTotalRow(grandTotalRow,'FF0D6EFD');
+        grandTotalRow.eachCell((cell,colNumber)=>{if(colNumber!==13)cell.font={bold:true,color:{argb:'FFFFFFFF'}};});
         if(movimientosDelDia.length){
           const ws2=wb.addWorksheet('Inventario descontado',{views:[{state:'frozen',ySplit:1}]});
           ws2.columns=[{header:'Producto',key:'producto',width:28},{header:'Cantidad descontada',key:'cantidadDescontada',width:20},{header:'Unidad',key:'unidad',width:14},{header:'Nota',key:'nota',width:36}];
@@ -1116,3 +1148,4 @@
       if(!activeUser){ window.location.replace('./login.html'); return; }
       load(); applyBranding(); loadFromServer().then(() => { normalize(); render(); applyBranding(); }); render(); activate('dispatch');
     })();
+  
