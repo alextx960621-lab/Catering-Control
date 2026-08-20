@@ -1,5 +1,4 @@
-
-    (() => {
+(() => {
       'use strict';
       /* La configuración de la empresa vive en config.js (un solo archivo
          para toda la app: marca + credenciales de Supabase). */
@@ -200,6 +199,19 @@
         if(okDelete) deletedIds.forEach(id=>lastSavedClients.delete(id));
         return okUpsert&&okDelete;
       }
+      // Antes, cada save() bajaba y volvía a subir los 3 bloques completos
+      // (clientes, personal, inventario) SIN IMPORTAR qué se haya editado en
+      // realidad — así, cambiar un solo campo de un cliente igual descargaba
+      // y volvía a subir todos los drivers, rutas, configuración y todo el
+      // historial de inventario, y el modal se quedaba esperando ese viaje
+      // de ida y vuelta completo para poder cerrarse. Ahora cada bloque solo
+      // se toca (GET + merge + SET) si sus datos locales cambiaron de verdad
+      // desde el último guardado confirmado; si no cambió nada ahí, se deja
+      // tal cual está en el servidor.
+      function blockChanged(local,lastSynced){
+        if(!lastSynced) return true;
+        return Object.keys(local).some(key=>JSON.stringify(local[key])!==JSON.stringify(lastSynced[key]));
+      }
       function save(){
         localStorage.setItem(KEY, JSON.stringify(state));
         localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
@@ -211,12 +223,17 @@
             const localClientes={plans:state.plans,days:state.days,currentDate:state.currentDate};
             const localPersonal={drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers};
             const localInventario={inventory:state.inventory};
+            const needClientes=blockChanged(localClientes,lastSyncedClientes);
+            const needPersonal=blockChanged(localPersonal,lastSyncedPersonal);
+            const needInventario=blockChanged(localInventario,lastSyncedInventario);
             const [serverClientes,serverPersonal,serverInventario]=await Promise.all([
-              db.dbGet('clientes'), db.dbGet('personal'), db.dbGet('inventario')
+              needClientes?db.dbGet('clientes'):Promise.resolve(null),
+              needPersonal?db.dbGet('personal'):Promise.resolve(null),
+              needInventario?db.dbGet('inventario'):Promise.resolve(null)
             ]);
-            const mergedClientes=mergeTopLevel(serverClientes,localClientes,lastSyncedClientes);
-            const mergedPersonal=mergeTopLevel(serverPersonal,localPersonal,lastSyncedPersonal);
-            const mergedInventario=mergeTopLevel(serverInventario,localInventario,lastSyncedInventario);
+            const mergedClientes=needClientes?mergeTopLevel(serverClientes,localClientes,lastSyncedClientes):localClientes;
+            const mergedPersonal=needPersonal?mergeTopLevel(serverPersonal,localPersonal,lastSyncedPersonal):localPersonal;
+            const mergedInventario=needInventario?mergeTopLevel(serverInventario,localInventario,lastSyncedInventario):localInventario;
             // Refleja lo combinado también en este dispositivo, para que quede
             // igual de al día que lo que se subió (evita que este mismo
             // dispositivo, en su próximo guardado, vuelva a pisar algo).
@@ -224,16 +241,16 @@
             state.drivers=mergedPersonal.drivers; state.routes=mergedPersonal.routes; state.settings=mergedPersonal.settings; staffUsers=mergedPersonal.staffUsers;
             state.inventory=mergedInventario.inventory;
             const [okClientes,okClientRows,okPersonal,okInventario]=await Promise.all([
-              db.dbSet('clientes',mergedClientes),
+              needClientes?db.dbSet('clientes',mergedClientes):Promise.resolve(true),
               saveClientRows(),
-              db.dbSet('personal',mergedPersonal),
-              db.dbSet('inventario',mergedInventario)
+              needPersonal?db.dbSet('personal',mergedPersonal):Promise.resolve(true),
+              needInventario?db.dbSet('inventario',mergedInventario):Promise.resolve(true)
             ]);
             const ok=okClientes&&okClientRows&&okPersonal&&okInventario;
             if(ok){
-              lastSyncedClientes=JSON.parse(JSON.stringify(mergedClientes));
-              lastSyncedPersonal=JSON.parse(JSON.stringify(mergedPersonal));
-              lastSyncedInventario=JSON.parse(JSON.stringify(mergedInventario));
+              if(needClientes)lastSyncedClientes=JSON.parse(JSON.stringify(mergedClientes));
+              if(needPersonal)lastSyncedPersonal=JSON.parse(JSON.stringify(mergedPersonal));
+              if(needInventario)lastSyncedInventario=JSON.parse(JSON.stringify(mergedInventario));
               localStorage.setItem(KEY, JSON.stringify(state));
               localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
             }
@@ -1148,4 +1165,3 @@
       if(!activeUser){ window.location.replace('./login.html'); return; }
       load(); applyBranding(); loadFromServer().then(() => { normalize(); render(); applyBranding(); }); render(); activate('dispatch');
     })();
-  
