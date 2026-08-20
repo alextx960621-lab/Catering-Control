@@ -1,96 +1,11 @@
-Claude terminó la respuesta
 
-Ejecutó un comando, archivo visualizado
-Ejecutó un comando, archivo visualizado
-Confirmado: cliente.js nunca llama a dbInsertAudit, así que cuando el cliente pausa desde su portal no queda ningún registro. Lo agrego replicando el mismo esquema que usa index.js.
-
-
-Ejecutó un comando, editó un archivo
-Ejecutó un comando, editó un archivo
-Ahora corrijo el layout del portal — encontré el problema: la tarjeta de "Pausar servicio" está declarada como col-12 entre la tarjeta del plan (col-lg-8) y la de atención al cliente (col-lg-4), dentro de la misma fila. En Bootstrap eso rompe la fila a la mitad (8+12 no entra en 12 columnas), así que en vista de PC el plan queda arriba con un hueco a la derecha, la pausa ocupa una fila completa sola, y atención al cliente queda desalineada abajo con otro hueco — por eso "se ajustan raro".
-
-
-Se ejecutaron 3 comandos, editó 2 archivos, archivo leído · 2 notas
-Se ejecutaron 3 comandos, editó 2 archivos, archivo leído · 2 notas
-Los tres problemas:
-
-1. Auditoría no registra las pausas del cliente
-cliente.js nunca llamaba a dbInsertAudit — esa función solo existía en index.js. Ahora, cada vez que un cliente pausa su servicio desde su portal, se guarda un registro en db_audit_log con actor_role: 'cliente' (identificado con su propio nombre e id) para diferenciarlo de las acciones de staff.
-
-2. Recuadros desalineados en PC
-La tarjeta "Pausar servicio" (col-12, ancho completo) estaba metida entre "Tu plan" (col-lg-8) y "Atención al cliente" (col-lg-4), dentro de la misma fila de Bootstrap. Como 8+12 no entra en 12 columnas, la fila se cortaba a la mitad: el plan quedaba arriba con un hueco vacío a la derecha, la pausa se metía sola en una fila completa, y atención al cliente terminaba desalineada abajo con otro hueco. Reordené para que "Tu plan" y "Atención al cliente" queden en la misma fila (mismo alto, h-100), y "Pausar servicio" pase debajo ocupando todo el ancho.
-
-3. Imagen de publicidad recortada
-El CSS forzaba max-height:220px con object-fit:cover, que recorta la imagen para rellenar ese recuadro. Lo cambié a width:100%; height:auto, así se muestra completa, respetando la proporción real de la imagen que subas, cualquiera sea su tamaño.
-
-
-Cliente
-JS 
-
-Cliente
-Código · CSS 
-si el servicio del cliente esta pausado necesito q el mismo pueda reactivarlo para el dia siguiente antes de las 10pm ed la misma manera q la pausa
-
-
-Viewing file
-Viewing file
-Ahora agrego la reactivación, replicando exactamente la misma lógica y el mismo corte de las 22:00 que ya usa la pausa.
-
-
-Editó 2 archivos, se ejecutaron 2 comandos, archivo visualizado · 2 notas
-Editó 2 archivos, se ejecutaron 2 comandos, archivo visualizado · 2 notas
-Listo. Cómo quedó:
-
-Cuando el cliente está Pausado, la tarjeta que antes decía "Pausar servicio" cambia automáticamente a "Reactivar servicio", con la misma lógica que la pausa: se aplica al siguiente día laborable y solo se puede pedir antes de las 22:00 (si ya pasó esa hora, muestra el mismo mensaje de error con el botón de WhatsApp para contactar soporte).
-Si el cliente ya tenía una reactivación programada para una fecha futura, se lo avisa antes de confirmar de nuevo.
-Técnicamente no toca pauseStart ni status: solo fija returnDate al siguiente día laborable, que es justamente el campo que stateFor() revisa primero — así el estado pasa a "Activo" automáticamente ese día, sin necesidad de otra lógica.
-Igual que con la pausa, la reactivación queda registrada en el historial de auditoría (Cliente reactivó su servicio (autoservicio)).
-Cuando el servicio está activo, sigue viendo la tarjeta de pausa normal, como antes.
-
-
-Cliente
-JS 
-no me deja descargar el acrchivo q me diste
-
-
-Ejecutó un comando
-Ejecutó un comando
-El archivo está bien (sintaxis válida, 16 KB). Vuelvo a compartirlo por si fue un problema puntual del enlace:
-
-
-Presented file
-Presented file
-¿Podés contarme un poco más de qué pasa exactamente? Por ejemplo:
-
-¿El botón de descarga no aparece, o aparece pero al tocarlo no pasa nada?
-¿Da algún error?
-¿Estás en el celular o en la compu?
-¿Es solo con este archivo o te pasó con los anteriores también (index.js, login.js, etc.)?
-Mientras tanto, como alternativa que seguro funciona: te pego el contenido completo de cliente.js acá abajo para que lo copies y pegues directo en tu archivo.
-
-
-Viewing file
-Viewing file
-Contame qué pasa exactamente con la descarga (¿no aparece el botón, da error, estás en el celular?) y si mientras tanto necesitás el contenido completo para copiar y pegar, ahí lo tenés arriba completo.
-
-
-Cliente
-JS 
-
-
-
-
-
-Claude es IA y puede cometer errores. Por favor, verifica nuevamente las respuestas.
-Cliente · JS
- 
     (()=>{
       'use strict';
- 
+
       /* La configuración de la empresa vive en config.js (un solo archivo
          para toda la app: marca + credenciales de Supabase). */
       const APP_CONFIG = window.APP_CONFIG;
- 
+
       const OPERATIONS_KEY=`${APP_CONFIG.storagePrefix}-operaciones-v3`,CLIENT_ROW_KEY=`${APP_CONFIG.storagePrefix}-client-row-v1`,CLIENT_SESSION_KEY=`${APP_CONFIG.storagePrefix}-client-session-v1`,THEME_KEY=`${APP_CONFIG.storagePrefix}-client-theme-v1`;
       const $=s=>document.querySelector(s),n=v=>Number(v)||0,items=[['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
       const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));let data,session,client;
@@ -185,3 +100,4 @@ Cliente · JS
       }
       boot();
     })();
+  
