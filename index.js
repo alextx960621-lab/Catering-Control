@@ -1,5 +1,4 @@
-
-    (() => {
+(() => {
       'use strict';
       /* La configuración de la empresa vive en config.js (un solo archivo
          para toda la app: marca + credenciales de Supabase). */
@@ -286,7 +285,7 @@
           return gotAny;
         } catch (_) { setDatabaseStatus('error'); return false; }
       }
-      function day(date=state.currentDate){ return state.days[date] ||= {laborable:true, processed:false, rates:{}}; }
+      function day(date=state.currentDate){ return state.days[date] ||= {laborable:true, processed:false, rates:{}, processedClientIds:[]}; }
       function route(id){ return state.routes.find(x=>x.id===id); }
       function plan(id){ return state.plans.find(x=>x.id===id); }
       function driver(id){ return state.drivers.find(x=>x.id===id); }
@@ -841,12 +840,18 @@
       }
       function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
       async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
-      // Constancia del día procesado: genera un Excel y un JSON con exactamente
-      // los datos que se modificaron/enviaron ese día (clientes atendidos,
-      // artículos entregados, inventario descontado y tarifas), para tener
-      // respaldo de qué se procesó y a quién se le envió.
-      async function exportProcessedDaySnapshot(date){
-        const activeClients=state.clients.filter(c=>status(c,date)==='Activo');
+      // Constancia del día procesado: genera un Excel con exactamente los datos
+      // que se modificaron/enviaron ese día (clientes atendidos, artículos
+      // entregados, inventario descontado y tarifas), para tener respaldo de
+      // qué se procesó y a quién se le envió.
+      // clientIds: lista de ids de clientes que se marcaron como atendidos al
+      // procesar (pasada desde processDay). Es importante usar esta lista fija
+      // y NO volver a calcular status(c,date) aquí: si un cliente llegó a su
+      // último día pagado, su estado ya cambió a "Retorno pendiente" para
+      // cuando se genera esta constancia, y quedaría afuera del reporte pese a
+      // haber sido atendido.
+      async function exportProcessedDaySnapshot(date,clientIds){
+        const activeClients=clientIds?state.clients.filter(c=>clientIds.includes(c.id)):state.clients.filter(c=>status(c,date)==='Activo');
         const clientesAtendidos=activeClients.map(c=>{
           const pitems=c.items||plan(c.planId)?.items||{};
           return {
@@ -868,22 +873,15 @@
           nota:m.note||''
         }));
         const tarifas=Object.entries(day(date).rates||{}).map(([driverId,rate])=>({driver:driverName(driverId),tarifa:n(rate)}));
-        const snapshot={
-          fecha:date,
-          empresa:state.settings.companyName||APP_CONFIG.companyName,
-          generadoEl:new Date().toISOString(),
-          totalClientesAtendidos:clientesAtendidos.length,
-          clientesAtendidos,
-          inventarioDescontado:movimientosDelDia,
-          tarifasDrivers:tarifas
-        };
-        // JSON
-        const jsonBlob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
-        const aJson=document.createElement('a');
-        aJson.href=URL.createObjectURL(jsonBlob); aJson.download=`dia-procesado-${date}.json`; aJson.click();
-        setTimeout(()=>URL.revokeObjectURL(aJson.href),1000);
-        // Excel (si la librería no cargó, nos quedamos con el JSON igual)
-        if(!window.ExcelJS) return;
+        // Antes se descargaban un .json y un .xlsx por cada día procesado. El
+        // navegador solo permite una descarga automática por gesto del
+        // usuario (clic en "Procesar día"): la del .json consumía ese permiso
+        // y la del .xlsx quedaba bloqueada en silencio — y si se procesaban
+        // varios días seguidos, ni siquiera la primera descarga del segundo
+        // día llegaba a salir. Ahora todo va en un único archivo .xlsx (con
+        // hoja de tarifas incluida) para que cada "Procesar día" dispare
+        // exactamente una descarga.
+        if(!window.ExcelJS){ notice('Día procesado, pero no se pudo generar el Excel: la librería ExcelJS no cargó (revisa la conexión a jsdelivr).',true); return; }
         const wb=new ExcelJS.Workbook();
         wb.creator=state.settings.companyName||APP_CONFIG.companyName;
         const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
@@ -902,6 +900,12 @@
           ws2.getRow(1).eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF15A77F'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
           movimientosDelDia.forEach((m,i)=>{const row=ws2.addRow(m);row.eachCell(cell=>{cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:i%2===0?'FFF0FBF4':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});});
         }
+        if(tarifas.length){
+          const ws3=wb.addWorksheet('Tarifas',{views:[{state:'frozen',ySplit:1}]});
+          ws3.columns=[{header:'Driver',key:'driver',width:28},{header:'Tarifa (Bs)',key:'tarifa',width:16}];
+          ws3.getRow(1).eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFB8860B'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+          tarifas.forEach((t,i)=>{const row=ws3.addRow(t);row.eachCell(cell=>{cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:i%2===0?'FFFBF6EC':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});});
+        }
         const buffer=await wb.xlsx.writeBuffer();
         const aXlsx=document.createElement('a');
         aXlsx.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
@@ -914,21 +918,36 @@
         if(!d.laborable){notice('Un día no laborable no procesa pedidos ni descuenta inventario.',true);return;}
         if(d.processed){notice('Este día ya fue procesado.',true);return;}
         if(!confirm(`¿Procesar el día ${state.currentDate.split('-').reverse().join('/')}?`))return;
-        const activeCount=state.clients.filter(c=>status(c)==='Activo').length;
-        state.clients.filter(c=>status(c)==='Activo').forEach(c=>c.consumedDays=n(c.consumedDays)+1);
+        // Se captura la lista de clientes activos ANTES de sumarles el día
+        // consumido: si algún cliente llega justo a su último día pagado, su
+        // estado cambia a "Retorno pendiente" en el mismo instante, y si más
+        // adelante volviéramos a calcular quién estaba "Activo" (en la
+        // constancia o al desprocesar) ese cliente ya no aparecería, pese a
+        // haber sido atendido este día.
+        const activeClients=state.clients.filter(c=>status(c)==='Activo');
+        const processedIds=activeClients.map(c=>c.id);
+        activeClients.forEach(c=>c.consumedDays=n(c.consumedDays)+1);
         applyInventoryForProcessedDay(state.currentDate);
-        d.processed=true;save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel y JSON)…');
-        logAudit('Día procesado','day',state.currentDate,state.currentDate,{clientesAtendidos:activeCount});
-        exportProcessedDaySnapshot(state.currentDate);
+        d.processed=true;d.processedClientIds=processedIds;save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel)…');
+        logAudit('Día procesado','day',state.currentDate,state.currentDate,{clientesAtendidos:processedIds.length});
+        exportProcessedDaySnapshot(state.currentDate,processedIds);
       }
       function unprocessDay(){
         if(!canManage()){notice('No tienes permiso para desprocesar el día.',true);return;}
         const d=day();
         if(!d.processed){notice('Este día no está procesado.',true);return;}
         if(!confirm(`¿Desprocesar el día ${state.currentDate.split('-').reverse().join('/')}? Se revertirá el descuento de inventario y el conteo de días consumidos que se hicieron al procesarlo (puedes volver a procesarlo después).`))return;
-        state.clients.filter(c=>status(c)==='Activo').forEach(c=>c.consumedDays=Math.max(0,n(c.consumedDays)-1));
+        // Se revierte usando la lista guardada al procesar (d.processedClientIds),
+        // no volviendo a filtrar por status()==='Activo': un cliente que llegó
+        // a "Retorno pendiente" justo al procesar ya no es "Activo" ahora, y
+        // con el filtro viejo se quedaba sin revertir (por eso los que llegaban
+        // a 0 días restantes se quedaban "en 0" al desprocesar). Si el día se
+        // procesó con una versión anterior y no tiene la lista guardada, se usa
+        // el filtro anterior como respaldo.
+        const ids=d.processedClientIds||state.clients.filter(c=>status(c)==='Activo').map(c=>c.id);
+        state.clients.filter(c=>ids.includes(c.id)).forEach(c=>c.consumedDays=Math.max(0,n(c.consumedDays)-1));
         revertInventoryForProcessedDay(state.currentDate);
-        d.processed=false;save();renderDispatch();notice('Día desprocesado. El inventario y los días consumidos fueron restaurados.');
+        d.processed=false;d.processedClientIds=[];save();renderDispatch();notice('Día desprocesado. El inventario y los días consumidos fueron restaurados.');
         logAudit('Día desprocesado','day',state.currentDate,state.currentDate,{});
       }
       function toggleDayPause(id){
@@ -1097,4 +1116,3 @@
       if(!activeUser){ window.location.replace('./login.html'); return; }
       load(); applyBranding(); loadFromServer().then(() => { normalize(); render(); applyBranding(); }); render(); activate('dispatch');
     })();
-  
