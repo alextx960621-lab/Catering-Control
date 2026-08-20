@@ -1,11 +1,96 @@
+Claude terminó la respuesta
 
+Ejecutó un comando, archivo visualizado
+Ejecutó un comando, archivo visualizado
+Confirmado: cliente.js nunca llama a dbInsertAudit, así que cuando el cliente pausa desde su portal no queda ningún registro. Lo agrego replicando el mismo esquema que usa index.js.
+
+
+Ejecutó un comando, editó un archivo
+Ejecutó un comando, editó un archivo
+Ahora corrijo el layout del portal — encontré el problema: la tarjeta de "Pausar servicio" está declarada como col-12 entre la tarjeta del plan (col-lg-8) y la de atención al cliente (col-lg-4), dentro de la misma fila. En Bootstrap eso rompe la fila a la mitad (8+12 no entra en 12 columnas), así que en vista de PC el plan queda arriba con un hueco a la derecha, la pausa ocupa una fila completa sola, y atención al cliente queda desalineada abajo con otro hueco — por eso "se ajustan raro".
+
+
+Se ejecutaron 3 comandos, editó 2 archivos, archivo leído · 2 notas
+Se ejecutaron 3 comandos, editó 2 archivos, archivo leído · 2 notas
+Los tres problemas:
+
+1. Auditoría no registra las pausas del cliente
+cliente.js nunca llamaba a dbInsertAudit — esa función solo existía en index.js. Ahora, cada vez que un cliente pausa su servicio desde su portal, se guarda un registro en db_audit_log con actor_role: 'cliente' (identificado con su propio nombre e id) para diferenciarlo de las acciones de staff.
+
+2. Recuadros desalineados en PC
+La tarjeta "Pausar servicio" (col-12, ancho completo) estaba metida entre "Tu plan" (col-lg-8) y "Atención al cliente" (col-lg-4), dentro de la misma fila de Bootstrap. Como 8+12 no entra en 12 columnas, la fila se cortaba a la mitad: el plan quedaba arriba con un hueco vacío a la derecha, la pausa se metía sola en una fila completa, y atención al cliente terminaba desalineada abajo con otro hueco. Reordené para que "Tu plan" y "Atención al cliente" queden en la misma fila (mismo alto, h-100), y "Pausar servicio" pase debajo ocupando todo el ancho.
+
+3. Imagen de publicidad recortada
+El CSS forzaba max-height:220px con object-fit:cover, que recorta la imagen para rellenar ese recuadro. Lo cambié a width:100%; height:auto, así se muestra completa, respetando la proporción real de la imagen que subas, cualquiera sea su tamaño.
+
+
+Cliente
+JS 
+
+Cliente
+Código · CSS 
+si el servicio del cliente esta pausado necesito q el mismo pueda reactivarlo para el dia siguiente antes de las 10pm ed la misma manera q la pausa
+
+
+Viewing file
+Viewing file
+Ahora agrego la reactivación, replicando exactamente la misma lógica y el mismo corte de las 22:00 que ya usa la pausa.
+
+
+Editó 2 archivos, se ejecutaron 2 comandos, archivo visualizado · 2 notas
+Editó 2 archivos, se ejecutaron 2 comandos, archivo visualizado · 2 notas
+Listo. Cómo quedó:
+
+Cuando el cliente está Pausado, la tarjeta que antes decía "Pausar servicio" cambia automáticamente a "Reactivar servicio", con la misma lógica que la pausa: se aplica al siguiente día laborable y solo se puede pedir antes de las 22:00 (si ya pasó esa hora, muestra el mismo mensaje de error con el botón de WhatsApp para contactar soporte).
+Si el cliente ya tenía una reactivación programada para una fecha futura, se lo avisa antes de confirmar de nuevo.
+Técnicamente no toca pauseStart ni status: solo fija returnDate al siguiente día laborable, que es justamente el campo que stateFor() revisa primero — así el estado pasa a "Activo" automáticamente ese día, sin necesidad de otra lógica.
+Igual que con la pausa, la reactivación queda registrada en el historial de auditoría (Cliente reactivó su servicio (autoservicio)).
+Cuando el servicio está activo, sigue viendo la tarjeta de pausa normal, como antes.
+
+
+Cliente
+JS 
+no me deja descargar el acrchivo q me diste
+
+
+Ejecutó un comando
+Ejecutó un comando
+El archivo está bien (sintaxis válida, 16 KB). Vuelvo a compartirlo por si fue un problema puntual del enlace:
+
+
+Presented file
+Presented file
+¿Podés contarme un poco más de qué pasa exactamente? Por ejemplo:
+
+¿El botón de descarga no aparece, o aparece pero al tocarlo no pasa nada?
+¿Da algún error?
+¿Estás en el celular o en la compu?
+¿Es solo con este archivo o te pasó con los anteriores también (index.js, login.js, etc.)?
+Mientras tanto, como alternativa que seguro funciona: te pego el contenido completo de cliente.js acá abajo para que lo copies y pegues directo en tu archivo.
+
+
+Viewing file
+Viewing file
+Contame qué pasa exactamente con la descarga (¿no aparece el botón, da error, estás en el celular?) y si mientras tanto necesitás el contenido completo para copiar y pegar, ahí lo tenés arriba completo.
+
+
+Cliente
+JS 
+
+
+
+
+
+Claude es IA y puede cometer errores. Por favor, verifica nuevamente las respuestas.
+Cliente · JS
+ 
     (()=>{
       'use strict';
-
+ 
       /* La configuración de la empresa vive en config.js (un solo archivo
          para toda la app: marca + credenciales de Supabase). */
       const APP_CONFIG = window.APP_CONFIG;
-
+ 
       const OPERATIONS_KEY=`${APP_CONFIG.storagePrefix}-operaciones-v3`,CLIENT_ROW_KEY=`${APP_CONFIG.storagePrefix}-client-row-v1`,CLIENT_SESSION_KEY=`${APP_CONFIG.storagePrefix}-client-session-v1`,THEME_KEY=`${APP_CONFIG.storagePrefix}-client-theme-v1`;
       const $=s=>document.querySelector(s),n=v=>Number(v)||0,items=[['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
       const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));let data,session,client;
@@ -47,9 +132,13 @@
         ${p&&n(client.paidDays)>0&&remaining<=renewalWarningDays()&&!['Pausado','Programado','No laborable'].includes(st)?`<section class="renewal-banner rounded-4 shadow-sm p-4 mb-3 d-flex align-items-center justify-content-between flex-wrap gap-3"><div class="d-flex align-items-center gap-3"><span class="bounce fs-1">🥤</span><div><span class="ribbon mb-2 d-inline-flex">${remaining<=0?'¡Ya venció!':remaining===1?'¡Último día!':`¡Solo ${remaining} días!`}</span><h2 class="h5 mb-1 mt-2">${remaining<=0?'Tu plan ya terminó':'Tu plan está por terminar'}</h2><p class="mb-0 opacity-90">${remaining<=0?'Renueva ahora para no perder tus entregas.':'Renueva ahora y no te quedes sin tus entregas.'} ¡Es rapidísimo! 🎉</p></div></div>${whatsappNumber()?`<a class="btn btn-light rounded-pill px-4" href="${wa(`Hola, soy ${client.name}. ${remaining<=0?'Mi plan ya terminó y':`Me quedan ${remaining} día(s) y`} quiero renovarlo.`)}" target="_blank" rel="noopener">Quiero renovar</a>`:''}</section>`:''}
         <section class="row g-3"><div class="col-lg-8"><article class="card shadow-sm border-0 h-100 text-center"><div class="card-body p-4">${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="${esc(p.name)}" style="width:84px;height:84px;object-fit:cover;border-radius:16px;margin:0 auto 12px">`:''}<h2 class="h5">Tu plan actual</h2><p class="h3 mb-1">${esc(p?.name||'Plan sin asignar')}</p><span class="badge text-bg-${statusClass(st)} rounded-pill mb-4">${esc(st)}</span><div class="row g-2 justify-content-center"><div class="col-4"><div class="metric p-3"><small class="text-secondary d-block">Días pagados</small><strong class="fs-4">${n(client.paidDays)}</strong></div></div><div class="col-4"><div class="metric p-3"><small class="text-secondary d-block">Consumidos</small><strong class="fs-4">${n(client.consumedDays)}</strong></div></div><div class="col-4"><div class="metric p-3"><small class="text-secondary d-block">Restantes</small><strong class="fs-4">${remaining}</strong></div></div></div><div class="d-flex justify-content-center flex-wrap gap-2 mt-4">${items.filter(([key])=>n(included[key])>0).map(([key,label])=>{const icon=branding.itemIcons?.[key];return `<span class="badge rounded-pill text-bg-light border">${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:14px;height:14px;object-fit:cover;border-radius:50%;vertical-align:-2px;margin-right:3px">`:''}${n(included[key])} ${label}</span>`;}).join('')||'<span class="text-secondary">Sin artículos registrados.</span>'}</div></div></article></div>
         <div class="col-lg-4"><article class="card shadow-sm border-0 h-100"><div class="card-body p-4 d-flex flex-column"><h2 class="h5">Atención al cliente</h2><p class="text-secondary">Para renovar o cambiar tu plan, escríbenos directamente.</p>${whatsappNumber()?`<a class="btn btn-success mt-auto" href="${wa(`Hola, soy ${client.name}. Quiero renovar o cambiar mi plan.`)}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:'<p class="text-secondary small mb-0">Contacta a tu proveedor para más información.</p>'}</div></article></div>
-        <div class="col-12"><article class="card shadow-sm border-0"><div class="card-body p-4"><h2 class="h5">Pausar servicio</h2><p class="text-secondary">La pausa se aplica al siguiente día laborable: <b>${next.split('-').reverse().join('/')}</b>. Puedes programarla hasta las <b>22:00</b>.</p><div class="border rounded-3 p-3 mb-3"><div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="pause-only" checked disabled><label class="form-check-label fw-semibold" for="pause-only">Pausar solo, sin fecha de retorno</label></div><div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="with-return"><label class="form-check-label" for="with-return">Agregar fecha de retorno (opcional)</label></div><div id="return-date-wrap" hidden><label class="form-label" for="return-date">Fecha de retorno</label><input class="form-control" type="date" id="return-date" min="${next}" value="" disabled></div></div><button class="btn btn-primary" id="pause">Confirmar pausa</button><div class="alert alert-${error?'danger':'warning'} mt-3 mb-0 ${message?'':'d-none'}" id="message">${esc(message)}${showSupport&&whatsappNumber()?` <a class="alert-link" href="${wa(`Hola, soy ${client.name}. Necesito solicitar una pausa de mi servicio.`)}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div></div></article></div>
+        <div class="col-12">${st==='Pausado'?`<article class="card shadow-sm border-0"><div class="card-body p-4"><h2 class="h5">Reactivar servicio</h2><p class="text-secondary">Tu servicio se reactivará el siguiente día laborable: <b>${next.split('-').reverse().join('/')}</b>. Puedes solicitarlo hasta las <b>22:00</b>, igual que la pausa.</p>${client.returnDate&&client.returnDate>date?`<p class="text-secondary small">Ya tienes una reactivación programada para el <b>${client.returnDate.split('-').reverse().join('/')}</b>. Puedes confirmar de nuevo para actualizarla al siguiente día laborable.</p>`:''}<button class="btn btn-primary" id="resume">Confirmar reactivación</button><div class="alert alert-${error?'danger':'warning'} mt-3 mb-0 ${message?'':'d-none'}" id="message">${esc(message)}${showSupport&&whatsappNumber()?` <a class="alert-link" href="${wa(`Hola, soy ${client.name}. Necesito reactivar mi servicio.`)}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div></div></article>`:`<article class="card shadow-sm border-0"><div class="card-body p-4"><h2 class="h5">Pausar servicio</h2><p class="text-secondary">La pausa se aplica al siguiente día laborable: <b>${next.split('-').reverse().join('/')}</b>. Puedes programarla hasta las <b>22:00</b>.</p><div class="border rounded-3 p-3 mb-3"><div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="pause-only" checked disabled><label class="form-check-label fw-semibold" for="pause-only">Pausar solo, sin fecha de retorno</label></div><div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="with-return"><label class="form-check-label" for="with-return">Agregar fecha de retorno (opcional)</label></div><div id="return-date-wrap" hidden><label class="form-label" for="return-date">Fecha de retorno</label><input class="form-control" type="date" id="return-date" min="${next}" value="" disabled></div></div><button class="btn btn-primary" id="pause">Confirmar pausa</button><div class="alert alert-${error?'danger':'warning'} mt-3 mb-0 ${message?'':'d-none'}" id="message">${esc(message)}${showSupport&&whatsappNumber()?` <a class="alert-link" href="${wa(`Hola, soy ${client.name}. Necesito solicitar una pausa de mi servicio.`)}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div></div></article>`}</div>
         ${(branding.instagramUrl||APP_CONFIG.instagramUrl)?`<div class="col-12"><a class="instagram d-flex align-items-center gap-3 rounded-4 p-3 shadow-sm" href="${esc(branding.instagramUrl||APP_CONFIG.instagramUrl)}" target="_blank" rel="noopener"><span class="fs-3">◎</span><span><b class="d-block">Seguinos en Instagram</b><small>${esc(branding.instagramHandle||APP_CONFIG.instagramHandle)} · novedades, menús y bienestar</small></span></a></div>`:''}</section>`;
-        $('#theme').value=theme;$('#theme').onchange=e=>{localStorage.setItem(THEME_KEY,e.target.value);render();};$('#logout').onclick=()=>{sessionStorage.removeItem(CLIENT_SESSION_KEY);location.href='./login.html';};$('#with-return').onchange=e=>{const input=$('#return-date');$('#return-date-wrap').hidden=!e.target.checked;input.disabled=!e.target.checked;if(!e.target.checked)input.value='';};$('#pause').onclick=requestPause;
+        $('#theme').value=theme;$('#theme').onchange=e=>{localStorage.setItem(THEME_KEY,e.target.value);render();};$('#logout').onclick=()=>{sessionStorage.removeItem(CLIENT_SESSION_KEY);location.href='./login.html';};
+        // Estos controles solo existen en la tarjeta de pausa (no en la de reactivar).
+        $('#with-return')?.addEventListener('change',e=>{const input=$('#return-date');$('#return-date-wrap').hidden=!e.target.checked;input.disabled=!e.target.checked;if(!e.target.checked)input.value='';});
+        $('#pause')?.addEventListener('click',requestPause);
+        $('#resume')?.addEventListener('click',requestResume);
       }
       async function requestPause(){const now=new Date();if(now.getHours()>=22){render('Ya pasó el horario de pausa automática. Ponte en contacto con Atención al Cliente.',true,true);return;}const next=nextWorkDay(workDate()),returnDate=$('#with-return').checked?$('#return-date').value:'';if($('#with-return').checked&&!returnDate){render('Selecciona una fecha de retorno o desactiva esa opción.',true);return;}if(returnDate&&returnDate<=next){render('La fecha de retorno debe ser posterior al día pausado.',true);return;}client.pauseStart=next;client.returnDate=returnDate;client.status='Pausado';client.pauseDates=(client.pauseDates||[]).filter(d=>d!==next);const saved=await save();if(!saved){render('No se pudo guardar la pausa en la base de datos. Intenta nuevamente.',true);return;}
         // El panel de operaciones (index.js) registra cada pausa en el
@@ -59,6 +148,21 @@
         // cliente como el actor (no hay un rol de staff acá).
         window.SupabaseDB?.dbInsertAudit({actor_id:client.id,actor_name:client.name,actor_role:'cliente',action:'Cliente pausó su servicio (autoservicio)',entity_type:'client',entity_label:client.name,entity_id:client.id,details:{desde:next,retorno:returnDate||'sin definir'}});
         render(returnDate?`Pausa programada desde el ${next.split('-').reverse().join('/')} hasta el ${returnDate.split('-').reverse().join('/')}.`:`Pausa abierta desde el ${next.split('-').reverse().join('/')} sin fecha de retorno.`);}
+      // Reactivación por el propio cliente, con el mismo horario límite
+      // (22:00) y la misma lógica de "aplica al siguiente día laborable"
+      // que la pausa. No hace falta tocar client.status ni pauseStart: al
+      // fijar returnDate=next, stateFor() ya devuelve 'Activo' automáticamente
+      // a partir de esa fecha (revisa returnDate antes que pauseStart).
+      async function requestResume(){
+        const now=new Date();
+        if(now.getHours()>=22){render('Ya pasó el horario de reactivación automática. Ponte en contacto con Atención al Cliente.',true,true);return;}
+        const next=nextWorkDay(workDate());
+        client.returnDate=next;
+        const saved=await save();
+        if(!saved){render('No se pudo guardar la reactivación en la base de datos. Intenta nuevamente.',true);return;}
+        window.SupabaseDB?.dbInsertAudit({actor_id:client.id,actor_name:client.name,actor_role:'cliente',action:'Cliente reactivó su servicio (autoservicio)',entity_type:'client',entity_label:client.name,entity_id:client.id,details:{reactivaDesde:next}});
+        render(`Reactivación programada para el ${next.split('-').reverse().join('/')}.`);
+      }
       // Al primer ingreso (o si se limpió el navegador) todavía no hay una
       // copia local del cliente: se busca su propia fila en la base de datos
       // antes de mostrar el portal. En las siguientes visitas ya está en
@@ -81,4 +185,3 @@
       }
       boot();
     })();
-  
