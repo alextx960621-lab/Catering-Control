@@ -7,10 +7,16 @@
       const APP_CONFIG = window.APP_CONFIG;
 
       const OPERATIONS_KEY=`${APP_CONFIG.storagePrefix}-operaciones-v3`,CLIENT_ROW_KEY=`${APP_CONFIG.storagePrefix}-client-row-v1`,CLIENT_SESSION_KEY=`${APP_CONFIG.storagePrefix}-client-session-v1`,THEME_KEY=`${APP_CONFIG.storagePrefix}-client-theme-v1`;
-      const $=s=>document.querySelector(s),n=v=>Number(v)||0,items=[['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
+      const $=s=>document.querySelector(s),n=v=>Number(v)||0;
+      // Antes esta lista era fija (los mismos 8 artículos hardcodeados en
+      // index.js). Ahora el menú real vive en Configuración/Planes (panel de
+      // operaciones) y llega acá vía syncBranding() como branding.menuItems.
+      // DEFAULT_ITEMS solo se usa como respaldo si todavía no sincronizó.
+      const DEFAULT_ITEMS=[['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
+      function menuItemsList(){ return branding.menuItems && branding.menuItems.length ? branding.menuItems : DEFAULT_ITEMS; }
       const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));let data,session,client;
       let branding={};try{branding=JSON.parse(localStorage.getItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`))||{};}catch(_){branding={};}
-      async function syncBranding(){try{const personal=await window.SupabaseDB?.dbGet('personal');if(personal?.settings){branding={companyName:personal.settings.companyName,logoUrl:personal.settings.logoUrl,itemIcons:personal.settings.itemIcons||{},whatsappNumber:personal.settings.whatsappNumber,instagramUrl:personal.settings.instagramUrl,instagramHandle:personal.settings.instagramHandle,adImageUrl:personal.settings.adImageUrl,renewalWarningDays:personal.settings.renewalWarningDays};localStorage.setItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`,JSON.stringify(branding));}}catch(_){}}
+      async function syncBranding(){try{const personal=await window.SupabaseDB?.dbGet('personal');if(personal?.settings){branding={companyName:personal.settings.companyName,logoUrl:personal.settings.logoUrl,itemIcons:personal.settings.itemIcons||{},whatsappNumber:personal.settings.whatsappNumber,instagramUrl:personal.settings.instagramUrl,instagramHandle:personal.settings.instagramHandle,adImageUrl:personal.settings.adImageUrl,renewalWarningDays:personal.settings.renewalWarningDays,menuItems:(personal.settings.menuItems||[]).map(m=>[m.key,m.label])};localStorage.setItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`,JSON.stringify(branding));}}catch(_){}}
       // "data" ahora solo trae planes y días (compartidos, livianos). El
       // cliente propio ("client") se guarda aparte, en su propia fila de la
       // base de datos: así este portal nunca descarga la lista de los demás

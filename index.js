@@ -18,7 +18,17 @@
       const n = v => Number(v) || 0;
       const uid = p => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
       const today = () => new Date().toISOString().slice(0,10);
-      const items = [['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
+      // Antes esta lista era fija en el código (8 artículos que ni se podían
+      // renombrar ni agregar/quitar). Ahora solo se usa para "sembrar" el
+      // menú la primera vez (empresa nueva o empresa existente que todavía
+      // no tiene menuItems guardado); de ahí en adelante el menú real vive
+      // en state.settings.menuItems (editable desde Planes) y se lee
+      // siempre a través de menuItems().
+      const DEFAULT_MENU_ITEMS = [['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
+      // Devuelve el menú actual como pares [key,label], igual forma que antes
+      // tenía la lista fija, para no tener que tocar todo el código que ya
+      // la consume — solo hay que llamar a menuItems() en vez de usar 'items'.
+      function menuItems(){ return (state?.settings?.menuItems||[]).map(m=>[m.key,m.label]); }
       // Comprime y redimensiona una imagen antes de guardarla como base64,
       // para que subir logos/íconos/fotos no infle la base de datos ni ralentice la web.
       function readImageAsDataURL(file, maxDim = 480, quality = 0.82) {
@@ -136,11 +146,12 @@
         plans: [
           {id:'p_balance', name:'Balance', type:'General', items:{shots:1,proteins:1,juices:1,breakfast:1,snack1:1,lunch:1,snack2:1,dinner:1}},
           {id:'p_light', name:'Light', type:'General', items:{shots:0,proteins:1,juices:1,breakfast:1,snack1:0,lunch:1,snack2:0,dinner:1}}
-        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}, whatsappNumber:'', instagramUrl:'', instagramHandle:'', adImageUrl:'', renewalWarningDays:3}
+        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}, whatsappNumber:'', instagramUrl:'', instagramHandle:'', adImageUrl:'', renewalWarningDays:3, menuItems: DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label}))}
       });
       function normalize() {
         state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
         state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3;
+        if (!Array.isArray(state.settings.menuItems) || !state.settings.menuItems.length) state.settings.menuItems = DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label}));
         if (!state.routes.some(r => r.open)) state.routes.unshift({id:'r_open',name:'Ruta abierta',description:'Drivers disponibles sin ruta de trabajo',open:true,order:0});
         state.clients.forEach(c => { c.items ||= {}; c.order ??= ''; c.status ||= 'Activo'; c.returnDate ??= c.estimatedReturn || ''; c.paidDays ??= 0; c.consumedDays ??= 0; });
       }
@@ -406,8 +417,8 @@
       function notice(text, error=false){ const el=$('#notice'); el.textContent=text; el.className='notice show'+(error?' error':''); clearTimeout(notice.t); notice.t=setTimeout(()=>el.className='notice',2600); }
       function pageHead(title, subtitle, actions=''){ return `<div class="page-head"><div><h1>${title}</h1><p>${subtitle}</p></div><div class="head-actions">${actions}</div></div>`; }
       function options(list,current,placeholder='Seleccionar…',label=x=>x.name){ return `<option value="">${placeholder}</option>`+list.map(x=>`<option value="${esc(x.id)}" ${x.id===current?'selected':''}>${esc(label(x))}</option>`).join(''); }
-      function itemFields(values={}){ return `<div class="items-grid">${items.map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<label>${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:16px;height:16px;object-fit:cover;border-radius:4px;vertical-align:-3px;margin-right:4px">`:''}${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`;}).join('')}</div>`; }
-      function formItems(f){ return Object.fromEntries(items.map(([key])=>[key,n(f.elements[key]?.value)])); }
+      function itemFields(values={}){ return `<div class="items-grid">${menuItems().map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<label>${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:16px;height:16px;object-fit:cover;border-radius:4px;vertical-align:-3px;margin-right:4px">`:''}${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`;}).join('')}</div>`; }
+      function formItems(f){ return Object.fromEntries(menuItems().map(([key])=>[key,n(f.elements[key]?.value)])); }
       // Antes esta función ordenaba SIEMPRE por el 'key' que le pasaba cada
       // pantalla (p. ej. 'order' en Clientes/Drivers/Rutas), sin importar en
       // qué encabezado hiciera clic el usuario: el clic sí guardaba la
@@ -487,7 +498,7 @@
             head.ondrop=e=>{
               e.preventDefault(); const targetKey=head.dataset.sort;
               if(!sourceKey || sourceKey===targetKey) return;
-              const all=['order','name','route','driver','plan',...items.map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'];
+              const all=['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'];
               const order=state.settings.dispatchColumnOrder.length?[...state.settings.dispatchColumnOrder]:all;
               all.forEach(key=>{if(!order.includes(key))order.push(key);});
               const from=order.indexOf(sourceKey), to=order.indexOf(targetKey);
@@ -523,7 +534,7 @@
           {key:'route',label:'Ruta',cell:c=>esc(routeName(effectiveRouteId(c,date)))},
           {key:'driver',label:'Driver',cell:c=>esc(driverName(effectiveDriverId(c,date)))},
           {key:'plan',label:'Plan',cell:c=>{const p=plan(c.planId);return `${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:18px;height:18px;object-fit:cover;border-radius:4px;vertical-align:-4px;margin-right:4px">`:''}${esc(planName(c.planId))}`;}},
-          ...items.map(([key,label])=>({key,label,cell:c=>itemValue(c,key)})),
+          ...menuItems().map(([key,label])=>({key,label,cell:c=>itemValue(c,key)})),
           {key:'address1',label:'Dirección',cell:c=>{const addr=effectiveAddress(c,date),other=addr===c.address2?c.address1:c.address2;return `${esc(addr||'—')}<br><small>${esc(other||'')}</small>`;}},
           {key:'maps',label:'Google Maps',cell:c=>{const link=effectiveMaps(c,date);return `${link?`<a href="${esc(link)}" target="_blank" rel="noopener">Abrir mapa</a>`:'—'}<br>${editableField(c,'maps',c.maps||'')}`;}},
           {key:'phone1',label:'Teléfono 1',cell:c=>editableField(c,'phone1',c.phone1||'')},
@@ -540,7 +551,7 @@
         const allKeys=definitions.map(x=>x.key), wanted=state.settings.dispatchColumnOrder;
         const arranged=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
         const columns=arranged.filter(x=>!state.settings.hiddenColumns.includes(x.key));
-        const numericKeys=new Set([...items.map(([key])=>key),'career','bags','remaining']);
+        const numericKeys=new Set([...menuItems().map(([key])=>key),'career','bags','remaining']);
         const totalRow=(label,orders,variant)=>{
           let labelled=false;
           return `<tr class="table-totals ${variant}">${columns.map(col=>{
@@ -614,7 +625,7 @@
         // elegir el plan, no bloquea los campos).
         if(planField) planField.onchange=()=>{
           const p=plan(planField.value);
-          items.forEach(([key])=>{ const input=form.elements[key]; if(input) input.value=n(p?.items?.[key]); });
+          menuItems().forEach(([key])=>{ const input=form.elements[key]; if(input) input.value=n(p?.items?.[key]); });
         };
         initScheduleEditor(form, c?.schedule||[]);
       }
@@ -655,12 +666,56 @@
       function routeForm(r={}){return `<div class="form-grid"><label>Nombre de ruta *<input name="name" required value="${esc(r.name)}"></label><label>Orden<input type="number" min="0" name="order" value="${esc(r.order)}"></label><label>Tipo de ruta<select name="type"><option value="short" ${(r.type||'short')==='short'?'selected':''}>Corta</option><option value="long" ${r.type==='long'?'selected':''}>Larga</option><option value="verylong" ${r.type==='verylong'?'selected':''}>Muy larga</option></select></label><label class="wide">Descripción / zona<input name="description" value="${esc(r.description)}"></label></div>`;}
       function openRoute(id){const isNew=!id;const r0=id?route(id):null;showModal(r0?'Editar ruta':'Crear ruta',routeForm(r0||{}),f=>{const data=Object.fromEntries(new FormData(f));let r=r0;if(r)Object.assign(r,data);else{r={id:uid('r'),...data};state.routes.push(r);}save();renderRoutes();notice('Ruta guardada.');logAudit(isNew?'Ruta creada':'Ruta editada','route',r.name,r.id,{});});}
 
-      function renderPlans(){ if(!canAccessPage('plans')) return; const rows=p=>`<tr><td style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;border-radius:8px;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><b>${esc(p.name)}</b></td><td>${esc(p.type||'General')}</td><td>${items.map(([k,l])=>`${l}: ${n(p.items?.[k])}`).join('<br>')}</td><td>${canManage()?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}</td></tr>`;$('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan.',canManage()?'<button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="primary" data-action="add-plan">+ Crear plan</button>':'')+table(state.plans,[['Plan','name'],['Tipo','type'],['Artículos incluidos','items'],['Acciones','id']],rows,'plans');}
+      function renderPlans(){ if(!canAccessPage('plans')) return; const rows=p=>`<tr><td style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;border-radius:8px;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><b>${esc(p.name)}</b></td><td>${esc(p.type||'General')}</td><td>${menuItems().map(([k,l])=>`${l}: ${n(p.items?.[k])}`).join('<br>')}</td><td>${canManage()?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}</td></tr>`;
+        const menuRows=()=>menuItems().map(([key,label])=>`<tr><td>${esc(label)}</td><td>${canManage()?`<button class="icon-btn" data-action="edit-menu-item" data-id="${key}">Editar</button><button class="icon-btn delete" data-action="delete-menu-item" data-id="${key}">×</button>`:'—'}</td></tr>`).join('');
+        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan.',canManage()?'<button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="primary" data-action="add-plan">+ Crear plan</button>':'')+table(state.plans,[['Plan','name'],['Tipo','type'],['Artículos incluidos','items'],['Acciones','id']],rows,'plans')
+          +pageHead('Artículos del menú','Aparecen como columnas en Día de trabajo, en el Excel del día procesado y en el portal del cliente. Se pueden crear, renombrar o eliminar artículos (incluidos los que vienen por defecto).',canManage()?'<button class="primary" data-action="add-menu-item">+ Crear artículo</button>':'')
+          +`<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Artículo</th><th>Acciones</th></tr></thead><tbody>${menuItems().length?menuRows():'<tr><td colspan="2" class="empty">No hay artículos definidos.</td></tr>'}</tbody></table></div>`;
+      }
+      function menuItemForm(item={}){ return `<div class="form-grid"><label class="wide">Nombre del artículo *<input name="label" required value="${esc(item.label)}" placeholder="Ej.: Postre"></label></div>`; }
+      // key===undefined ⇒ crear artículo nuevo. La 'key' interna (usada en
+      // planes/clientes/inventario/columnas) nunca cambia una vez creada, ni
+      // siquiera al renombrar el artículo — así renombrar no rompe nada que
+      // ya esté guardado referenciando ese artículo.
+      function openMenuItem(key){
+        const isNew=!key;
+        const current=isNew?null:state.settings.menuItems.find(x=>x.key===key);
+        showModal(current?'Editar artículo':'Crear artículo',menuItemForm(current||{}),async f=>{
+          const label=f.elements.label.value.trim();
+          if(!label){notice('El nombre no puede estar vacío.',true);return false;}
+          if(current){ current.label=label; }
+          else { state.settings.menuItems.push({key:uid('item'),label}); }
+          const saved=await save();
+          if(!saved)return false;
+          renderPlans();
+          notice(isNew?'Artículo creado.':'Artículo actualizado.');
+          logAudit(isNew?'Artículo de menú creado':'Artículo de menú editado','menu-item',label,current?.key||'',{});
+        });
+      }
+      // Al eliminar un artículo se limpia también de todo lo que lo
+      // referencia (planes, clientes, íconos asignados y vínculos de
+      // inventario) para no dejar datos huérfanos apuntando a una clave que
+      // ya no existe.
+      async function deleteMenuItem(key){
+        const current=state.settings.menuItems.find(x=>x.key===key);
+        if(!current)return;
+        if(state.settings.menuItems.length<=1){notice('Debe existir al menos un artículo en el menú.',true);return;}
+        if(!confirm(`¿Eliminar el artículo "${current.label}"? Se quitará de planes, clientes y vínculos de inventario que lo usen.`))return;
+        state.settings.menuItems=state.settings.menuItems.filter(x=>x.key!==key);
+        state.plans.forEach(p=>{ if(p.items) delete p.items[key]; });
+        state.clients.forEach(c=>{ if(c.items) delete c.items[key]; });
+        if(state.settings.itemIcons) delete state.settings.itemIcons[key];
+        state.inventory.links=state.inventory.links.filter(l=>l.clientItemKey!==key);
+        const saved=await save();
+        renderPlans();
+        notice(saved?'Artículo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved);
+        if(saved) logAudit('Artículo de menú eliminado','menu-item',current.label,key,{});
+      }
       // Antes esto vivía en Configuración, separado de donde se administran
       // los planes y sus artículos; ahora es un botón acá mismo en Planes.
       function itemIconsForm(){
         return `<p class="muted">Sube una imagen para cada artículo del menú (aparece junto a las cantidades en planes y clientes).</p>
-        <div class="toggle-list" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${items.map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px">
+        <div class="toggle-list" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${menuItems().map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px">
           <div style="width:34px;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div>
           <div style="flex:1;min-width:0">
             <div style="font-size:12px;font-weight:650;margin-bottom:4px">${label}</div>
@@ -713,14 +768,14 @@
         notice(saved?'Movimiento eliminado y stock ajustado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved);
         if(saved) logAudit('Movimiento de inventario eliminado','inventory-movement',item?.name||m.inventoryId,m.id,{tipo:m.type,cantidad:m.quantity,motivo:m.note});
       }
-      function inventoryLinkForm(link={}){ return `<div class="form-grid"><label>Producto de cocina *<select name="inventoryId" required>${inventoryOptions(link.inventoryId)}</select></label><label>Artículo entregado al cliente *<select name="clientItemKey" required>${items.map(([key,label])=>`<option value="${key}" ${link.clientItemKey===key?'selected':''}>${label}</option>`).join('')}</select></label><label class="wide">Cantidad a descontar por cada artículo entregado *<input name="quantity" type="number" min="0.01" step="0.01" required value="${n(link.quantity)||1}"></label></div>`; }
+      function inventoryLinkForm(link={}){ return `<div class="form-grid"><label>Producto de cocina *<select name="inventoryId" required>${inventoryOptions(link.inventoryId)}</select></label><label>Artículo entregado al cliente *<select name="clientItemKey" required>${menuItems().map(([key,label])=>`<option value="${key}" ${link.clientItemKey===key?'selected':''}>${label}</option>`).join('')}</select></label><label class="wide">Cantidad a descontar por cada artículo entregado *<input name="quantity" type="number" min="0.01" step="0.01" required value="${n(link.quantity)||1}"></label></div>`; }
       function openInventoryLink(id){ const isNew=!id; const link0=id?state.inventory.links.find(x=>x.id===id):null; showModal(link0?'Editar vínculo de consumo':'Vincular consumo a artículo entregado',inventoryLinkForm(link0||{}),async f=>{const data=Object.fromEntries(new FormData(f));let link=link0;if(link)Object.assign(link,data);else{link={id:uid('link'),...data};state.inventory.links.push(link);}const saved=await save();if(!saved)return false;renderInventory();notice('Vínculo de consumo guardado.');logAudit(isNew?'Vínculo de consumo creado':'Vínculo de consumo editado','inventory-link',kitchenItem(link.inventoryId)?.name||link.inventoryId,link.id,{});}); }
       async function deleteInventoryItem(id){ const item=kitchenItem(id); if(!item || !confirm(`¿Eliminar ${item.name} del inventario?`))return; state.inventory.items=state.inventory.items.filter(x=>x.id!==id); state.inventory.links=state.inventory.links.filter(x=>x.inventoryId!==id); const saved=await save();renderInventory();notice(saved?'Producto eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); if(saved) logAudit('Producto de inventario eliminado','inventory-item',item.name,id,{}); }
       async function deleteInventoryLink(id){ const link=state.inventory.links.find(x=>x.id===id); if(!link||!confirm('¿Eliminar este vínculo de consumo?'))return; state.inventory.links=state.inventory.links.filter(x=>x.id!==id);const saved=await save();renderInventory();notice(saved?'Vínculo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); if(saved) logAudit('Vínculo de consumo eliminado','inventory-link',kitchenItem(link.inventoryId)?.name||link.inventoryId,id,{}); }
       function renderInventory(){
         if(!canAccessPage('inventory')) return;
-        const itemRows=item=>{const links=state.inventory.links.filter(l=>l.inventoryId===item.id);const low=n(item.stock)<=n(item.minimum);return `<tr><td><b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}</td><td>${esc(item.unit||'unidades')}</td><td>${n(item.stock)}</td><td>${n(item.minimum)}</td><td>${links.length?links.map(l=>`${n(l.quantity)} × ${esc(items.find(([key])=>key===l.clientItemKey)?.[1]||l.clientItemKey)}`).join('<br>'):'—'}</td><td>${canManageInventory()?`<button class="icon-btn" data-action="edit-inventory-item" data-id="${item.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-item" data-id="${item.id}">×</button>`:'—'}</td></tr>`;};
-        const linkRows=link=>`<tr><td>${esc(kitchenItem(link.inventoryId)?.name||'Producto eliminado')}</td><td>${esc(items.find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey)}</td><td>${n(link.quantity)}</td><td>${canManageInventory()?`<button class="icon-btn" data-action="edit-inventory-link" data-id="${link.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-link" data-id="${link.id}">×</button>`:'—'}</td></tr>`;
+        const itemRows=item=>{const links=state.inventory.links.filter(l=>l.inventoryId===item.id);const low=n(item.stock)<=n(item.minimum);return `<tr><td><b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}</td><td>${esc(item.unit||'unidades')}</td><td>${n(item.stock)}</td><td>${n(item.minimum)}</td><td>${links.length?links.map(l=>`${n(l.quantity)} × ${esc(menuItems().find(([key])=>key===l.clientItemKey)?.[1]||l.clientItemKey)}`).join('<br>'):'—'}</td><td>${canManageInventory()?`<button class="icon-btn" data-action="edit-inventory-item" data-id="${item.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-item" data-id="${item.id}">×</button>`:'—'}</td></tr>`;};
+        const linkRows=link=>`<tr><td>${esc(kitchenItem(link.inventoryId)?.name||'Producto eliminado')}</td><td>${esc(menuItems().find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey)}</td><td>${n(link.quantity)}</td><td>${canManageInventory()?`<button class="icon-btn" data-action="edit-inventory-link" data-id="${link.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-link" data-id="${link.id}">×</button>`:'—'}</td></tr>`;
         const recent=state.inventory.movements.slice(0,12);
         const movementRows=m=>`<tr><td>${esc(m.date)}</td><td>${esc(kitchenItem(m.inventoryId)?.name||'Producto eliminado')}</td><td>${m.quantity>0?`+${n(m.quantity)}`:n(m.quantity)}</td><td>${m.type==='entry'?'Ingreso':m.type==='waste'?'Merma':m.type==='delivery'?'Entrega procesada':'Uso'}</td><td>${esc(m.note||'—')}</td><td>${canManageInventory()&&m.type!=='delivery'?`<button class="icon-btn" data-action="edit-inventory-movement" data-id="${m.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-movement" data-id="${m.id}">×</button>`:'—'}</td></tr>`;
         const actions=canManageInventory()?`<button class="primary" data-action="add-inventory-item">+ Producto de cocina</button><button class="outline" data-action="add-inventory-entry">+ Ingreso</button><button class="outline" data-action="add-inventory-use">− Uso</button><button class="outline" data-action="add-inventory-waste">− Merma</button><button class="outline" data-action="add-inventory-link">Vincular consumo</button>`:'';
@@ -733,7 +788,7 @@
           const delivered=active.reduce((sum,c)=>sum+clientItemQuantity(c,link.clientItemKey),0), used=delivered*n(link.quantity);
           if(!used)return;
           item.stock=n(item.stock)-used;
-          state.inventory.movements.unshift({id:uid('mov'),date,inventoryId:item.id,type:'delivery',quantity:-used,note:`Descuento automático: ${delivered} ${items.find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey}`});
+          state.inventory.movements.unshift({id:uid('mov'),date,inventoryId:item.id,type:'delivery',quantity:-used,note:`Descuento automático: ${delivered} ${menuItems().find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey}`});
         });
       }
       // Revierte exactamente los movimientos que applyInventoryForProcessedDay generó
@@ -815,7 +870,7 @@
       });bindUserFormRoleToggle();}
       function renderSettings(){
         if(!canAccessPage('settings')) return;
-        const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...items,['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['remaining','Servicios restantes'],['returnDate','Fecha de retorno'],['id','Acciones']];
+        const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...menuItems(),['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['remaining','Servicios restantes'],['returnDate','Fecha de retorno'],['id','Acciones']];
         const logo=state.settings.logoUrl;
         // Todos los roles pueden entrar a Configuración, pero solo ven y editan
         // la tarjeta de "Columnas visibles". El resto (apariencia, empresa,
@@ -904,29 +959,27 @@
       // haber sido atendido.
       async function exportProcessedDaySnapshot(date,clientIds){
         const activeClients=clientIds?state.clients.filter(c=>clientIds.includes(c.id)):state.clients.filter(c=>status(c,date)==='Activo');
+        // Las columnas de artículos ya no son 8 fijas (shots/jugos/etc.): se
+        // arman a partir del menú actual (menuItems()), así que un artículo
+        // creado, renombrado o eliminado en Planes se refleja automáticamente
+        // en este Excel sin tocar código.
+        const menuCols=menuItems();
         // Fila numérica por cliente para la hoja "Clientes atendidos", que se
         // agrupa y totaliza por ruta más abajo.
         const clientRow=c=>{
           const pitems=c.items||plan(c.planId)?.items||{};
-          return {
-            nombre:c.name,
-            bolsas:n(c.bags),
-            shots:n(pitems.shots),
-            jugos:n(pitems.juices),
-            proteinas:n(pitems.proteins),
-            desayuno:n(pitems.breakfast),
-            merienda1:n(pitems.snack1),
-            almuerzo:n(pitems.lunch),
-            merienda2:n(pitems.snack2),
-            cena:n(pitems.dinner),
-            restantes:n(c.paidDays)?Math.max(0,n(c.paidDays)-n(c.consumedDays)):0,
-            carreras:n(c.career||1)
-          };
+          const row={nombre:c.name, bolsas:n(c.bags)};
+          menuCols.forEach(([key])=>{row[key]=n(pitems[key]);});
+          row.restantes=n(c.paidDays)?Math.max(0,n(c.paidDays)-n(c.consumedDays)):0;
+          row.carreras=n(c.career||1);
+          return row;
         };
-        const NUMERIC_KEYS=['bolsas','shots','jugos','proteinas','desayuno','merienda1','almuerzo','merienda2','cena','restantes','carreras'];
+        const NUMERIC_KEYS=['bolsas',...menuCols.map(([key])=>key),'restantes','carreras'];
         // Agrupa por ruta (efectiva del día) respetando el orden en que las
         // rutas están cargadas en Rutas; los clientes sin ruta reconocible
-        // quedan en un grupo "Sin ruta" al final.
+        // quedan en un grupo "Sin ruta" al final. Dentro de cada ruta, los
+        // clientes van en el orden que el driver les asignó (campo "Orden"
+        // en Día de trabajo/Clientes), no en el orden en que se cargaron.
         const groupsById=new Map();
         activeClients.forEach(c=>{
           const rid=effectiveRouteId(c,date)||'__none__';
@@ -935,6 +988,7 @@
         });
         const orderedIds=[...state.routes.map(r=>r.id),'__none__'].filter(id=>groupsById.has(id));
         const routeGroups=orderedIds.map(id=>groupsById.get(id));
+        routeGroups.forEach(group=>{ group.clients.sort((a,b)=>(n(a.order)||9999)-(n(b.order)||9999)); });
         const movimientosDelDia=state.inventory.movements.filter(m=>m.date===date&&m.type==='delivery').map(m=>({
           producto:kitchenItem(m.inventoryId)?.name||m.inventoryId,
           cantidadDescontada:-n(m.quantity),
@@ -957,18 +1011,17 @@
         const ws=wb.addWorksheet('Clientes atendidos',{views:[{state:'frozen',ySplit:1}]});
         ws.columns=[
           {header:'Nombre',key:'nombre',width:26},{header:'Ruta',key:'ruta',width:16},
-          {header:'Bolsas',key:'bolsas',width:9},{header:'Shots',key:'shots',width:9},
-          {header:'Jugos',key:'jugos',width:9},{header:'Proteínas',key:'proteinas',width:11},
-          {header:'Desayuno',key:'desayuno',width:11},{header:'Merienda 1',key:'merienda1',width:12},
-          {header:'Almuerzo',key:'almuerzo',width:11},{header:'Merienda 2',key:'merienda2',width:12},
-          {header:'Cena',key:'cena',width:9},{header:'Servicios restantes',key:'restantes',width:17},
+          {header:'Bolsas',key:'bolsas',width:9},
+          ...menuCols.map(([key,label])=>({header:label,key,width:11})),
+          {header:'Servicios restantes',key:'restantes',width:17},
           {header:'Carreras',key:'carreras',width:11}
         ];
+        const CARRERAS_COL=ws.columns.length; // última columna: se resalta en ámbar en toda la hoja
         const CARRERAS_FILL={argb:'FFFFC857'}; // ámbar: resalta la columna Carreras en toda la hoja
-        ws.getRow(1).eachCell((cell,colNumber)=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===13?'FFB8860B':'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        ws.getRow(1).eachCell((cell,colNumber)=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===CARRERAS_COL?'FFB8860B':'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
         const sumField=(clients,key)=>clients.reduce((a,c)=>a+clientRow(c)[key],0);
-        const styleDataRow=(row,i)=>row.eachCell((cell,colNumber)=>{cell.fill={type:'pattern',pattern:'solid',fgColor:colNumber===13?CARRERAS_FILL.argb:{argb:i%2===0?'FFF3F6FB':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};cell.alignment={vertical:'top'};});
-        const styleTotalRow=(row,argb)=>row.eachCell((cell,colNumber)=>{cell.font={bold:true};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===13?'FFB8860B':argb}};if(colNumber===13)cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        const styleDataRow=(row,i)=>row.eachCell((cell,colNumber)=>{cell.fill={type:'pattern',pattern:'solid',fgColor:colNumber===CARRERAS_COL?CARRERAS_FILL.argb:{argb:i%2===0?'FFF3F6FB':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};cell.alignment={vertical:'top'};});
+        const styleTotalRow=(row,argb)=>row.eachCell((cell,colNumber)=>{cell.font={bold:true};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===CARRERAS_COL?'FFB8860B':argb}};if(colNumber===CARRERAS_COL)cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
         routeGroups.forEach(group=>{
           group.clients.forEach((c,i)=>{const row=ws.addRow({...clientRow(c),ruta:group.name});styleDataRow(row,i);});
           const totalRow=ws.addRow({nombre:`Total ${group.name}`,ruta:'',...Object.fromEntries(NUMERIC_KEYS.map(k=>[k,sumField(group.clients,k)]))});
@@ -976,7 +1029,7 @@
         });
         const grandTotalRow=ws.addRow({nombre:'TOTAL GENERAL',ruta:'',...Object.fromEntries(NUMERIC_KEYS.map(k=>[k,sumField(activeClients,k)]))});
         styleTotalRow(grandTotalRow,'FF0D6EFD');
-        grandTotalRow.eachCell((cell,colNumber)=>{if(colNumber!==13)cell.font={bold:true,color:{argb:'FFFFFFFF'}};});
+        grandTotalRow.eachCell((cell,colNumber)=>{if(colNumber!==CARRERAS_COL)cell.font={bold:true,color:{argb:'FFFFFFFF'}};});
         if(movimientosDelDia.length){
           const ws2=wb.addWorksheet('Inventario descontado',{views:[{state:'frozen',ySplit:1}]});
           ws2.columns=[{header:'Producto',key:'producto',width:28},{header:'Cantidad descontada',key:'cantidadDescontada',width:20},{header:'Unidad',key:'unidad',width:14},{header:'Nota',key:'nota',width:36}];
@@ -1047,10 +1100,12 @@
         const date=state.currentDate;
         const activeClients=state.clients.filter(c=>status(c,date)==='Activo');
         if(!window.ExcelJS){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
+        if(!activeClients.length){ notice('No hay clientes activos para exportar hoy.',true); return; }
         const wb=new ExcelJS.Workbook();
         wb.creator=state.settings.companyName||APP_CONFIG.companyName;
         const ws=wb.addWorksheet('Dietas especiales',{views:[{state:'frozen',ySplit:1}]});
         ws.columns=[
+          {header:'Ruta',key:'ruta',width:16},
           {header:'Cliente',key:'cliente',width:26},
           {header:'Plan',key:'plan',width:18},
           {header:'Artículos incluidos',key:'items',width:46},
@@ -1065,22 +1120,44 @@
           cell.alignment={vertical:'middle',horizontal:'left'};
           cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
         });
-        activeClients.forEach((c,i)=>{
-          const pitems=c.items||plan(c.planId)?.items||{};
-          const row=ws.addRow({
-            cliente:c.name,
-            plan:planName(c.planId),
-            items:items.filter(([k])=>n(pitems[k])>0).map(([k,l])=>`${l}: ${n(pitems[k])}`).join(' | ')||'—',
-            notes:[c.notes,c.specialDiet].filter(Boolean).join(' — ')||'—'
-          });
-          const fillColor=i%2===0?'FFF3F6FB':'FFFFFFFF';
-          row.eachCell(cell=>{
-            cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:fillColor}};
-            cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
-            cell.alignment={vertical:'top',horizontal:'left',wrapText:true};
-          });
+        // Igual que en la constancia del día procesado: se agrupa por ruta
+        // efectiva del día (orden de Rutas, "Sin ruta" al final) y, dentro de
+        // cada ruta, se ordena por el campo "Orden" que asignó el driver —
+        // así el Excel de dietas queda en el mismo orden de reparto real, no
+        // en el orden en que los clientes se cargaron en el sistema.
+        const groupsById=new Map();
+        activeClients.forEach(c=>{
+          const rid=effectiveRouteId(c,date)||'__none__';
+          if(!groupsById.has(rid))groupsById.set(rid,{name:rid==='__none__'?'Sin ruta':routeName(rid),clients:[]});
+          groupsById.get(rid).clients.push(c);
         });
-        if(!activeClients.length){ notice('No hay clientes activos para exportar hoy.',true); return; }
+        const orderedIds=[...state.routes.map(r=>r.id),'__none__'].filter(id=>groupsById.has(id));
+        const routeGroups=orderedIds.map(id=>groupsById.get(id));
+        routeGroups.forEach(group=>{ group.clients.sort((a,b)=>(n(a.order)||9999)-(n(b.order)||9999)); });
+        let rowIndex=0;
+        routeGroups.forEach(group=>{
+          group.clients.forEach(c=>{
+            const pitems=c.items||plan(c.planId)?.items||{};
+            const row=ws.addRow({
+              ruta:group.name,
+              cliente:c.name,
+              plan:planName(c.planId),
+              items:menuItems().filter(([k])=>n(pitems[k])>0).map(([k,l])=>`${l}: ${n(pitems[k])}`).join(' | ')||'—',
+              notes:[c.notes,c.specialDiet].filter(Boolean).join(' — ')||'—'
+            });
+            const fillColor=rowIndex%2===0?'FFF3F6FB':'FFFFFFFF';
+            row.eachCell(cell=>{
+              cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:fillColor}};
+              cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
+              cell.alignment={vertical:'top',horizontal:'left',wrapText:true};
+            });
+            rowIndex++;
+          });
+          const totalRow=ws.addRow({ruta:'',cliente:`Total ${group.name}: ${group.clients.length} clientes`,plan:'',items:'',notes:''});
+          totalRow.eachCell(cell=>{cell.font={bold:true};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE3E7EE'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        });
+        const grandTotalRow=ws.addRow({ruta:'',cliente:`TOTAL GENERAL: ${activeClients.length} clientes`,plan:'',items:'',notes:''});
+        grandTotalRow.eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
         const buffer=await wb.xlsx.writeBuffer();
         const a=document.createElement('a');
         a.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
@@ -1150,12 +1227,13 @@
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
       }
-      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
         const ACTION_PERMS={
           "add-client":canManage,"pause-client":canManage,"resume-client":canManage,"edit-client":canManage,"delete-client":canManage,
           "add-driver":canManage,"edit-driver":canManage,"delete-driver":canManage,
           "add-route":canManage,"edit-route":canManage,"delete-route":canManage,
           "add-plan":canManage,"edit-plan":canManage,"delete-plan":canManage,
+          "add-menu-item":canManage,"edit-menu-item":canManage,"delete-menu-item":canManage,
           "add-inventory-item":canManageInventory,"edit-inventory-item":canManageInventory,"delete-inventory-item":canManageInventory,
           "add-inventory-entry":canManageInventory,"add-inventory-use":canManageInventory,"add-inventory-waste":canManageInventory,
           "edit-inventory-movement":canManageInventory,"delete-inventory-movement":canManageInventory,
