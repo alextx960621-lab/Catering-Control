@@ -161,7 +161,8 @@
         if(dot)dot.className='sync-dot '+(kind==='saving'?'local':kind);
         if(text)text.textContent=kind==='saving'?'Guardando…':kind==='ok'?'Sincronizado':'Error de guardado';
       }
-      let lastSavedClients=new Map();ntario=null;
+      let lastSavedClients=new Map();
+      let lastSyncedClientes=null, lastSyncedPersonal=null, lastSyncedInventario=null;
       function mergeTopLevel(serverPayload, localPayload, lastSynced){
         const merged={...(serverPayload||{})};
         Object.keys(localPayload).forEach(key=>{
@@ -1089,7 +1090,6 @@
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
       }
-.
       async function exportRouteOrder(){
         const date=state.currentDate, r=route(activeUser.routeId);
         let activeClients=state.clients.filter(c=>effectiveRouteId(c,date)===activeUser.routeId && status(c,date)==='Activo');
