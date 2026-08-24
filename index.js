@@ -521,15 +521,38 @@
         // recorta con "…" en vez de forzar que la columna crezca (ver CSS
         // "text-overflow: ellipsis" en th/td). El ancho final se guarda en
         // state.settings.columnWidths para que sobreviva a los re-render.
-        $$('.sheet table').forEach(tbl=>{
+      // El ancho REAL de la tabla lo calculamos acá, no en el CSS. Antes el
+      // CSS tenía `width:max-content` en la tabla — eso hace que el navegador
+      // calcule el ancho "ideal" de la tabla mirando el contenido de las
+      // celdas (aunque table-layout sea "fixed"), y por eso una columna no
+      // podía encogerse más allá de su palabra/dato más largo: el navegador
+      // la volvía a estirar sola. IMPORTANTE: además, con table-layout:fixed,
+      // cada vez que el ancho de la tabla queda MAYOR a la suma de sus
+      // columnas, el navegador reparte ese sobrante proporcionalmente entre
+      // TODAS las columnas (así se haya fijado el ancho por CSS o por JS) —
+      // por eso no alcanza con solo quitar el CSS: hay que asegurarse de que
+      // el ancho de la tabla sea SIEMPRE exactamente la suma de sus columnas,
+      // ni un pixel más. Así, si encogés una columna a 40px, se queda en
+      // 40px de verdad y el texto se recorta con "…" (Dirección 1 → "Dir…").
+      // Como consecuencia, una tabla con pocas columnas angostas ya no
+      // "estira" para llenar todo el ancho de la pantalla — queda del ancho
+      // real de sus columnas, igual que en Excel o Google Sheets.
+      function syncTableWidth(tbl,cols){
+        cols=cols||$$('colgroup col',tbl);
+        const sum=cols.reduce((a,c)=>a+(parseFloat(c.style.width)||0),0);
+        if(sum>0){ tbl.style.width=sum+'px'; }
+        else { const min=tbl.closest('.sheet')?.clientWidth; if(min) tbl.style.width=min+'px'; }
+      }
+      $$('.sheet table').forEach(tbl=>{
           const cols=$$('colgroup col',tbl);
+          syncTableWidth(tbl,cols);
           $$('.resize-handle',tbl).forEach((handle,index)=>{
             const headCell=handle.parentElement, col=cols[index];
             if(!col) return;
             handle.onmousedown=e=>{
               e.preventDefault(); e.stopPropagation();
               const initial=col.getBoundingClientRect().width, start=e.clientX;
-              const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.clientX-start)); col.style.width=width+'px'; };
+              const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.clientX-start)); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
               const up=()=>{
                 document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
                 const group=headCell.dataset.group, key=headCell.dataset.sort;
@@ -541,11 +564,18 @@
               };
               document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
             };
-            // Soporte táctil (tablet/celular): mismo comportamiento con touch events.
+            // Soporte táctil (tablet/celular): mismo comportamiento con touch
+            // events. Antes, al arrastrar con el dedo, el navegador competía
+            // por el gesto: como no se llamaba preventDefault(), el celular
+            // interpretaba el arrastre como "scroll horizontal de la tabla"
+            // en vez de "mover el borde de la columna", así que no se podía
+            // ajustar el ancho tocando. Ahora se bloquea el scroll mientras
+            // se arrastra el borde (preventDefault en touchstart y en cada
+            // touchmove, con {passive:false} para poder hacerlo).
             handle.ontouchstart=e=>{
-              e.stopPropagation();
+              e.preventDefault(); e.stopPropagation();
               const touch=e.touches[0], initial=col.getBoundingClientRect().width, start=touch.clientX;
-              const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.touches[0].clientX-start)); col.style.width=width+'px'; };
+              const move=ev=>{ ev.preventDefault(); const width=Math.max(28,Math.round(initial+ev.touches[0].clientX-start)); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
               const up=()=>{
                 document.removeEventListener('touchmove',move); document.removeEventListener('touchend',up);
                 const group=headCell.dataset.group, key=headCell.dataset.sort;
@@ -555,7 +585,7 @@
                   save();
                 }
               };
-              document.addEventListener('touchmove',move,{passive:true}); document.addEventListener('touchend',up);
+              document.addEventListener('touchmove',move,{passive:false}); document.addEventListener('touchend',up);
             };
           });
         });
@@ -738,9 +768,9 @@
       function routeForm(r={}){return `<div class="form-grid"><label>Nombre de ruta *<input name="name" required value="${esc(r.name)}"></label><label>Orden<input type="number" min="0" name="order" value="${esc(r.order)}"></label><label>Tipo de ruta<select name="type"><option value="short" ${(r.type||'short')==='short'?'selected':''}>Corta</option><option value="long" ${r.type==='long'?'selected':''}>Larga</option><option value="verylong" ${r.type==='verylong'?'selected':''}>Muy larga</option></select></label><label class="wide">Descripción / zona<input name="description" value="${esc(r.description)}"></label></div>`;}
       function openRoute(id){const isNew=!id;const r0=id?route(id):null;showModal(r0?'Editar ruta':'Crear ruta',routeForm(r0||{}),f=>{const data=Object.fromEntries(new FormData(f));let r=r0;if(r)Object.assign(r,data);else{r={id:uid('r'),...data};state.routes.push(r);}save();renderRoutes();notice('Ruta guardada.');logAudit(isNew?'Ruta creada':'Ruta editada','route',r.name,r.id,{});});}
 
-      function renderPlans(){ if(!canAccessPage('plans')) return; const cols=menuItems(); const rows=p=>`<tr><td style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;border-radius:8px;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><b>${esc(p.name)}</b></td><td>${esc(p.type||'General')}</td>${cols.map(([k])=>`<td>${n(p.items?.[k])}</td>`).join('')}<td>${canEditPage('plans')?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}</td></tr>`;
+      function renderPlans(){ if(!canAccessPage('plans')) return; const cols=menuItems(); let planList=sort(state.plans,'name','plans'); const rows=p=>`<tr><td style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;border-radius:8px;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><b>${esc(p.name)}</b></td><td>${esc(p.type||'General')}</td>${cols.map(([k])=>`<td>${n(p.items?.[k])}</td>`).join('')}<td>${canEditPage('plans')?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}</td></tr>`;
         const menuRows=()=>cols.map(([key,label])=>`<tr><td>${esc(label)}</td><td>${canEditPage('plans')?`<button class="icon-btn" data-action="edit-menu-item" data-id="${key}">Editar</button><button class="icon-btn delete" data-action="delete-menu-item" data-id="${key}">×</button>`:'—'}</td></tr>`).join('');
-        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button><button class="primary" data-action="add-plan">+ Crear plan</button>':'')+table(state.plans,[['Plan','name'],['Tipo','type'],...cols.map(([key,label])=>[label,key]),['Acciones','id']],rows,'plans')
+        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button><button class="primary" data-action="add-plan">+ Crear plan</button>':'')+table(planList,[['Plan','name'],['Tipo','type'],...cols.map(([key,label])=>[label,key]),['Acciones','id']],rows,'plans')
           +pageHead('Artículos del menú','Aparecen como columnas en Día de trabajo, en el Excel del día procesado y en el portal del cliente. Se pueden crear, renombrar o eliminar artículos (incluidos los que vienen por defecto).')
           +`<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Artículo</th><th>Acciones</th></tr></thead><tbody>${cols.length?menuRows():'<tr><td colspan="2" class="empty">No hay artículos definidos.</td></tr>'}</tbody></table></div>`;
       }

@@ -1,4 +1,4 @@
-    /* ===== RESET & VARIABLES ===== */
+/* ===== RESET & VARIABLES ===== */
     :root {
       --bg: #f5f7fb;
       --surface: #ffffff;
@@ -320,13 +320,9 @@
     table {
       border-collapse: separate;
       border-spacing: 0;
-      width: max-content;
-      min-width: 100%;
       table-layout: fixed;
     }
     .sheet table.table {
-      width: max-content;
-      min-width: 100%;
       table-layout: fixed;
       margin-bottom: 0;
     }
