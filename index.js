@@ -1,14 +1,7 @@
 (() => {
       'use strict';
-      /* La configuración de la empresa vive en config.js (un solo archivo
-         para toda la app: marca + credenciales de Supabase). */
       const APP_CONFIG = window.APP_CONFIG;
 
-      // ExcelJS (~1MB) antes se cargaba con <script defer> en index.html en
-      // CADA carga del panel, aunque solo se usa al exportar (3 lugares:
-      // procesar día, exportar dietas, exportar orden de ruta). Ahora se
-      // pide bajo demanda, la primera vez que hace falta, y se reutiliza si
-      // ya se cargó. Así el panel carga más liviano y rápido normalmente.
       let excelJsLoadPromise=null;
       function ensureExcelJS(){
         if(window.ExcelJS) return Promise.resolve(true);
@@ -23,13 +16,10 @@
         return excelJsLoadPromise;
       }
       const KEY = `${APP_CONFIG.storagePrefix}-operaciones-v3`;
-      // Esta base almacena exclusivamente cuentas del equipo. Los clientes,
-      // planes, rutas y operaciones continúan dentro de KEY.
+
       const STAFF_USERS_KEY = `${APP_CONFIG.storagePrefix}-staff-users-v1`;
       const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
-      // Tema personal por navegador (todos los roles lo pueden elegir en
-      // Configuración). Si no hay preferencia personal, se usa el tema por
-      // defecto de la empresa (state.settings.theme, solo lo cambia admin).
+
       const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
       const $ = (s, root=document) => root.querySelector(s);
       const $$ = (s, root=document) => [...root.querySelectorAll(s)];
@@ -37,19 +27,11 @@
       const n = v => Number(v) || 0;
       const uid = p => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
       const today = () => new Date().toISOString().slice(0,10);
-      // Antes esta lista era fija en el código (8 artículos que ni se podían
-      // renombrar ni agregar/quitar). Ahora solo se usa para "sembrar" el
-      // menú la primera vez (empresa nueva o empresa existente que todavía
-      // no tiene menuItems guardado); de ahí en adelante el menú real vive
-      // en state.settings.menuItems (editable desde Planes) y se lee
-      // siempre a través de menuItems().
+
       const DEFAULT_MENU_ITEMS = [['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
-      // Devuelve el menú actual como pares [key,label], igual forma que antes
-      // tenía la lista fija, para no tener que tocar todo el código que ya
-      // la consume — solo hay que llamar a menuItems() en vez de usar 'items'.
+
       function menuItems(){ return (state?.settings?.menuItems||[]).map(m=>[m.key,m.label]); }
-      // Comprime y redimensiona una imagen antes de guardarla como base64,
-      // para que subir logos/íconos/fotos no infle la base de datos ni ralentice la web.
+
       function readImageAsDataURL(file, maxDim = 480, quality = 0.82) {
         return new Promise((resolve, reject) => {
           if (!file || !file.type?.startsWith('image/')) { reject(new Error('Archivo no válido')); return; }
@@ -70,8 +52,6 @@
           reader.readAsDataURL(file);
         });
       }
-      // Aplica el nombre y logo de la empresa (guardados en Configuración) al
-      // encabezado. Si no hay nada configurado, usa el valor por defecto.
       function applyBranding(){
         const name = state?.settings?.companyName?.trim() || APP_CONFIG.companyName;
         const logo = state?.settings?.logoUrl || '';
@@ -79,39 +59,17 @@
         const markEl = $('#brand-mark'); if (markEl) markEl.innerHTML = logo ? `<img loading="lazy" decoding="async" src="${logo}" alt="${esc(name)}">` : '🍽';
         document.title = `${name} · Operaciones`;
       }
-      // Nota de seguridad: este usuario admin por defecto ya NO tiene la
-      // contraseña en texto plano aquí. Solo existe como respaldo visual para
-      // esta pantalla de Usuarios antes de que se haya guardado nada en la
-      // base de datos; el login real se valida en el servidor (login_staff en
-      // supabase-security-update.sql), no contra este objeto.
+
       const defaultStaffUser = {id:'staff_admin',name:'Administrador',username:'admin',email:'admin@catering.local',role:'admin',routeId:'',driverId:''};
       function readStaffUsers(){
         try { const stored=JSON.parse(localStorage.getItem(STAFF_USERS_KEY)); if(Array.isArray(stored) && stored.length) return stored; } catch (_) {}
         localStorage.setItem(STAFF_USERS_KEY,JSON.stringify([defaultStaffUser]));
         return [defaultStaffUser];
       }
-      // El guardado y borrado de usuarios de staff viaja dentro de la tabla
-      // "personal" de Supabase junto con drivers/rutas/configuración, cada
-      // vez que se llama a save().
+
       let activeUser = null;
       let staffUsers = readStaffUsers();
-      /* ==========================================================================
-         ROLES Y PERMISOS
-         - admin:   acceso total (incluye Usuarios, Configuración y tarifas de sueldo).
-         - editor:  igual que admin en el día a día (clientes, drivers, rutas,
-                    planes, día de trabajo, inventario, procesar día) pero SIN
-                    acceso a Usuarios, Configuración ni a editar tarifas de sueldo.
-         - kitchen: solo Día de trabajo (lectura, para imprimir dietas) e Inventario
-                    (control de stock, ingresos, mermas y vínculos de consumo).
-         - driver:  solo su ruta y sus clientes asignados. Puede editar el campo
-                    "Orden" (y Google Maps/teléfonos) de sus propios clientes en el
-                    Día de trabajo, ve solo la fila de su sueldo en Sueldos, y tiene
-                    un botón para descargar su "Orden de ruta" en Excel.
-         Nota de seguridad: esto es un control de UI para que cada persona vea y
-         edite solo lo que le corresponde en el uso normal de la app. No reemplaza
-         seguridad de servidor: la clave publishable de Supabase, tal como está
-         configurada, permite leer y escribir a quien la tenga.
-         ========================================================================== */
+
       const ROLE_LABELS = {admin:'Administrador', editor:'Editor', kitchen:'Cocina', driver:'Driver'};
       const NAV_PERMS = {
         dispatch: ['admin','editor','kitchen','driver'],
@@ -125,13 +83,7 @@
         audit: ['admin'],
         settings: ['admin','editor','kitchen','driver']
       };
-      // Páginas que un rol PERSONALIZADO puede configurar con Ver/Editar
-      // (Usuarios queda excluido a propósito: gestionar usuarios y roles se
-      // queda exclusivamente en Administrador, para que un rol personalizado
-      // nunca pueda otorgarse a sí mismo más permisos. Auditoría y
-      // Configuración solo ofrecen "Ver": lo sensible de Configuración
-      // — logo, respaldo completo, refrescar auditoría — sigue siendo
-      // exclusivo de Administrador vía ACTION_PERMS, sin importar el rol.)
+
       const ROLE_PAGE_OPTIONS = [
         ['dispatch','Día de trabajo',true],
         ['clients','Clientes',true],
@@ -149,47 +101,23 @@
       const isKitchenRole = () => role() === 'kitchen';
       const isBuiltinRole = () => !!ROLE_LABELS[role()];
       function customRole(id){ return (state.settings.customRoles||[]).find(r=>r.id===id); }
-      // Etiqueta legible del rol: primero los 4 fijos, si no busca entre los
-      // roles personalizados creados en Usuarios.
+  
       function roleLabel(r){ return ROLE_LABELS[r] || customRole(r)?.label || r || 'Usuario'; }
-      // Acceso operativo completo (crear/editar/eliminar clientes, drivers, rutas,
-      // planes; procesar el día; editar campos del Día de trabajo). Se sigue
-      // usando tal cual para los 4 roles fijos (admin/editor); canEditPage()
-      // es la que decide caso por caso incluyendo roles personalizados.
+
       const canManage = () => role() === 'admin' || role() === 'editor';
       // Puede administrar el inventario de cocina.
       const canManageInventory = () => ['admin','editor','kitchen'].includes(role());
-      // "Ver" una página: para los 4 roles fijos, exactamente el mismo
-      // NAV_PERMS de siempre (cero cambio de comportamiento); para un rol
-      // personalizado, lo que se haya marcado al crear/editar el rol.
-      // "Usuarios" queda SIEMPRE exclusivo de Administrador, sin importar
-      // el rol — no se consulta customRole() para esta página.
       function canAccessPage(page){
         if (page === 'users') return isAdmin();
         if (isBuiltinRole()) return (NAV_PERMS[page] || []).includes(role());
         return !!customRole(role())?.pages?.[page]?.view;
       }
-      // Mapa de "editar" equivalente para los 4 roles fijos, reconstruyendo
-      // exactamente lo que hacía cada canManage()/canEditPage('inventory')/
-      // isAdmin() suelto antes de esta función: Sueldos (tarifa) seguía
-      // siendo exclusivo de admin aunque editor sí administraba todo lo
-      // demás, así que se mantiene así también para los roles fijos.
       const BUILTIN_EDIT = { dispatch:canManage, clients:canManage, drivers:canManage, routes:canManage, plans:canManage, payroll:isAdmin, inventory:canManageInventory };
-      // "Editar" dentro de una página: para los 4 roles fijos usa el mapeo
-      // de arriba (mismo comportamiento que tenía canManage() antes, página
-      // por página); para un rol personalizado, lo que se haya marcado.
-      // "Usuarios" siempre exclusivo de Administrador; Auditoría y
-      // Configuración no tienen "editar" configurable por rol personalizado
-      // (lo sensible de esas dos páginas sigue siendo admin-only vía
-      // ACTION_PERMS, para no abrir una vía de escalar permisos).
       function canEditPage(page){
         if (page === 'users') return isAdmin();
         if (isBuiltinRole()) return !!BUILTIN_EDIT[page]?.();
         return !!customRole(role())?.pages?.[page]?.edit;
       }
-      // Registra un evento en el historial de auditoría (quién hizo qué,
-      // sobre qué registro y cuándo). Se dispara "en paralelo" — no bloquea
-      // la acción del usuario ni la interrumpe si falla el guardado del log.
       function logAudit(action, entityType, entityLabel, entityId, details){
         window.SupabaseDB?.dbInsertAudit({
           actor_id: activeUser?.id || '',
@@ -233,27 +161,7 @@
         if(dot)dot.className='sync-dot '+(kind==='saving'?'local':kind);
         if(text)text.textContent=kind==='saving'?'Guardando…':kind==='ok'?'Sincronizado':'Error de guardado';
       }
-      // Guarda en Supabase, repartido en sus bases de datos independientes:
-      // db_clientes (planes y días de trabajo), db_clientes_rows (UNA FILA POR
-      // CLIENTE — solo se suben los clientes que cambiaron desde el último
-      // guardado, no la lista completa), db_personal (drivers, rutas, usuarios
-      // de staff y configuración) y db_inventario (inventario).
-      let lastSavedClients=new Map(); // id -> JSON.stringify(cliente), refleja lo último confirmado en Supabase
-      // db_clientes, db_personal y db_inventario son, cada uno, UN SOLO bloque
-      // (fila 'main') con varias claves adentro (p. ej. clientes: {plans,days,
-      // currentDate}). Antes, save() subía ese bloque completo tal cual estaba
-      // en memoria de ESTE dispositivo en cada guardado — así, si el dispositivo
-      // tenía datos desactualizados (p. ej. no se enteró todavía de que otro
-      // dispositivo procesó un día, o cambió la visibilidad de una columna),
-      // cualquier guardado sin relación (editar un driver, un plan, etc.)
-      // pisaba por completo esos cambios ajenos.
-      // lastSyncedClientes/Personal/Inventario guardan una foto de cada bloque
-      // tal como se confirmó la última vez con el servidor (al cargar o guardar
-      // con éxito). mergeTopLevel() compara esa foto contra lo que hay ahora en
-      // memoria: solo las claves que ESTE dispositivo modificó de verdad se
-      // suben; el resto de las claves se toma de la versión más reciente del
-      // servidor, para no perder cambios hechos desde otro dispositivo.
-      let lastSyncedClientes=null, lastSyncedPersonal=null, lastSyncedInventario=null;
+      let lastSavedClients=new Map();ntario=null;
       function mergeTopLevel(serverPayload, localPayload, lastSynced){
         const merged={...(serverPayload||{})};
         Object.keys(localPayload).forEach(key=>{
@@ -282,15 +190,6 @@
         if(okDelete) deletedIds.forEach(id=>lastSavedClients.delete(id));
         return okUpsert&&okDelete;
       }
-      // Antes, cada save() bajaba y volvía a subir los 3 bloques completos
-      // (clientes, personal, inventario) SIN IMPORTAR qué se haya editado en
-      // realidad — así, cambiar un solo campo de un cliente igual descargaba
-      // y volvía a subir todos los drivers, rutas, configuración y todo el
-      // historial de inventario, y el modal se quedaba esperando ese viaje
-      // de ida y vuelta completo para poder cerrarse. Ahora cada bloque solo
-      // se toca (GET + merge + SET) si sus datos locales cambiaron de verdad
-      // desde el último guardado confirmado; si no cambió nada ahí, se deja
-      // tal cual está en el servidor.
       function blockChanged(local,lastSynced){
         if(!lastSynced) return true;
         return Object.keys(local).some(key=>JSON.stringify(local[key])!==JSON.stringify(lastSynced[key]));
@@ -317,9 +216,6 @@
             const mergedClientes=needClientes?mergeTopLevel(serverClientes,localClientes,lastSyncedClientes):localClientes;
             const mergedPersonal=needPersonal?mergeTopLevel(serverPersonal,localPersonal,lastSyncedPersonal):localPersonal;
             const mergedInventario=needInventario?mergeTopLevel(serverInventario,localInventario,lastSyncedInventario):localInventario;
-            // Refleja lo combinado también en este dispositivo, para que quede
-            // igual de al día que lo que se subió (evita que este mismo
-            // dispositivo, en su próximo guardado, vuelva a pisar algo).
             state.plans=mergedClientes.plans; state.days=mergedClientes.days; state.currentDate=mergedClientes.currentDate;
             state.drivers=mergedPersonal.drivers; state.routes=mergedPersonal.routes; state.settings=mergedPersonal.settings; staffUsers=mergedPersonal.staffUsers;
             state.inventory=mergedInventario.inventory;
@@ -400,13 +296,6 @@
         else if(data.routeId) data.driverId=driverForRoute(data.routeId)?.id || '';
         return data;
       }
-      // --- Horario por días de la semana ---------------------------------
-      // Un cliente puede tener franjas (c.schedule) que definen, para ciertos
-      // días de la semana (0=Domingo…6=Sábado, según Date.getDay()), una ruta,
-      // driver y/o dirección distintos a los valores base del cliente. Si no
-      // hay franjas o ninguna coincide con el día consultado, se usan los
-      // campos base (routeId/driverId/address1) tal como siempre. El cambio
-      // entre franjas es automático: no requiere ninguna acción manual.
       const WEEKDAYS=[{v:1,l:'Lun'},{v:2,l:'Mar'},{v:3,l:'Mié'},{v:4,l:'Jue'},{v:5,l:'Vie'},{v:6,l:'Sáb'},{v:0,l:'Dom'}];
       function weekdayOf(date=state.currentDate){ return new Date(date+'T00:00:00').getDay(); }
       function scheduleEntryFor(c,date=state.currentDate){
@@ -419,9 +308,6 @@
         const e=scheduleEntryFor(c,date), key=(e?.address==='address2')?'address2':'address1';
         return c[key]||c.address1||'';
       }
-      // La Dirección 2 ahora tiene su propio link de Google Maps (c.maps2),
-      // igual que la Dirección 1 usa c.maps. Se elige uno u otro según cuál
-      // dirección esté activa ese día (misma lógica que effectiveAddress).
       function effectiveMaps(c,date=state.currentDate){
         const e=scheduleEntryFor(c,date), key=(e?.address==='address2')?'address2':'address1';
         return (key==='address2'?c.maps2:c.maps)||c.maps||'';
@@ -468,8 +354,6 @@
       function status(c,date=state.currentDate){
         if (!day(date).laborable) return 'No laborable';
         if (c.returnDate && date>=c.returnDate) return 'Activo';
-        // Pausas solicitadas desde el portal del cliente. Una fecha de retorno
-        // hace que el estado vuelva a Activo automáticamente ese día.
         if (c.pauseStart && date >= c.pauseStart && (!c.returnDate || date < c.returnDate)) return 'Pausado';
         if (c.pauseDates?.includes(date)) return 'Pausado';
         if (c.startDate && c.startDate > date) return 'Programado';
@@ -491,15 +375,6 @@
       function options(list,current,placeholder='Seleccionar…',label=x=>x.name){ return `<option value="">${placeholder}</option>`+list.map(x=>`<option value="${esc(x.id)}" ${x.id===current?'selected':''}>${esc(label(x))}</option>`).join(''); }
       function itemFields(values={}){ return `<div class="items-grid">${menuItems().map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<label>${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:16px;height:16px;object-fit:cover;border-radius:4px;vertical-align:-3px;margin-right:4px">`:''}${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`;}).join('')}</div>`; }
       function formItems(f){ return Object.fromEntries(menuItems().map(([key])=>[key,n(f.elements[key]?.value)])); }
-      // Antes esta función ordenaba SIEMPRE por el 'key' que le pasaba cada
-      // pantalla (p. ej. 'order' en Clientes/Drivers/Rutas), sin importar en
-      // qué encabezado hiciera clic el usuario: el clic sí guardaba la
-      // columna elegida en ui.sort[group].key y la flechita ▲/▼ aparecía en
-      // ese encabezado, pero el orden real de las filas seguía usando el
-      // 'order' de siempre — por eso parecía que las columnas "no filtraban".
-      // Ahora se ordena por la columna guardada en ui.sort[group].key (la que
-      // realmente se clickeó); si todavía no se clickeó ninguna, se usa el
-      // 'key' recibido como orden por defecto.
       function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; const sortKey=s.key; return [...list].sort((a,b)=>String(value(a,sortKey)).localeCompare(String(value(b,sortKey)),undefined,{numeric:true})*s.dir); }
       function value(x,key){ if(key==='route') return routeName(x.routeId); if(key==='driver') return driverName(x.driverId); if(key==='plan') return planName(x.planId); return x[key] ?? ''; }
       function th(label,key,group){ const s=ui.sort[group]; const drag=group==='dispatch'?' draggable="true" title="Arrastra para reordenar la columna"':''; return `<th data-sort="${key}" data-group="${group}"${drag}>${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
@@ -513,30 +388,6 @@
       function render(){ document.documentElement.dataset.theme=localStorage.getItem(UI_THEME_KEY)||state.settings.theme; $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); }
       function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { fn(); enableTableTools(); } }
       function enableTableTools(){
-        // Redimensionado de columnas al estilo Excel: se arrastra el borde
-        // de la columna y se ajusta el elemento <col> correspondiente, lo
-        // que cambia el ancho de TODA la columna (encabezado + celdas) a la
-        // vez. El ancho mínimo es muy bajo a propósito: así se puede achicar
-        // una columna incluso más que la palabra que contiene, y el texto se
-        // recorta con "…" en vez de forzar que la columna crezca (ver CSS
-        // "text-overflow: ellipsis" en th/td). El ancho final se guarda en
-        // state.settings.columnWidths para que sobreviva a los re-render.
-      // El ancho REAL de la tabla lo calculamos acá, no en el CSS. Antes el
-      // CSS tenía `width:max-content` en la tabla — eso hace que el navegador
-      // calcule el ancho "ideal" de la tabla mirando el contenido de las
-      // celdas (aunque table-layout sea "fixed"), y por eso una columna no
-      // podía encogerse más allá de su palabra/dato más largo: el navegador
-      // la volvía a estirar sola. IMPORTANTE: además, con table-layout:fixed,
-      // cada vez que el ancho de la tabla queda MAYOR a la suma de sus
-      // columnas, el navegador reparte ese sobrante proporcionalmente entre
-      // TODAS las columnas (así se haya fijado el ancho por CSS o por JS) —
-      // por eso no alcanza con solo quitar el CSS: hay que asegurarse de que
-      // el ancho de la tabla sea SIEMPRE exactamente la suma de sus columnas,
-      // ni un pixel más. Así, si encogés una columna a 40px, se queda en
-      // 40px de verdad y el texto se recorta con "…" (Dirección 1 → "Dir…").
-      // Como consecuencia, una tabla con pocas columnas angostas ya no
-      // "estira" para llenar todo el ancho de la pantalla — queda del ancho
-      // real de sus columnas, igual que en Excel o Google Sheets.
       function syncTableWidth(tbl,cols){
         cols=cols||$$('colgroup col',tbl);
         const sum=cols.reduce((a,c)=>a+(parseFloat(c.style.width)||0),0);
@@ -564,14 +415,6 @@
               };
               document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
             };
-            // Soporte táctil (tablet/celular): mismo comportamiento con touch
-            // events. Antes, al arrastrar con el dedo, el navegador competía
-            // por el gesto: como no se llamaba preventDefault(), el celular
-            // interpretaba el arrastre como "scroll horizontal de la tabla"
-            // en vez de "mover el borde de la columna", así que no se podía
-            // ajustar el ancho tocando. Ahora se bloquea el scroll mientras
-            // se arrastra el borde (preventDefault en touchstart y en cada
-            // touchmove, con {passive:false} para poder hacerlo).
             handle.ontouchstart=e=>{
               e.preventDefault(); e.stopPropagation();
               const touch=e.touches[0], initial=col.getBoundingClientRect().width, start=touch.clientX;
@@ -589,8 +432,6 @@
             };
           });
         });
-        // Reordenar columnas del Día de trabajo mediante arrastre. El orden se
-        // guarda para que se conserve después de recargar la página.
         const dispatchTable=$('#dispatch-page .sheet table');
         if(dispatchTable){
           let sourceKey='';
@@ -682,8 +523,6 @@
           const cursor=e.target.selectionStart;
           ui.search[key]=e.target.value;
           fn();
-          // La tabla se redibuja al filtrar; se restaura el foco para poder escribir
-          // una frase completa y no quedarse bloqueado después de la primera letra.
           const fresh=$('#'+id);
           fresh?.focus();
           fresh?.setSelectionRange(cursor,cursor);
@@ -721,10 +560,6 @@
         const form=$('#modal-form'), routeField=form?.elements.routeId, driverField=form?.elements.driverId, planField=form?.elements.planId;
         if(routeField) routeField.onchange=()=>{ driverField.value=driverForRoute(routeField.value)?.id || ''; };
         if(driverField) driverField.onchange=()=>{ const d=driver(driverField.value); if(d?.routeId) routeField.value=d.routeId; };
-        // Al elegir un plan, se autorrellenan los artículos de ese plan en el
-        // formulario; la persona igual puede editar las cantidades a mano
-        // después (el autorrelleno solo pisa los valores en el momento de
-        // elegir el plan, no bloquea los campos).
         if(planField) planField.onchange=()=>{
           const p=plan(planField.value);
           menuItems().forEach(([key])=>{ const input=form.elements[key]; if(input) input.value=n(p?.items?.[key]); });
@@ -756,12 +591,13 @@
         renderClients();notice(`Servicio de ${c.name} activado.`);scrollToRow(c.id);
         logAudit('Cliente reactivado','client',c.name,c.id,{});
       }
-
-
       function renderDrivers(){ if(!canAccessPage('drivers')) return; const q=(ui.search.drivers||'').toLowerCase();let list=state.drivers.filter(d=>!q||[d.firstName,d.lastName,d.carnet,d.phone,d.address,routeName(d.routeId)].join(' ').toLowerCase().includes(q));list=sort(list,'order','drivers');const rows=d=>`<tr><td>${n(d.order)||''}</td><td style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><b>${esc(d.firstName)} ${esc(d.lastName)}</b></td><td>${esc(d.carnet||'—')}</td><td>${esc(d.phone||'—')}</td><td>${esc(d.address||'—')}</td><td>${esc(routeName(d.routeId))}</td><td>${canEditPage('drivers')?`<button class="icon-btn" data-action="edit-driver" data-id="${d.id}">Editar</button><button class="icon-btn delete" data-action="delete-driver" data-id="${d.id}">×</button>`:'—'}</td></tr>`;$('#drivers-page').innerHTML=pageHead('Drivers','Personal de entrega registrado.',canEditPage('drivers')?'<button class="primary" data-action="add-driver">+ Añadir driver</button>':'')+`<div class="toolbar"><input id="drivers-search" class="search" placeholder="Buscar driver…" value="${esc(ui.search.drivers||'')}"></div>`+table(list,[['Orden','order'],['Nombre','firstName'],['Carnet','carnet'],['Teléfono','phone'],['Dirección domicilio','address'],['Ruta','route'],['Acciones','id']],rows,'drivers');bindSearch('drivers-search','drivers',renderDrivers);}
       function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label>Orden<input name="order" type="number" min="0" value="${esc(d.order)}"></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="outline" onclick="removeDriverPhoto('${d.id}')">Quitar foto</button>`:''}</div></label></div>`;}
       async function removeDriverPhoto(id){const d=driver(id);if(!d)return;d.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openDriver(id);}
-      function openDriver(id){const isNew=!id;const d0=id?driver(id):null;showModal(d0?'Editar driver':'Añadir driver',driverForm(d0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}let d=d0;if(d){Object.assign(d,data);state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);}else{d={id:uid('d'),...data};state.drivers.push(d);}const saved=await save();if(!saved)return false;renderDrivers();notice('Driver guardado.');logAudit(isNew?'Driver creado':'Driver editado','driver',`${d.firstName||''} ${d.lastName||''}`.trim(),d.id,{});});}
+      function openDriver(id){const isNew=!id;const d0=id?driver(id):null;showModal(d0?'Editar driver':'Añadir driver',driverForm(d0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}let d=d0;if(d){Object.assign(d,data);state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);
+        const linkedUser=staffUsers.find(u=>u.driverId===d.id);
+        if(linkedUser) linkedUser.routeId=d.routeId;
+      }else{d={id:uid('d'),...data};state.drivers.push(d);}const saved=await save();if(!saved)return false;renderDrivers();notice('Driver guardado.');logAudit(isNew?'Driver creado':'Driver editado','driver',`${d.firstName||''} ${d.lastName||''}`.trim(),d.id,{});});}
       const ROUTE_TYPES={short:['Corta','done'],long:['Larga','pending'],verylong:['Muy larga','warn']};
       function routeTypeBadge(r){const [label,cl]=ROUTE_TYPES[r.type]||ROUTE_TYPES.short;return `<span class="badge ${cl}">${label}</span>`;}
       function renderRoutes(){ if(!canAccessPage('routes')) return; const q=(ui.search.routes||'').toLowerCase();let list=state.routes.filter(r=>!q||[r.name,r.description].join(' ').toLowerCase().includes(q));list=sort(list,'order','routes');const rows=r=>`<tr><td>${n(r.order)||''}</td><td><b>${esc(r.name)}</b>${r.open?' <span class="badge off">Abierta</span>':''}</td><td>${routeTypeBadge(r)}</td><td>${esc(r.description||'—')}</td><td>${state.clients.filter(c=>c.routeId===r.id).length}</td><td>${state.drivers.filter(d=>d.routeId===r.id).length}</td><td>${canEditPage('routes')&&!r.open?`<button class="icon-btn" data-action="edit-route" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-route" data-id="${r.id}">×</button>`:'—'}</td></tr>`;$('#routes-page').innerHTML=pageHead('Rutas','Incluye una ruta abierta para drivers disponibles sin ruta de trabajo.',canEditPage('routes')?'<button class="primary" data-action="add-route">+ Crear ruta</button>':'')+`<div class="toolbar"><input id="routes-search" class="search" placeholder="Buscar ruta…" value="${esc(ui.search.routes||'')}"></div>`+table(list,[['Orden','order'],['Ruta','name'],['Tipo','type'],['Descripción','description'],['Clientes','clients'],['Drivers','drivers'],['Acciones','id']],rows,'routes');bindSearch('routes-search','routes',renderRoutes);}
@@ -775,10 +611,6 @@
           +`<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Artículo</th><th>Acciones</th></tr></thead><tbody>${cols.length?menuRows():'<tr><td colspan="2" class="empty">No hay artículos definidos.</td></tr>'}</tbody></table></div>`;
       }
       function menuItemForm(item={}){ return `<div class="form-grid"><label class="wide">Nombre del artículo *<input name="label" required value="${esc(item.label)}" placeholder="Ej.: Postre"></label></div>`; }
-      // key===undefined ⇒ crear artículo nuevo. La 'key' interna (usada en
-      // planes/clientes/inventario/columnas) nunca cambia una vez creada, ni
-      // siquiera al renombrar el artículo — así renombrar no rompe nada que
-      // ya esté guardado referenciando ese artículo.
       function openMenuItem(key){
         const isNew=!key;
         const current=isNew?null:state.settings.menuItems.find(x=>x.key===key);
@@ -794,10 +626,6 @@
           logAudit(isNew?'Artículo de menú creado':'Artículo de menú editado','menu-item',label,current?.key||'',{});
         });
       }
-      // Al eliminar un artículo se limpia también de todo lo que lo
-      // referencia (planes, clientes, íconos asignados y vínculos de
-      // inventario) para no dejar datos huérfanos apuntando a una clave que
-      // ya no existe.
       async function deleteMenuItem(key){
         const current=state.settings.menuItems.find(x=>x.key===key);
         if(!current)return;
@@ -813,8 +641,6 @@
         notice(saved?'Artículo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved);
         if(saved) logAudit('Artículo de menú eliminado','menu-item',current.label,key,{});
       }
-      // Antes esto vivía en Configuración, separado de donde se administran
-      // los planes y sus artículos; ahora es un botón acá mismo en Planes.
       function itemIconsForm(){
         return `<p class="muted">Sube una imagen para cada artículo del menú (aparece junto a las cantidades en planes y clientes).</p>
         <div class="toggle-list" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${menuItems().map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px">
@@ -831,8 +657,6 @@
         $('#modal-save').hidden=true;
         openItemIconsHandlers();
       }
-      // Vuelve a enganchar los <input type="file"> después de redibujar el
-      // contenido del modal (al actualizar/quitar un ícono), sin cerrar el modal.
       function openItemIconsHandlers(){
         $$('[data-item-icon]').forEach(input=>input.onchange=async e=>{const file=e.target.files[0];if(!file)return;const key=input.dataset.itemIcon;try{state.settings.itemIcons[key]=await readImageAsDataURL(file,160,.8);const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}});
       }
@@ -893,10 +717,6 @@
           state.inventory.movements.unshift({id:uid('mov'),date,inventoryId:item.id,type:'delivery',quantity:-used,note:`Descuento automático: ${delivered} ${menuItems().find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey}`});
         });
       }
-      // Revierte exactamente los movimientos que applyInventoryForProcessedDay generó
-      // para esa fecha (type:'delivery'): repone el stock descontado y los elimina.
-      // Estos movimientos son los únicos con type:'delivery' — deleteInventoryMovement
-      // los protege explícitamente porque solo deben tocarse al procesar/desprocesar.
       function revertInventoryForProcessedDay(date){
         const kept=[];
         state.inventory.movements.forEach(m=>{
@@ -920,10 +740,6 @@
           +pageHead('Roles personalizados','Qué páginas puede ver y editar cada rol creado a medida. Administrador, Editor, Cocina y Driver son fijos y no aparecen aquí.')
           +`<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Rol</th><th>Permisos</th><th>Acciones</th></tr></thead><tbody>${(state.settings.customRoles||[]).length?state.settings.customRoles.map(roleRows).join(''):'<tr><td colspan="3" class="empty">No hay roles personalizados todavía.</td></tr>'}</tbody></table></div>`;
       }
-      // Historial de auditoría: se trae de Supabase (tabla db_audit_log, de solo
-      // agregar filas) y se guarda en caché en memoria (auditEntries) para no
-      // volver a pedirlo en cada tecla de la búsqueda — solo se refresca al
-      // entrar a la página o al tocar "Actualizar".
       let auditEntries=null;
       async function renderAudit(forceRefresh){
         if(!canAccessPage('audit')) return;
@@ -942,8 +758,6 @@
         bindSearch('audit-search','audit',renderAudit);
       }
       function userForm(u={}){const d=u.driverId?driver(u.driverId):{};const showDriver=u.role==='driver';return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'}></label><label>Rol<select name="role" id="user-role-select"><option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="kitchen" ${u.role==='kitchen'?'selected':''}>Cocina</option><option value="driver" ${(!u.role||u.role==='driver')?'selected':''}>Driver</option>${(state.settings.customRoles||[]).map(r=>`<option value="${r.id}" ${u.role===r.id?'selected':''}>${esc(r.label)}</option>`).join('')}</select></label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Carnet${showDriver?' *':''}<input name="carnet" value="${esc(d.carnet)}" ${showDriver?'required':''}></label><label class="driver-field" ${showDriver?'':'hidden'}>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="driver-field wide" ${showDriver?'':'hidden'}>Dirección de domicilio<input name="address" value="${esc(d.address)}"></label><p class="muted wide driver-field-hint" ${showDriver?'hidden':''}>Solo el rol Driver necesita ficha de driver y ruta asignada.</p></div>`;}
-      // Tabla Ver/Editar para crear o editar un rol personalizado. "Usuarios"
-      // no aparece acá a propósito (ver nota junto a ROLE_PAGE_OPTIONS).
       function roleForm(r={}){
         const pages=r.pages||{};
         return `<div class="form-grid"><label class="wide">Nombre del rol *<input name="label" required value="${esc(r.label)}" placeholder="Ej.: Supervisor de zona"></label>
@@ -972,8 +786,6 @@
           logAudit(isNew?'Rol creado':'Rol editado','role',label,current?.id||'',{});
         });
       }
-      // Al eliminar un rol se bloquea si todavía hay usuarios con ese rol
-      // asignado, para no dejar a nadie con un rol fantasma que ya no existe.
       async function deleteRole(id){
         const current=customRole(id);
         if(!current)return;
@@ -999,8 +811,6 @@
         const data=Object.fromEntries(new FormData(f));
         if(staffUsers.some(x=>x.username===data.username&&x.id!==u?.id)){notice('Ese usuario ya existe.',true);return false;}
         if(staffUsers.some(x=>x.email.toLowerCase()===data.email.toLowerCase()&&x.id!==u?.id)){notice('Ese correo ya está registrado.',true);return false;}
-        // La contraseña nunca se guarda en texto plano: se hashea en el
-        // servidor (Supabase) antes de escribirla en la base de datos.
         let passwordHash=u?.passwordHash||'';
         if(data.password){
           passwordHash=await window.SupabaseDB?.rpc('hash_password',{p_password:data.password});
@@ -1026,9 +836,6 @@
         if(!canAccessPage('settings')) return;
         const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...menuItems(),['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['remaining','Servicios restantes'],['returnDate','Fecha de retorno'],['id','Acciones']];
         const logo=state.settings.logoUrl;
-        // Todos los roles pueden entrar a Configuración, pero solo ven y editan
-        // la tarjeta de "Columnas visibles". El resto (apariencia, empresa,
-        // íconos, respaldo de datos) sigue siendo exclusivo de admin.
         const columnsCard=`<div class="card card-pad stack">
             <h3>Tu tema</h3>
             <p class="muted">Solo afecta a tu navegador, no a los demás usuarios.</p>
@@ -1101,25 +908,10 @@
       }
       function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
       async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
-      // Constancia del día procesado: genera un Excel con exactamente los datos
-      // que se modificaron/enviaron ese día (clientes atendidos, artículos
-      // entregados, inventario descontado y tarifas), para tener respaldo de
-      // qué se procesó y a quién se le envió.
-      // clientIds: lista de ids de clientes que se marcaron como atendidos al
-      // procesar (pasada desde processDay). Es importante usar esta lista fija
-      // y NO volver a calcular status(c,date) aquí: si un cliente llegó a su
-      // último día pagado, su estado ya cambió a "Retorno pendiente" para
-      // cuando se genera esta constancia, y quedaría afuera del reporte pese a
-      // haber sido atendido.
+
       async function exportProcessedDaySnapshot(date,clientIds){
         const activeClients=clientIds?state.clients.filter(c=>clientIds.includes(c.id)):state.clients.filter(c=>status(c,date)==='Activo');
-        // Las columnas de artículos ya no son 8 fijas (shots/jugos/etc.): se
-        // arman a partir del menú actual (menuItems()), así que un artículo
-        // creado, renombrado o eliminado en Planes se refleja automáticamente
-        // en este Excel sin tocar código.
         const menuCols=menuItems();
-        // Fila numérica por cliente para la hoja "Clientes atendidos", que se
-        // agrupa y totaliza por ruta más abajo.
         const clientRow=c=>{
           const pitems=c.items||plan(c.planId)?.items||{};
           const row={nombre:c.name, bolsas:n(c.bags)};
@@ -1129,11 +921,7 @@
           return row;
         };
         const NUMERIC_KEYS=['bolsas',...menuCols.map(([key])=>key),'restantes','carreras'];
-        // Agrupa por ruta (efectiva del día) respetando el orden en que las
-        // rutas están cargadas en Rutas; los clientes sin ruta reconocible
-        // quedan en un grupo "Sin ruta" al final. Dentro de cada ruta, los
-        // clientes van en el orden que el driver les asignó (campo "Orden"
-        // en Día de trabajo/Clientes), no en el orden en que se cargaron.
+ 
         const groupsById=new Map();
         activeClients.forEach(c=>{
           const rid=effectiveRouteId(c,date)||'__none__';
@@ -1150,14 +938,7 @@
           nota:m.note||''
         }));
         const tarifas=Object.entries(day(date).rates||{}).map(([driverId,rate])=>({driver:driverName(driverId),tarifa:n(rate)}));
-        // Antes se descargaban un .json y un .xlsx por cada día procesado. El
-        // navegador solo permite una descarga automática por gesto del
-        // usuario (clic en "Procesar día"): la del .json consumía ese permiso
-        // y la del .xlsx quedaba bloqueada en silencio — y si se procesaban
-        // varios días seguidos, ni siquiera la primera descarga del segundo
-        // día llegaba a salir. Ahora todo va en un único archivo .xlsx (con
-        // hoja de tarifas incluida) para que cada "Procesar día" dispare
-        // exactamente una descarga.
+
         if(!await ensureExcelJS()){ notice('Día procesado, pero no se pudo generar el Excel: la librería ExcelJS no cargó (revisa la conexión a jsdelivr).',true); return; }
         const wb=new ExcelJS.Workbook();
         wb.creator=state.settings.companyName||APP_CONFIG.companyName;
@@ -1170,8 +951,8 @@
           {header:'Servicios restantes',key:'restantes',width:17},
           {header:'Carreras',key:'carreras',width:11}
         ];
-        const CARRERAS_COL=ws.columns.length; // última columna: se resalta en ámbar en toda la hoja
-        const CARRERAS_FILL={argb:'FFFFC857'}; // ámbar: resalta la columna Carreras en toda la hoja
+        const CARRERAS_COL=ws.columns.length; 
+        const CARRERAS_FILL={argb:'FFFFC857'}; 
         ws.getRow(1).eachCell((cell,colNumber)=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===CARRERAS_COL?'FFB8860B':'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
         const sumField=(clients,key)=>clients.reduce((a,c)=>a+clientRow(c)[key],0);
         const styleDataRow=(row,i)=>row.eachCell((cell,colNumber)=>{cell.fill={type:'pattern',pattern:'solid',fgColor:colNumber===CARRERAS_COL?CARRERAS_FILL.argb:{argb:i%2===0?'FFF3F6FB':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};cell.alignment={vertical:'top'};});
@@ -1227,13 +1008,6 @@
         const d=day();
         if(!d.processed){notice('Este día no está procesado.',true);return;}
         if(!confirm(`¿Desprocesar el día ${state.currentDate.split('-').reverse().join('/')}? Se revertirá el descuento de inventario y el conteo de días consumidos que se hicieron al procesarlo (puedes volver a procesarlo después).`))return;
-        // Se revierte usando la lista guardada al procesar (d.processedClientIds),
-        // no volviendo a filtrar por status()==='Activo': un cliente que llegó
-        // a "Retorno pendiente" justo al procesar ya no es "Activo" ahora, y
-        // con el filtro viejo se quedaba sin revertir (por eso los que llegaban
-        // a 0 días restantes se quedaban "en 0" al desprocesar). Si el día se
-        // procesó con una versión anterior y no tiene la lista guardada, se usa
-        // el filtro anterior como respaldo.
         const ids=d.processedClientIds||state.clients.filter(c=>status(c)==='Activo').map(c=>c.id);
         state.clients.filter(c=>ids.includes(c.id)).forEach(c=>c.consumedDays=Math.max(0,n(c.consumedDays)-1));
         revertInventoryForProcessedDay(state.currentDate);
@@ -1274,11 +1048,6 @@
           cell.alignment={vertical:'middle',horizontal:'left'};
           cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
         });
-        // Igual que en la constancia del día procesado: se agrupa por ruta
-        // efectiva del día (orden de Rutas, "Sin ruta" al final) y, dentro de
-        // cada ruta, se ordena por el campo "Orden" que asignó el driver —
-        // así el Excel de dietas queda en el mismo orden de reparto real, no
-        // en el orden en que los clientes se cargaron en el sistema.
         const groupsById=new Map();
         activeClients.forEach(c=>{
           const rid=effectiveRouteId(c,date)||'__none__';
@@ -1320,8 +1089,7 @@
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
       }
-      // Excel de reparto para el driver: sus clientes activos, en el orden que él
-      // mismo definió en el Día de trabajo, con los datos que necesita en ruta.
+.
       async function exportRouteOrder(){
         const date=state.currentDate, r=route(activeUser.routeId);
         let activeClients=state.clients.filter(c=>effectiveRouteId(c,date)===activeUser.routeId && status(c,date)==='Activo');
@@ -1382,12 +1150,7 @@
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
-        // Igual que antes con canManage()/canManageInventory()/isAdmin(): ahora
-        // cada acción se valida contra la página que le corresponde
-        // (canEditPage), así un rol personalizado con "editar" marcado solo
-        // en Rutas puede crear/editar/eliminar rutas y nada más. Usuarios y
-        // roles quedan SIEMPRE exclusivos de Administrador — nunca se
-        // consulta canEditPage('users') para esto, es isAdmin directo.
+
         const ACTION_PERMS={
           "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),
           "add-driver":()=>canEditPage('drivers'),"edit-driver":()=>canEditPage('drivers'),"delete-driver":()=>canEditPage('drivers'),
@@ -1413,10 +1176,7 @@
           try{ parsed=JSON.parse(r.result); }
           catch{ notice('El archivo no es un JSON válido.',true); e.target.value=''; return; }
           if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)){ notice('El archivo no tiene el formato esperado.',true); e.target.value=''; return; }
-          // Solo se restauran las claves que el archivo realmente trae — así un
-          // respaldo parcial (p. ej. exportado con alcance "Clientes") no borra
-          // el resto de los datos (drivers, inventario, usuarios, etc.), que
-          // antes se perdían porque el restore reemplazaba TODO el estado.
+
           const knownStateKeys=['clients','plans','days','currentDate','drivers','routes','settings','inventory'];
           const foundStateKeys=knownStateKeys.filter(k=>k in parsed);
           const hasStaffUsers=Array.isArray(parsed.staffUsers)&&parsed.staffUsers.length>0;
