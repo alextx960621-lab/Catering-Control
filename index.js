@@ -368,7 +368,7 @@
         let changed=false;
         state.clients.forEach(c=>{
           if(c.returnDate && date>=c.returnDate && c.status!=='Activo'){
-            c.status='Activo'; c.pauseStart=''; changed=true;
+            c.status='Activo'; c.pauseStart=''; c.returnDate=''; changed=true;
           }
         });
         if(changed) save();
@@ -732,7 +732,10 @@
       }
 
       function monthDates(month){const [y,m]=month.split('-').map(Number),end=new Date(y,m,0).getDate();return Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
-      function renderPayroll(){ if(!canAccessPage('payroll')) return; const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const rows=d=>{const values=dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
+      function renderPayroll(){ if(!canAccessPage('payroll')) return; const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const dayValues=d=>dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const rows=d=>{const values=dayValues(d);const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
+        const dayTotals=dates.map((date,i)=>list.reduce((sum,d)=>sum+n(dayValues(d)[i]),0));
+        const grandTotal=dayTotals.reduce((a,v)=>a+v,0);
+        const totalsRow=`<tfoot><tr class="table-totals"><td>Total (carreras/día)</td>${dayTotals.map(v=>`<td>${v||'—'}</td>`).join('')}<td>${grandTotal}</td><td>—</td><td>—</td></tr></tfoot>`;
         // Antes esta tabla tenía encabezados <th> escritos a mano, sin
         // colgroup ni el tirador de resize (.resize-handle) que usan el
         // resto de las tablas — por eso las columnas se amontonaban y no se
@@ -741,7 +744,7 @@
         // grupo 'payroll' (una clave fija por día del mes: 'd1'…'d31', para
         // que el ancho no se resetee al cambiar de mes).
         const headers=[['Driver / Ruta','driver'],...dates.map((d,i)=>[String(Number(d.slice(-2))),`d${i+1}`]),['Total','total'],['Día tarifa','rate'],['Monto Bs','amount']];
-        $('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<input id="payroll-month" type="month" value="${ui.month}"></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet table-responsive"><table class="table table-hover align-middle mb-0 payroll">${colgroupHtml(headers,'payroll')}<thead><tr>${headers.map(h=>th(h[0],h[1],'payroll')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody></table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
+        $('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<input id="payroll-month" type="month" value="${ui.month}"></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet table-responsive"><table class="table table-hover align-middle mb-0 payroll">${colgroupHtml(headers,'payroll')}<thead><tr>${headers.map(h=>th(h[0],h[1],'payroll')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody>${list.length?totalsRow:''}</table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
 
       function renderUsers(){if(!canAccessPage('users'))return;
         const rows=u=>`<tr><td><b>${esc(u.username)}</b></td><td>${esc(u.name)}</td><td>${esc(u.email||'—')}</td><td>${badge(roleLabel(u.role))}</td><td>${u.role==='driver'?esc(routeName(u.routeId)):'—'}</td><td><button class="icon-btn" data-action="edit-user" data-id="${u.id}">Editar</button>${u.id!==activeUser.id?`<button class="icon-btn delete" data-action="delete-user" data-id="${u.id}">×</button>`:''}</td></tr>`;
