@@ -1169,9 +1169,17 @@
         };
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
         map[action]?.();});
-      document.addEventListener('click',e=>{const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
+      document.addEventListener('click',e=>{if(e.target.closest('.resize-handle'))return;const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
       $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#modal-cancel').onclick=()=>$('#modal').close();$('#logout-btn').onclick=async()=>{
-
+        // save() sube los cambios a Supabase de forma asíncrona (no bloquea
+        // la interfaz). Antes, "Salir" navegaba a login.html al toque, sin
+        // esperar ese guardado — si alguien cambiaba el ancho de una columna
+        // (o cualquier otra cosa) y le daba a Salir enseguida, la navegación
+        // podía cortar el guardado a mitad de camino: quedaba bien en este
+        // navegador (localStorage) pero nunca llegaba a subirse a Supabase.
+        // Al volver a entrar, se bajaba la versión vieja del servidor y
+        // pisaba el cambio, dando la sensación de que "no se guardó nada".
+        // Ahora espera a que cualquier guardado en curso termine antes de salir.
         try{ await operationsSaveQueue; }catch(_){}
         sessionStorage.removeItem(STAFF_SESSION_KEY);
         location.href='./login.html';
@@ -1204,6 +1212,11 @@
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
       if(!activeUser){ window.location.replace('./login.html'); return; }
       load(); applyBranding(); loadFromServer().then(() => { normalize(); render(); applyBranding(); }); render(); activate('dispatch');
-
+      // Si se cierra la pestaña o se recarga mientras hay un guardado en
+      // curso (p. ej. justo después de resizar una columna), el navegador
+      // puede cortar esa subida a Supabase a mitad de camino — el cambio
+      // queda bien guardado en este navegador pero nunca llega al servidor,
+      // y se pierde en el próximo inicio de sesión. Este aviso nativo del
+      // navegador le da a la persona la chance de esperar unos segundos.
       window.addEventListener('beforeunload', e => { if (saveInFlight) { e.preventDefault(); e.returnValue = ''; } });
     })();
