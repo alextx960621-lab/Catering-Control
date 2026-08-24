@@ -16,7 +16,13 @@
       function menuItemsList(){ return branding.menuItems && branding.menuItems.length ? branding.menuItems : DEFAULT_ITEMS; }
       const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));let data,session,client;
       let branding={};try{branding=JSON.parse(localStorage.getItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`))||{};}catch(_){branding={};}
-      async function syncBranding(){try{const personal=await window.SupabaseDB?.dbGet('personal');if(personal?.settings){branding={companyName:personal.settings.companyName,logoUrl:personal.settings.logoUrl,itemIcons:personal.settings.itemIcons||{},whatsappNumber:personal.settings.whatsappNumber,instagramUrl:personal.settings.instagramUrl,instagramHandle:personal.settings.instagramHandle,adImageUrl:personal.settings.adImageUrl,renewalWarningDays:personal.settings.renewalWarningDays,menuItems:(personal.settings.menuItems||[]).map(m=>[m.key,m.label])};localStorage.setItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`,JSON.stringify(branding));}}catch(_){}}
+      // Antes esto pedía dbGet('personal') completo: además del nombre/logo
+      // de la empresa trae staffUsers (con el hash de la contraseña de cada
+      // usuario del equipo), drivers y routes — y el portal de cliente los
+      // descargaba igual, sin necesitarlos. get_branding() (ver
+      // supabase-public-branding-migration.sql) devuelve solo el bloque
+      // "settings" (público), nunca staffUsers/drivers/routes.
+      async function syncBranding(){try{const settings=await window.SupabaseDB?.rpc('get_branding',{});if(settings){branding={companyName:settings.companyName,logoUrl:settings.logoUrl,itemIcons:settings.itemIcons||{},whatsappNumber:settings.whatsappNumber,instagramUrl:settings.instagramUrl,instagramHandle:settings.instagramHandle,adImageUrl:settings.adImageUrl,renewalWarningDays:settings.renewalWarningDays,menuItems:(settings.menuItems||[]).map(m=>[m.key,m.label])};localStorage.setItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`,JSON.stringify(branding));}}catch(_){}}
       // "data" ahora solo trae planes y días (compartidos, livianos). El
       // cliente propio ("client") se guarda aparte, en su propia fila de la
       // base de datos: así este portal nunca descarga la lista de los demás

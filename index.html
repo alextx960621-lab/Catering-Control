@@ -8,7 +8,10 @@
   <script src="./config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="./supabase-client.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" defer></script>
+  <!-- ExcelJS (~1MB) ya no se carga aquí en cada visita: index.js lo pide
+       bajo demanda solo cuando el usuario exporta un Excel (procesar día,
+       exportar dietas, exportar orden de ruta). Así el panel carga más
+       liviano y rápido en el uso normal del día a día. -->
   <link rel="stylesheet" href="./index.css">
 </head>
 <body>

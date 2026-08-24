@@ -23,9 +23,15 @@ function updateWhatsappButton(number) {
 updateWhatsappButton(APP_CONFIG.whatsappNumber);
 (async () => {
   try {
-    const personal = await window.SupabaseDB?.dbGet('personal');
-    const name = personal?.settings?.companyName?.trim();
-    const logo = personal?.settings?.logoUrl;
+    // Antes esto pedía dbGet('personal') completo, que además del nombre y
+    // el logo de la empresa trae staffUsers (con el hash de la contraseña
+    // de cada usuario del equipo), drivers y routes — y como esta página se
+    // ve ANTES de iniciar sesión, cualquiera que la abriera descargaba todo
+    // eso. get_branding() (ver supabase-public-branding-migration.sql)
+    // devuelve solo el bloque "settings" (público), nunca staffUsers.
+    const settings = await window.SupabaseDB?.rpc('get_branding', {});
+    const name = settings?.companyName?.trim();
+    const logo = settings?.logoUrl;
     if (name) { document.getElementById('brand-title').textContent = name; document.title = `${name} · Iniciar sesión`; }
     // Antes solo se actualizaba el logo cuando 'logo' tenía un valor: si en
     // Configuración se quitó el logo (settings.logoUrl quedó en ''), esta
@@ -36,7 +42,7 @@ updateWhatsappButton(APP_CONFIG.whatsappNumber);
     document.getElementById('brand-mark').innerHTML = logo
       ? `<img src="${logo}" alt="${name || APP_CONFIG.companyName}" onerror="this.parentElement.textContent='🍽'">`
       : '🍽';
-    if (personal?.settings?.whatsappNumber) updateWhatsappButton(personal.settings.whatsappNumber);
+    if (settings?.whatsappNumber) updateWhatsappButton(settings.whatsappNumber);
   } catch (_) {}
 })();
 /* ========================================================================== */

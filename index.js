@@ -3,6 +3,25 @@
       /* La configuración de la empresa vive en config.js (un solo archivo
          para toda la app: marca + credenciales de Supabase). */
       const APP_CONFIG = window.APP_CONFIG;
+
+      // ExcelJS (~1MB) antes se cargaba con <script defer> en index.html en
+      // CADA carga del panel, aunque solo se usa al exportar (3 lugares:
+      // procesar día, exportar dietas, exportar orden de ruta). Ahora se
+      // pide bajo demanda, la primera vez que hace falta, y se reutiliza si
+      // ya se cargó. Así el panel carga más liviano y rápido normalmente.
+      let excelJsLoadPromise=null;
+      function ensureExcelJS(){
+        if(window.ExcelJS) return Promise.resolve(true);
+        if(excelJsLoadPromise) return excelJsLoadPromise;
+        excelJsLoadPromise=new Promise(resolve=>{
+          const script=document.createElement('script');
+          script.src='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+          script.onload=()=>resolve(true);
+          script.onerror=()=>{ excelJsLoadPromise=null; resolve(false); };
+          document.head.appendChild(script);
+        });
+        return excelJsLoadPromise;
+      }
       const KEY = `${APP_CONFIG.storagePrefix}-operaciones-v3`;
       // Esta base almacena exclusivamente cuentas del equipo. Los clientes,
       // planes, rutas y operaciones continúan dentro de KEY.
@@ -1109,7 +1128,7 @@
         // día llegaba a salir. Ahora todo va en un único archivo .xlsx (con
         // hoja de tarifas incluida) para que cada "Procesar día" dispare
         // exactamente una descarga.
-        if(!window.ExcelJS){ notice('Día procesado, pero no se pudo generar el Excel: la librería ExcelJS no cargó (revisa la conexión a jsdelivr).',true); return; }
+        if(!await ensureExcelJS()){ notice('Día procesado, pero no se pudo generar el Excel: la librería ExcelJS no cargó (revisa la conexión a jsdelivr).',true); return; }
         const wb=new ExcelJS.Workbook();
         wb.creator=state.settings.companyName||APP_CONFIG.companyName;
         const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
@@ -1204,7 +1223,7 @@
         if(isDriverRole()) return exportRouteOrder();
         const date=state.currentDate;
         const activeClients=state.clients.filter(c=>status(c,date)==='Activo');
-        if(!window.ExcelJS){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
+        if(!await ensureExcelJS()){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
         if(!activeClients.length){ notice('No hay clientes activos para exportar hoy.',true); return; }
         const wb=new ExcelJS.Workbook();
         wb.creator=state.settings.companyName||APP_CONFIG.companyName;
@@ -1277,7 +1296,7 @@
         const date=state.currentDate, r=route(activeUser.routeId);
         let activeClients=state.clients.filter(c=>effectiveRouteId(c,date)===activeUser.routeId && status(c,date)==='Activo');
         activeClients=[...activeClients].sort((a,b)=>(n(a.order)||9999)-(n(b.order)||9999));
-        if(!window.ExcelJS){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
+        if(!await ensureExcelJS()){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
         if(!activeClients.length){ notice('No hay clientes activos en tu ruta para exportar hoy.',true); return; }
         const wb=new ExcelJS.Workbook();
         wb.creator=state.settings.companyName||APP_CONFIG.companyName;
