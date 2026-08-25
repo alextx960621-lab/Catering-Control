@@ -895,7 +895,19 @@
         box-sizing: border-box;
         display: flex;
         align-items: center;
+        overflow: hidden;
+        /* Al vivir dentro de un <label>, iOS Safari puede dibujar su
+           highlight de "toque" (el recuadro gris translúcido, normalmente
+           redondeado) sobre el área del label al tocarlo — y esa área a
+           veces se calcula más grande que la caja visible, asomando por
+           fuera del borde. Como este div ya no es un control real (el
+           campo quedó de solo lectura), no necesita ningún feedback de
+           toque: se apaga explícitamente en vez de dejarlo al navegador. */
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none;
+        user-select: none;
       }
+      label:has(.field-locked) { -webkit-tap-highlight-color: transparent; }
       /* Tiradores más grandes en pantallas táctiles: 7px es casi imposible
          de agarrar con el dedo, sobre todo pegado al borde de una tabla
          con scroll horizontal. */
