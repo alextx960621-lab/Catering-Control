@@ -884,7 +884,18 @@
          desbordando la tarjeta (por eso se veía descuadrado). Sin el
          atributo disabled, el navegador lo mide como a cualquier otro
          input; pointer-events:none bloquea la edición igual. */
-      .field-locked { pointer-events: none; opacity: .65; background: var(--surface-2); width: 100%; }
+      .field-locked {
+        width: 100%;
+        min-height: 36px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--surface-2);
+        color: var(--muted);
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+      }
       /* Tiradores más grandes en pantallas táctiles: 7px es casi imposible
          de agarrar con el dedo, sobre todo pegado al borde de una tabla
          con scroll horizontal. */
