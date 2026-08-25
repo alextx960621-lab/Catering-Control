@@ -498,20 +498,30 @@
             handle.onmousedown=e=>{
               e.preventDefault(); e.stopPropagation();
               const initial=col.getBoundingClientRect().width, start=e.clientX;
+              const wasDraggable=headCell.draggable; headCell.draggable=false; // ver nota abajo
               const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.clientX-start)); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
               const up=()=>{
                 document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+                headCell.draggable=wasDraggable;
                 const group=headCell.dataset.group, key=headCell.dataset.sort;
                 if(group && key) saveColumnWidth(group,key,parseInt(col.style.width,10));
               };
               document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
             };
+            // En Día de trabajo, cada <th> tiene draggable="true" (para poder
+            // arrastrar y reordenar columnas) y el tirador de resize vive
+            // adentro de esa misma celda. Sin este apagado temporal, empezar
+            // a resizar (mouse o touch) hace que el navegador agarre el gesto
+            // como "arrastrar la columna entera" en vez de "cambiar su ancho"
+            // — por eso no se podía ajustar el ancho en esa tabla.
             handle.ontouchstart=e=>{
               e.preventDefault(); e.stopPropagation();
               const touch=e.touches[0], initial=col.getBoundingClientRect().width, start=touch.clientX;
+              const wasDraggable=headCell.draggable; headCell.draggable=false;
               const move=ev=>{ ev.preventDefault(); const width=Math.max(28,Math.round(initial+ev.touches[0].clientX-start)); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
               const up=()=>{
                 document.removeEventListener('touchmove',move); document.removeEventListener('touchend',up);
+                headCell.draggable=wasDraggable;
                 const group=headCell.dataset.group, key=headCell.dataset.sort;
                 if(group && key) saveColumnWidth(group,key,parseInt(col.style.width,10));
               };
@@ -594,9 +604,11 @@
         const rows=c=>`<tr data-id="${c.id}">${columns.map(col=>`<td>${col.cell(c)}</td>`).join('')}</tr>`;
         const filteredActive=list.filter(c=>status(c,date)==='Activo');
         const totals=`<tfoot>${totalRow(`Totales filtrados (${filteredActive.length} pedidos activos)`,filteredActive,'filtered')}${totalRow(`Totales generales (${activeOrders.length} pedidos activos)`,activeOrders,'general')}</tfoot>`;
-        const printLabel=isDriverRole()?'Imprimir orden de ruta':'Imprimir dietas especiales';
+        const printButtons=isDriverRole()
+          ?`<button class="outline" data-action="export-diets">Imprimir orden de ruta</button>`
+          :`<button class="outline" data-action="export-diets">Imprimir dietas especiales</button><button class="outline" data-action="export-route-order">Imprimir orden de ruta</button>`;
         const routeField=isDriverRole()?`<label class="field">Ruta<input value="${esc(routeName(activeUser.routeId))}" disabled></label>`:`<label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label>`;
-        $('#dispatch-page').innerHTML=pageHead('Día de trabajo','La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`<button class="outline" data-action="export-diets">${printLabel}</button>${canEditPage('dispatch')?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}`)+
+        $('#dispatch-page').innerHTML=pageHead('Día de trabajo','La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`${printButtons}${canEditPage('dispatch')?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}`)+
           `<div class="toolbar"><label class="field">Día de trabajo<input type="date" id="work-date" value="${date}" ${isDriverRole()?'disabled':''}></label>${routeField}<label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${canEditPage('dispatch')?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
           `<div class="sheet"><table id="dispatch-table">${colgroupHtml(columns.map(c=>[c.label,c.key]),'dispatch')}<thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
         $('#work-date').onchange=e=>{ if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); save(); renderDispatch(); };
@@ -1213,11 +1225,18 @@
         notice('Archivo Excel generado.');
       }
       async function exportRouteOrder(){
-        const date=state.currentDate, r=route(activeUser.routeId);
-        let activeClients=state.clients.filter(c=>effectiveRouteId(c,date)===activeUser.routeId && status(c,date)==='Activo');
+        const date=state.currentDate;
+        // Para un driver, su ruta siempre es la propia (activeUser.routeId).
+        // Para admin/editor no hay una "ruta propia" — se usa la ruta
+        // elegida en el filtro "Ruta" de Día de trabajo, para poder generar
+        // el orden de cualquier ruta puntual.
+        const routeId=isDriverRole()?activeUser.routeId:ui.route;
+        if(!routeId){ notice('Selecciona una ruta en el filtro "Ruta" antes de imprimir el orden de ruta.',true); return; }
+        const r=route(routeId);
+        let activeClients=state.clients.filter(c=>effectiveRouteId(c,date)===routeId && status(c,date)==='Activo');
         activeClients=[...activeClients].sort((a,b)=>(n(a.order)||9999)-(n(b.order)||9999));
         if(!await ensureExcelJS()){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
-        if(!activeClients.length){ notice('No hay clientes activos en tu ruta para exportar hoy.',true); return; }
+        if(!activeClients.length){ notice('No hay clientes activos en esa ruta para exportar hoy.',true); return; }
         const wb=new ExcelJS.Workbook();
         wb.creator=state.settings.companyName||APP_CONFIG.companyName;
         const ws=wb.addWorksheet('Orden de ruta',{views:[{state:'frozen',ySplit:1}]});
@@ -1271,7 +1290,7 @@
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
       }
-      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
 
         const ACTION_PERMS={
           "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),
