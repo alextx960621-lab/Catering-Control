@@ -20,7 +20,9 @@ html { font-size:15px; }
     .btn-primary:hover, .btn-primary:active { filter: brightness(.92); }
     .login-card { max-width:420px; }
     .login-card .card { overflow:hidden; }
-    .brand-mark { width:40px; height:40px; border-radius:.8rem; overflow:hidden; background:var(--brand); transition:background .2s; }
+    .brand-row { display:flex; align-items:center; gap:16px; }
+    .brand-info { min-width:0; flex:1; }
+    .brand-mark { width:72px; height:72px; flex:0 0 auto; border-radius:1rem; overflow:hidden; background:var(--brand); transition:background .2s; }
     .brand-mark img { width:100%; height:100%; object-fit:contain; }
     .form-panel { display:none; }
     .form-panel.active { display:block; }

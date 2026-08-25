@@ -7,9 +7,13 @@
 const APP_CONFIG = window.APP_CONFIG;
 document.getElementById('brand-title').textContent = APP_CONFIG.companyName;
 document.title = `${APP_CONFIG.companyName} · Iniciar sesión`;
-document.getElementById('brand-mark').innerHTML = APP_CONFIG.logoUrl
-  ? `<img src="${APP_CONFIG.logoUrl}" alt="${APP_CONFIG.companyName}" onerror="this.parentElement.textContent='🍽'">`
-  : '🍽';
+// Antes acá se pintaba de una el logo de config.js (el "por defecto" del
+// proyecto) y, más abajo, una vez llegaba la respuesta de Supabase, se
+// reemplazaba por el logo real guardado en Configuración — si eran
+// distintos, se veía un parpadeo del logo viejo antes del correcto. Ahora
+// no se pinta ningún logo hasta tener el definitivo: mientras se espera la
+// respuesta se deja el ícono neutro, y recién ahí se decide cuál mostrar.
+document.getElementById('brand-mark').textContent = '🍽';
 const waBtn = document.getElementById('whatsapp-support-btn');
 function updateWhatsappButton(number) {
   const num = String(number || '').replace(/\D/g, '');
@@ -22,6 +26,7 @@ function updateWhatsappButton(number) {
 }
 updateWhatsappButton(APP_CONFIG.whatsappNumber);
 (async () => {
+  let settings = null;
   try {
     // Antes esto pedía dbGet('personal') completo, que además del nombre y
     // el logo de la empresa trae staffUsers (con el hash de la contraseña
@@ -29,21 +34,18 @@ updateWhatsappButton(APP_CONFIG.whatsappNumber);
     // ve ANTES de iniciar sesión, cualquiera que la abriera descargaba todo
     // eso. get_branding() (ver supabase-public-branding-migration.sql)
     // devuelve solo el bloque "settings" (público), nunca staffUsers.
-    const settings = await window.SupabaseDB?.rpc('get_branding', {});
-    const name = settings?.companyName?.trim();
-    const logo = settings?.logoUrl;
-    if (name) { document.getElementById('brand-title').textContent = name; document.title = `${name} · Iniciar sesión`; }
-    // Antes solo se actualizaba el logo cuando 'logo' tenía un valor: si en
-    // Configuración se quitó el logo (settings.logoUrl quedó en ''), esta
-    // condición era falsa y no hacía nada — dejando en pantalla el logo
-    // anterior (el de APP_CONFIG.logoUrl con el que arrancó la página, o el
-    // último que se había dibujado). Ahora, igual que en index.html, se
-    // vuelve al ícono 🍽 por defecto cuando no hay logo configurado.
-    document.getElementById('brand-mark').innerHTML = logo
-      ? `<img src="${logo}" alt="${name || APP_CONFIG.companyName}" onerror="this.parentElement.textContent='🍽'">`
-      : '🍽';
-    if (settings?.whatsappNumber) updateWhatsappButton(settings.whatsappNumber);
+    settings = await window.SupabaseDB?.rpc('get_branding', {});
   } catch (_) {}
+  const name = settings?.companyName?.trim();
+  // Se usa el logo guardado en Configuración; si Supabase no devolvió nada
+  // (sin conexión, empresa recién creada, etc.) recién ahí se cae al logo
+  // por defecto de config.js — nunca se muestran los dos, uno tras otro.
+  const logo = settings?.logoUrl || APP_CONFIG.logoUrl;
+  if (name) { document.getElementById('brand-title').textContent = name; document.title = `${name} · Iniciar sesión`; }
+  document.getElementById('brand-mark').innerHTML = logo
+    ? `<img src="${logo}" alt="${name || APP_CONFIG.companyName}" onerror="this.parentElement.textContent='🍽'">`
+    : '🍽';
+  if (settings?.whatsappNumber) updateWhatsappButton(settings.whatsappNumber);
 })();
 /* ========================================================================== */
 
