@@ -21,6 +21,13 @@
       const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
 
       const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
+      const SIDEBAR_COLLAPSED_KEY = `${APP_CONFIG.storagePrefix}-sidebar-collapsed-v1`;
+      // Ancho/orden de columnas: preferencia PERSONAL de cada usuario del
+      // panel, no de la empresa. Por eso vive aparte en localStorage (nunca
+      // se sube a Supabase dentro de "settings") y se indexa por el id del
+      // usuario que inició sesión, en vez de guardarse en state.settings
+      // (que es compartido y se sincroniza para todos los dispositivos).
+      const COL_PREFS_KEY = `${APP_CONFIG.storagePrefix}-col-prefs-v1`;
       const $ = (s, root=document) => root.querySelector(s);
       const $$ = (s, root=document) => [...root.querySelectorAll(s)];
       const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));
@@ -69,6 +76,41 @@
 
       let activeUser = null;
       let staffUsers = readStaffUsers();
+
+      function readColPrefsStore(){ try { return JSON.parse(localStorage.getItem(COL_PREFS_KEY)) || {}; } catch (_) { return {}; } }
+      function writeColPrefsStore(store){ try { localStorage.setItem(COL_PREFS_KEY, JSON.stringify(store)); } catch (_) {} }
+      // Devuelve las preferencias de columnas del usuario activo. La primera
+      // vez que un usuario entra migra el valor viejo compartido (si había
+      // uno) para no perder de golpe lo ya personalizado; de ahí en más cada
+      // usuario tiene su propia copia y ya no se vuelven a tocar entre sí.
+      function userColPrefs(){
+        const store=readColPrefsStore(), key=activeUser?.id || 'default';
+        if(!store[key]){
+          store[key]={ columnWidths: state.settings.columnWidths || {}, dispatchColumnOrder: state.settings.dispatchColumnOrder || [], hiddenColumns: state.settings.hiddenColumns || [] };
+          writeColPrefsStore(store);
+        }
+        store[key].hiddenColumns ??= [];
+        return store[key];
+      }
+      function saveColumnWidth(group,key,width){
+        const store=readColPrefsStore(), ukey=activeUser?.id || 'default';
+        store[ukey] ||= { columnWidths:{}, dispatchColumnOrder:[], hiddenColumns:[] };
+        store[ukey].columnWidths[group] ||= {};
+        store[ukey].columnWidths[group][key]=width;
+        writeColPrefsStore(store);
+      }
+      function saveColumnOrder(order){
+        const store=readColPrefsStore(), ukey=activeUser?.id || 'default';
+        store[ukey] ||= { columnWidths:{}, dispatchColumnOrder:[], hiddenColumns:[] };
+        store[ukey].dispatchColumnOrder=order;
+        writeColPrefsStore(store);
+      }
+      function saveHiddenColumns(hidden){
+        const store=readColPrefsStore(), ukey=activeUser?.id || 'default';
+        store[ukey] ||= { columnWidths:{}, dispatchColumnOrder:[], hiddenColumns:[] };
+        store[ukey].hiddenColumns=hidden;
+        writeColPrefsStore(store);
+      }
 
       // 'superadmin' es un rol fijo más (como 'admin'), pero solo puede existir
       // UN usuario con ese rol (se valida al crear/editar usuarios en openUser).
@@ -405,7 +447,7 @@
       function th(label,key,group){ const s=ui.sort[group]; const drag=group==='dispatch'?' draggable="true" title="Arrastra para reordenar la columna"':''; return `<th data-sort="${key}" data-group="${group}"${drag}>${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
       function defaultColWidth(label){ return Math.min(240, Math.max(70, String(label).length*8+56)); }
       function colgroupHtml(cols, group){
-        const saved = state.settings.columnWidths?.[group] || {};
+        const saved = userColPrefs().columnWidths?.[group] || {};
         return `<colgroup>${cols.map(([label,key])=>`<col data-col-key="${esc(key)}" style="width:${n(saved[key])||defaultColWidth(label)}px">`).join('')}</colgroup>`;
       }
       function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${colgroupHtml(headers,group)}<thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
@@ -432,11 +474,7 @@
               const up=()=>{
                 document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
                 const group=headCell.dataset.group, key=headCell.dataset.sort;
-                if(group && key){
-                  state.settings.columnWidths[group] ||= {};
-                  state.settings.columnWidths[group][key]=parseInt(col.style.width,10);
-                  save();
-                }
+                if(group && key) saveColumnWidth(group,key,parseInt(col.style.width,10));
               };
               document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
             };
@@ -447,11 +485,7 @@
               const up=()=>{
                 document.removeEventListener('touchmove',move); document.removeEventListener('touchend',up);
                 const group=headCell.dataset.group, key=headCell.dataset.sort;
-                if(group && key){
-                  state.settings.columnWidths[group] ||= {};
-                  state.settings.columnWidths[group][key]=parseInt(col.style.width,10);
-                  save();
-                }
+                if(group && key) saveColumnWidth(group,key,parseInt(col.style.width,10));
               };
               document.addEventListener('touchmove',move,{passive:false}); document.addEventListener('touchend',up);
             };
@@ -467,11 +501,12 @@
               e.preventDefault(); const targetKey=head.dataset.sort;
               if(!sourceKey || sourceKey===targetKey) return;
               const all=['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'];
-              const order=state.settings.dispatchColumnOrder.length?[...state.settings.dispatchColumnOrder]:all;
+              const currentOrder=userColPrefs().dispatchColumnOrder;
+              const order=currentOrder.length?[...currentOrder]:all;
               all.forEach(key=>{if(!order.includes(key))order.push(key);});
               const from=order.indexOf(sourceKey), to=order.indexOf(targetKey);
               order.splice(to,0,order.splice(from,1)[0]);
-              state.settings.dispatchColumnOrder=order; save(); renderDispatch();
+              saveColumnOrder(order); renderDispatch();
             };
           });
         }
@@ -516,9 +551,9 @@
           {key:'returnDate',label:'Fecha de retorno',cell:c=>hasPremiumAccess()?(canEditPage('dispatch')?editableField(c,'returnDate',c.returnDate||'','date'):esc(c.returnDate||'—')):'<span class="muted" title="Función Premium">🔒 Premium</span>'},
           {key:'id',label:'Acciones',cell:c=>canEditPage('dispatch')?`<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button>`:'—'}
         ];
-        const allKeys=definitions.map(x=>x.key), wanted=state.settings.dispatchColumnOrder;
+        const allKeys=definitions.map(x=>x.key), wanted=userColPrefs().dispatchColumnOrder;
         const arranged=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
-        const columns=arranged.filter(x=>!state.settings.hiddenColumns.includes(x.key));
+        const columns=arranged.filter(x=>!userColPrefs().hiddenColumns.includes(x.key));
         const numericKeys=new Set([...menuItems().map(([key])=>key),'career','bags','remaining']);
         const totalRow=(label,orders,variant)=>{
           let labelled=false;
@@ -885,13 +920,13 @@
             <p class="muted">Solo afecta a tu navegador, no a los demás usuarios.</p>
             <label>Tema<select id="my-theme"><option value="light" ${(localStorage.getItem(UI_THEME_KEY)||'light')==='light'?'selected':''}>Claro</option><option value="night" ${localStorage.getItem(UI_THEME_KEY)==='night'?'selected':''}>Nocturno</option><option value="forest" ${localStorage.getItem(UI_THEME_KEY)==='forest'?'selected':''}>Bosque</option></select></label>
             <h3 style="margin-top:10px">Columnas visibles</h3>
-            <p class="muted">Afecta a la tabla de Día de trabajo. Allí también puedes arrastrar los encabezados para cambiar su orden.</p>
-            <div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!state.settings.hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div>
+            <p class="muted">Afecta a la tabla de Día de trabajo. Es personal: no se comparte con otros usuarios. Allí también puedes arrastrar los encabezados para cambiar su orden.</p>
+            <div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!userColPrefs().hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div>
           </div>`;
         if(!isAdmin()){
           $('#settings-page').innerHTML=pageHead('Configuración','Elige tu tema y qué columnas ver en la tabla de Día de trabajo.')+`<div class="two-col">${columnsCard}</div>`;
           $('#my-theme').onchange=e=>{localStorage.setItem(UI_THEME_KEY,e.target.value);render();};
-          $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
+          $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column,hidden=userColPrefs().hiddenColumns;saveHiddenColumns(input.checked?hidden.filter(x=>x!==key):[...hidden,key]);notice('Columnas actualizadas.');});
           return;
         }
         $('#settings-page').innerHTML=pageHead('Configuración','Preferencias visuales, columnas y respaldo de datos.')+`<div class="two-col">
@@ -950,7 +985,7 @@
           </div>`:''}
         </div>`;
         $('#my-theme').onchange=e=>{localStorage.setItem(UI_THEME_KEY,e.target.value);render();};
-        $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
+        $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column,hidden=userColPrefs().hiddenColumns;saveHiddenColumns(input.checked?hidden.filter(x=>x!==key):[...hidden,key]);notice('Columnas actualizadas.');});
         $('#company-name').onchange=async e=>{state.settings.companyName=e.target.value.trim();const saved=await save();applyBranding();notice(saved?'Nombre de la empresa actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
         $('#logo-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.logoUrl=await readImageAsDataURL(file,240,.85);const saved=await save();applyBranding();renderSettings();notice(saved?'Logo actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
         $('#whatsapp-number').onchange=async e=>{state.settings.whatsappNumber=e.target.value.trim().replace(/[^\d]/g,'');e.target.value=state.settings.whatsappNumber;const saved=await save();notice(saved?'Número de WhatsApp actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
@@ -1223,7 +1258,15 @@
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
         map[action]?.();});
       document.addEventListener('click',e=>{if(e.target.closest('.resize-handle'))return;const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
-      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');$('#modal-close').onclick=()=>$('#modal').close();$('#modal-cancel').onclick=()=>$('#modal').close();$('#logout-btn').onclick=async()=>{
+      $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');
+      // Menú lateral retráctil (solo escritorio): guarda la preferencia por
+      // navegador, igual que el tema, así queda como la dejó la última vez.
+      (function initSidebarCollapse(){
+        const btn=$('#sidebar-collapse-btn'); if(!btn) return;
+        const apply=collapsed=>{ document.getElementById('app').classList.toggle('sidebar-collapsed',collapsed); btn.textContent=collapsed?'»':'«'; btn.title=collapsed?'Expandir menú':'Contraer menú'; };
+        apply(localStorage.getItem(SIDEBAR_COLLAPSED_KEY)==='1');
+        btn.onclick=()=>{ const collapsed=!document.getElementById('app').classList.contains('sidebar-collapsed'); apply(collapsed); localStorage.setItem(SIDEBAR_COLLAPSED_KEY,collapsed?'1':'0'); };
+      })();$('#modal-close').onclick=()=>$('#modal').close();$('#modal-cancel').onclick=()=>$('#modal').close();$('#logout-btn').onclick=async()=>{
         // save() sube los cambios a Supabase de forma asíncrona (no bloquea
         // la interfaz). Antes, "Salir" navegaba a login.html al toque, sin
         // esperar ese guardado — si alguien cambiaba el ancho de una columna

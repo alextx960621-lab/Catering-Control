@@ -21,19 +21,20 @@
     <aside>
       <div class="aside-title">
         <div class="brand"><div class="brand-mark" id="brand-mark">🍽</div><strong id="brand-name">Catering Control</strong></div>
+        <button class="collapse-toggle" id="sidebar-collapse-btn" aria-label="Contraer menú" title="Contraer menú">«</button>
         <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú">☰</button>
       </div>
       <nav id="nav">
-        <button data-page="dispatch" data-roles="admin,editor,kitchen,driver" class="active"><span class="nav-icon">▦</span>Día de trabajo</button>
-        <button data-page="clients" data-roles="admin,editor,driver"><span class="nav-icon">♙</span>Clientes</button>
-        <button data-page="drivers" data-roles="admin,editor"><span class="nav-icon">⌁</span>Drivers</button>
-        <button data-page="routes" data-roles="admin,editor"><span class="nav-icon">⌘</span>Rutas</button>
-        <button data-page="plans" data-roles="admin,editor"><span class="nav-icon">▤</span>Planes</button>
-        <button data-page="payroll" data-roles="admin,editor,driver"><span class="nav-icon">💵</span>Sueldos</button>
-        <button data-page="inventory" data-roles="admin,editor,kitchen"><span class="nav-icon">▧</span>Inventario</button>
-        <button data-page="users" data-roles="admin"><span class="nav-icon">♟</span>Usuarios</button>
-        <button data-page="audit" data-roles="admin"><span class="nav-icon">🕘</span>Auditoría</button>
-        <button data-page="settings" data-roles="admin,editor,kitchen,driver"><span class="nav-icon">⚙</span>Configuración</button>
+        <button data-page="dispatch" data-roles="admin,editor,kitchen,driver" class="active"><span class="nav-icon">▦</span><span class="nav-label">Día de trabajo</span></button>
+        <button data-page="clients" data-roles="admin,editor,driver"><span class="nav-icon">♙</span><span class="nav-label">Clientes</span></button>
+        <button data-page="drivers" data-roles="admin,editor"><span class="nav-icon">⌁</span><span class="nav-label">Drivers</span></button>
+        <button data-page="routes" data-roles="admin,editor"><span class="nav-icon">⌘</span><span class="nav-label">Rutas</span></button>
+        <button data-page="plans" data-roles="admin,editor"><span class="nav-icon">▤</span><span class="nav-label">Planes</span></button>
+        <button data-page="payroll" data-roles="admin,editor,driver"><span class="nav-icon">💵</span><span class="nav-label">Sueldos</span></button>
+        <button data-page="inventory" data-roles="admin,editor,kitchen"><span class="nav-icon">▧</span><span class="nav-label">Inventario</span></button>
+        <button data-page="users" data-roles="admin"><span class="nav-icon">♟</span><span class="nav-label">Usuarios</span></button>
+        <button data-page="audit" data-roles="admin"><span class="nav-icon">🕘</span><span class="nav-label">Auditoría</span></button>
+        <button data-page="settings" data-roles="admin,editor,kitchen,driver"><span class="nav-icon">⚙</span><span class="nav-label">Configuración</span></button>
       </nav>
       <div class="aside-bottom">
         <div class="profile" id="profile-link" style="cursor:pointer" title="Ver sesión">
@@ -41,10 +42,10 @@
           <div><b id="current-name">Operaciones</b><small class="muted" id="current-role" style="display:block;font-size:10px;">Administrador</small></div>
         </div>
         <div class="aside-bottom-actions">
-          <button class="outline" id="logout-btn" title="Cerrar sesión"><span aria-hidden="true">⏻</span><span class="btn-text"> Salir</span></button>
+          <button class="danger" id="logout-btn" title="Cerrar sesión"><span aria-hidden="true">⏻</span><span class="btn-text"> Salir</span></button>
           <div class="mobile-sync-group">
             <div class="sync-pill" id="sync-pill" title="Estado de sincronización"><span class="sync-dot" id="sync-dot"></span><span id="sync-text" class="sync-text-label">Listo</span></div>
-            <button class="outline" id="manual-sync-btn" title="Sincronizar"><span aria-hidden="true">🔄</span><span class="btn-text"> Sincronizar</span></button>
+            <button class="primary" id="manual-sync-btn" title="Sincronizar"><span aria-hidden="true">🔄</span><span class="btn-text"> Sincronizar</span></button>
           </div>
         </div>
       </div>

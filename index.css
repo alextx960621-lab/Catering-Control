@@ -171,6 +171,10 @@
     }
     .aside-title {
       padding: 6px 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
     }
     .aside-title small {
       color: var(--muted);
@@ -185,6 +189,19 @@
       padding: 4px 8px;
       min-height: auto;
       color: var(--text);
+    }
+    /* Botón para contraer/expandir el menú lateral (solo escritorio; en
+       móvil el menú ya se pliega con el botón hamburguesa de arriba). */
+    .collapse-toggle {
+      display: block;
+      background: transparent;
+      border: 1px solid var(--line);
+      font-size: 14px;
+      font-weight: 700;
+      padding: 4px 8px;
+      min-height: auto;
+      flex-shrink: 0;
+      color: var(--muted);
     }
     nav {
       display: grid;
@@ -242,11 +259,31 @@
     .sync-dot.ok { background: var(--accent); }
     .sync-dot.error { background: var(--danger); }
     .sync-dot.local { background: var(--warning); }
-    /* En escritorio este wrapper es invisible para el layout (display:contents):
-       sus hijos (botón Salir, grupo de sincronización) siguen ocupando su
-       propia fila en el grid de .aside-bottom, igual que antes. En móvil se
-       convierte en una fila compacta (ver @media). */
-    .aside-bottom-actions { display: contents; }
+    /* En escritorio, "Salir" y "Sincronizar" quedan uno junto al otro y del
+       mismo tamaño (antes "Salir" ocupaba todo el ancho y "Sincronizar" solo
+       lo que ocupaba su contenido). El estado de sync va en su propia fila
+       arriba. .mobile-sync-group se "abre" (display:contents) para que el
+       pill de estado y el botón entren directo a este grid. En móvil, este
+       wrapper pasa a ser una fila compacta distinta (ver @media). */
+    .aside-bottom-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-areas: "status status" "logout sync";
+      gap: 8px;
+      align-items: center;
+    }
+    .mobile-sync-group { display: contents; }
+    #sync-pill { grid-area: status; }
+    #logout-btn, #manual-sync-btn {
+      grid-area: logout;
+      width: 100%;
+      justify-content: center;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 6px;
+    }
+    #manual-sync-btn { grid-area: sync; }
     .btn-text { display: inline; }
 
     main {
@@ -651,8 +688,56 @@
     .pause-option input { width: auto; min-height: auto; margin-top: 3px; }
     .rate-row input { padding: 5px 6px; }
 
+    /* ===== MENÚ LATERAL RETRÁCTIL (solo escritorio) ===== */
+    @media (min-width: 851px) {
+      #app.sidebar-collapsed {
+        grid-template-columns: 72px 1fr;
+      }
+      #app.sidebar-collapsed aside {
+        padding: 18px 8px;
+      }
+      #app.sidebar-collapsed .aside-title {
+        flex-direction: column;
+        gap: 10px;
+        padding: 0 0 16px;
+      }
+      #app.sidebar-collapsed .brand { gap: 0; justify-content: center; }
+      #app.sidebar-collapsed .brand strong,
+      #app.sidebar-collapsed .aside-title small {
+        display: none;
+      }
+      #app.sidebar-collapsed .collapse-toggle {
+        width: 100%;
+      }
+      #app.sidebar-collapsed nav button {
+        justify-content: center;
+        padding: 10px 4px;
+      }
+      #app.sidebar-collapsed .nav-label {
+        display: none;
+      }
+      #app.sidebar-collapsed .profile {
+        justify-content: center;
+      }
+      #app.sidebar-collapsed .profile > div {
+        display: none;
+      }
+      #app.sidebar-collapsed .aside-bottom-actions {
+        grid-template-columns: 1fr;
+        grid-template-areas: "status" "logout" "sync";
+      }
+      #app.sidebar-collapsed .btn-text,
+      #app.sidebar-collapsed .sync-text-label {
+        display: none;
+      }
+      #app.sidebar-collapsed #sync-pill {
+        justify-content: center;
+      }
+    }
+
     /* ===== RESPONSIVE ===== */
     @media (max-width: 850px) {
+      .collapse-toggle { display: none; }
       #app {
         grid-template-columns: 1fr;
       }
