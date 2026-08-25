@@ -878,6 +878,18 @@
          a los demás filtros de la misma fila. Se fuerza que ocupe todo el
          ancho de su contenedor en cualquier estado. */
       .toolbar input[type="date"] { width: 100%; min-width: 0; }
+      /* Reemplaza el "disabled" nativo del campo Día de trabajo (solo
+         lectura para Driver): en iOS Safari, input[type=date][disabled]
+         ignora el width por CSS y queda más ancho que su contenedor,
+         desbordando la tarjeta (por eso se veía descuadrado). Sin el
+         atributo disabled, el navegador lo mide como a cualquier otro
+         input; pointer-events:none bloquea la edición igual. */
+      .field-locked { pointer-events: none; opacity: .65; background: var(--surface-2); width: 100%; }
+      /* Tiradores más grandes en pantallas táctiles: 7px es casi imposible
+         de agarrar con el dedo, sobre todo pegado al borde de una tabla
+         con scroll horizontal. */
+      .resize-handle { width: 18px; right: -9px; }
+      .col-drag-handle { font-size: 18px; padding: 4px 2px; }
       .two-col { grid-template-columns: 1fr; }
       .page-head {
         align-items: stretch;
