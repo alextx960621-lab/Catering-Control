@@ -472,7 +472,15 @@
       function formItems(f){ return Object.fromEntries(menuItems().map(([key])=>[key,n(f.elements[key]?.value)])); }
       function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; const sortKey=s.key; return [...list].sort((a,b)=>String(value(a,sortKey)).localeCompare(String(value(b,sortKey)),undefined,{numeric:true})*s.dir); }
       function value(x,key){ if(key==='route') return routeName(x.routeId); if(key==='driver') return driverName(x.driverId); if(key==='plan') return planName(x.planId); return x[key] ?? ''; }
-      function th(label,key,group){ const s=ui.sort[group]; const drag=group==='dispatch'?' draggable="true" title="Arrastra para reordenar la columna"':''; return `<th data-sort="${key}" data-group="${group}"${drag}>${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
+      // El tirador de reordenar (⋮⋮) es un elemento propio, separado del de
+      // resize (el borde derecho). Antes, en Día de trabajo, era el <th>
+      // ENTERO el que tenía draggable="true" con el tirador de resize
+      // viviendo adentro; al empezar a arrastrar el borde para cambiar el
+      // ancho (sobre todo con el dedo, en el celular) el navegador podía
+      // interpretar el gesto como "arrastrar la columna" en vez de
+      // "resizear", y el ancho no cambiaba. Con el grip aparte, cada gesto
+      // tiene su propia zona y ya no compiten entre sí.
+      function th(label,key,group){ const s=ui.sort[group]; const dragHandle=group==='dispatch'?'<span class="col-drag-handle" aria-hidden="true" title="Arrastra para reordenar la columna">⋮⋮</span>':''; return `<th data-sort="${key}" data-group="${group}">${dragHandle}${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
       function defaultColWidth(label){ return Math.min(240, Math.max(70, String(label).length*8+56)); }
       function colgroupHtml(cols, group){
         const saved = userColPrefs().columnWidths?.[group] || {};
@@ -495,56 +503,64 @@
           $$('.resize-handle',tbl).forEach((handle,index)=>{
             const headCell=handle.parentElement, col=cols[index];
             if(!col) return;
-            handle.onmousedown=e=>{
+            // Pointer Events cubre mouse, dedo y lápiz con un solo listener
+            // (antes había un onmousedown Y un ontouchstart por separado).
+            handle.onpointerdown=e=>{
               e.preventDefault(); e.stopPropagation();
+              handle.setPointerCapture(e.pointerId);
               const initial=col.getBoundingClientRect().width, start=e.clientX;
-              const wasDraggable=headCell.draggable; headCell.draggable=false; // ver nota abajo
               const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.clientX-start)); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
               const up=()=>{
-                document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
-                headCell.draggable=wasDraggable;
+                handle.removeEventListener('pointermove',move);
+                handle.removeEventListener('pointerup',up);
+                handle.removeEventListener('pointercancel',up);
                 const group=headCell.dataset.group, key=headCell.dataset.sort;
                 if(group && key) saveColumnWidth(group,key,parseInt(col.style.width,10));
               };
-              document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
-            };
-            // En Día de trabajo, cada <th> tiene draggable="true" (para poder
-            // arrastrar y reordenar columnas) y el tirador de resize vive
-            // adentro de esa misma celda. Sin este apagado temporal, empezar
-            // a resizar (mouse o touch) hace que el navegador agarre el gesto
-            // como "arrastrar la columna entera" en vez de "cambiar su ancho"
-            // — por eso no se podía ajustar el ancho en esa tabla.
-            handle.ontouchstart=e=>{
-              e.preventDefault(); e.stopPropagation();
-              const touch=e.touches[0], initial=col.getBoundingClientRect().width, start=touch.clientX;
-              const wasDraggable=headCell.draggable; headCell.draggable=false;
-              const move=ev=>{ ev.preventDefault(); const width=Math.max(28,Math.round(initial+ev.touches[0].clientX-start)); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
-              const up=()=>{
-                document.removeEventListener('touchmove',move); document.removeEventListener('touchend',up);
-                headCell.draggable=wasDraggable;
-                const group=headCell.dataset.group, key=headCell.dataset.sort;
-                if(group && key) saveColumnWidth(group,key,parseInt(col.style.width,10));
-              };
-              document.addEventListener('touchmove',move,{passive:false}); document.addEventListener('touchend',up);
+              handle.addEventListener('pointermove',move);
+              handle.addEventListener('pointerup',up);
+              handle.addEventListener('pointercancel',up);
             };
           });
         });
+        // Reordenar columnas de Día de trabajo: el tirador ⋮⋮ (separado del
+        // de resize) también usa Pointer Events en vez del drag-and-drop
+        // nativo de HTML5, que no responde al dedo en la mayoría de
+        // navegadores móviles — por eso antes solo se podía reordenar con
+        // mouse en escritorio.
         const dispatchTable=$('#dispatch-page .sheet table');
         if(dispatchTable){
-          let sourceKey='';
-          $$('thead th[data-group="dispatch"]',dispatchTable).forEach(head=>{
-            head.ondragstart=e=>{ sourceKey=head.dataset.sort; e.dataTransfer.effectAllowed='move'; };
-            head.ondragover=e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; };
-            head.ondrop=e=>{
-              e.preventDefault(); const targetKey=head.dataset.sort;
-              if(!sourceKey || sourceKey===targetKey) return;
-              const all=['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'];
-              const currentOrder=userColPrefs().dispatchColumnOrder;
-              const order=currentOrder.length?[...currentOrder]:all;
-              all.forEach(key=>{if(!order.includes(key))order.push(key);});
-              const from=order.indexOf(sourceKey), to=order.indexOf(targetKey);
-              order.splice(to,0,order.splice(from,1)[0]);
-              saveColumnOrder(order); renderDispatch();
+          const heads=$$('thead th[data-group="dispatch"]',dispatchTable);
+          $$('.col-drag-handle',dispatchTable).forEach(grip=>{
+            const head=grip.parentElement;
+            grip.onpointerdown=e=>{
+              e.preventDefault(); e.stopPropagation();
+              const sourceKey=head.dataset.sort;
+              let targetHead=head;
+              const move=ev=>{
+                const el=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('th[data-group="dispatch"]');
+                heads.forEach(h=>h.classList.remove('drag-over'));
+                targetHead=(el && el!==head)?el:head;
+                if(targetHead!==head) targetHead.classList.add('drag-over');
+              };
+              const up=()=>{
+                document.removeEventListener('pointermove',move);
+                document.removeEventListener('pointerup',up);
+                document.removeEventListener('pointercancel',up);
+                heads.forEach(h=>h.classList.remove('drag-over'));
+                const targetKey=targetHead.dataset.sort;
+                if(!sourceKey || sourceKey===targetKey) return;
+                const all=['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'];
+                const currentOrder=userColPrefs().dispatchColumnOrder;
+                const order=currentOrder.length?[...currentOrder]:all;
+                all.forEach(key=>{if(!order.includes(key))order.push(key);});
+                const from=order.indexOf(sourceKey), to=order.indexOf(targetKey);
+                order.splice(to,0,order.splice(from,1)[0]);
+                saveColumnOrder(order); renderDispatch();
+              };
+              document.addEventListener('pointermove',move);
+              document.addEventListener('pointerup',up);
+              document.addEventListener('pointercancel',up);
             };
           });
         }
@@ -1308,7 +1324,7 @@
         };
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
         map[action]?.();});
-      document.addEventListener('click',e=>{if(e.target.closest('.resize-handle'))return;const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
+      document.addEventListener('click',e=>{if(e.target.closest('.resize-handle')||e.target.closest('.col-drag-handle'))return;const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
       $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');
       // Menú lateral retráctil (solo escritorio): guarda la preferencia por
       // navegador, igual que el tema, así queda como la dejó la última vez.

@@ -317,6 +317,13 @@
       border: 1px solid var(--line);
       background: var(--surface);
       border-radius: 10px;
+      /* .toolbar .search es un <input> suelto, sin texto de etiqueta arriba;
+         los demás filtros son <label class="field"> con etiqueta + input,
+         así que son más altos. Con align-items:center (heredado de arriba)
+         el buscador quedaba centrado respecto a esa altura extra y su caja
+         no coincidía con la de los demás inputs/selects. Alineando por la
+         base, el borde inferior de todos los controles queda parejo. */
+      align-items: flex-end;
     }
     .toolbar .search { width: 230px; }
     .toolbar .field { width: 175px; }
@@ -409,9 +416,22 @@
       height: 100%;
       cursor: col-resize;
       z-index: 4;
+      touch-action: none;
     }
     th { position: sticky; }
     th .resize-handle:hover { background: var(--primary); }
+    /* Tirador para reordenar columnas en Día de trabajo (separado del de
+       resize, ver nota en index.js) */
+    .col-drag-handle {
+      display: inline-block;
+      margin-right: 4px;
+      cursor: grab;
+      color: var(--muted);
+      touch-action: none;
+      user-select: none;
+    }
+    .col-drag-handle:hover { color: var(--primary); }
+    #dispatch-table thead th.drag-over { background: color-mix(in srgb, var(--primary) 18%, transparent); }
 
     .editable-cell input,
     .editable-cell select {
@@ -848,8 +868,16 @@
       .toolbar {
         padding: 8px;
         gap: 8px;
+        align-items: stretch;
       }
       .toolbar .search, .toolbar .field { width: 100%; }
+      /* Algunos navegadores móviles (sobre todo Safari/iOS) achican el
+         ancho real del widget nativo de input[type=date] cuando está
+         disabled (como pasa con "Día de trabajo" para el rol Driver),
+         aunque el elemento mida 100% por fuera — queda descuadrado frente
+         a los demás filtros de la misma fila. Se fuerza que ocupe todo el
+         ancho de su contenedor en cualquier estado. */
+      .toolbar input[type="date"] { width: 100%; min-width: 0; }
       .two-col { grid-template-columns: 1fr; }
       .page-head {
         align-items: stretch;
