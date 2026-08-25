@@ -22,6 +22,17 @@
       // supabase-public-branding-migration.sql) devuelve solo el bloque
       // "settings" (público), nunca staffUsers/drivers/routes.
       async function syncBranding(){try{const settings=await window.SupabaseDB?.rpc('get_branding',{});if(settings){branding={companyName:settings.companyName,logoUrl:settings.logoUrl,itemIcons:settings.itemIcons||{},whatsappNumber:settings.whatsappNumber,instagramUrl:settings.instagramUrl,instagramHandle:settings.instagramHandle,adImageUrl:settings.adImageUrl,renewalWarningDays:settings.renewalWarningDays,menuItems:(settings.menuItems||[]).map(m=>[m.key,m.label])};localStorage.setItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`,JSON.stringify(branding));}}catch(_){}}
+      // El Portal de clientes completo es una función Premium. get_plan_status()
+      // (ver supabase-premium-plan-migration.sql) es un RPC público de solo
+      // lectura: nunca expone staffUsers ni datos sensibles, solo {plan:'...'}.
+      async function fetchIsPremium(){try{const info=await window.SupabaseDB?.rpc('get_plan_status',{});return info?.plan==='premium';}catch(_){return false;}}
+      function renderLocked(){
+        document.documentElement.dataset.bsTheme='light';document.documentElement.dataset.theme='light';
+        const wa=whatsappNumber()?`https://wa.me/${whatsappNumber()}?text=${encodeURIComponent('Hola, quiero activar el plan Premium para acceder al portal de clientes.')}`:'';
+        $('#portal').innerHTML=`<header class="navbar bg-body rounded-3 shadow-sm px-3 mb-3"><a class="navbar-brand d-flex align-items-center gap-2 m-0" href="#"><img loading="lazy" decoding="async" class="brand-image rounded-3" src="${esc(branding.logoUrl||APP_CONFIG.logoUrl)}" alt="${esc(branding.companyName||APP_CONFIG.companyName)}" onerror="this.style.display='none'"><span><b class="d-block fs-6">${esc(branding.companyName||APP_CONFIG.companyName)}</b><small class="text-secondary">Mi portal de cliente</small></span></a><button class="btn btn-outline-secondary btn-sm" id="logout">Salir</button></header>
+        <article class="card shadow-sm border-0"><div class="card-body p-4 p-md-5 text-center"><div class="fs-1 mb-2">🔒</div><h2 class="h5">El portal de clientes es una función Premium</h2><p class="text-secondary">Esta cuenta todavía está en el plan Básico. Contacta a tu proveedor para activar el plan Premium y acceder a tu plan, pausas y reactivaciones desde aquí.</p>${wa?`<a class="btn btn-success" href="${wa}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div></article>`;
+        $('#logout').onclick=()=>{sessionStorage.removeItem(CLIENT_SESSION_KEY);location.href='./login.html';};
+      }
       // "data" ahora solo trae planes y días (compartidos, livianos). El
       // cliente propio ("client") se guarda aparte, en su propia fila de la
       // base de datos: así este portal nunca descarga la lista de los demás
@@ -106,8 +117,10 @@
           if(!client){location.replace('./login.html');return;}
           localStorage.setItem(CLIENT_ROW_KEY,JSON.stringify(client));
         }
+        await syncBranding();
+        if(!(await fetchIsPremium())){ renderLocked(); return; }
         render();
-        Promise.all([syncFromServer(),syncBranding()]).then(()=>render());
+        Promise.all([syncFromServer(),syncBranding()]).then(async()=>{ if(!(await fetchIsPremium())){ renderLocked(); return; } render(); });
       }
       boot();
     })();

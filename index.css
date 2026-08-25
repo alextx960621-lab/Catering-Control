@@ -813,3 +813,27 @@
       100% { background: transparent; }
     }
     tr.row-flash td { animation: rowFlash 2.1s ease-out; }
+/* ===== Recuadro "función Premium" (bloqueo por plan Básico) ===== */
+.premium-lock {
+  max-width: 460px;
+  margin: 40px auto;
+  padding: 28px 24px;
+  text-align: center;
+  border-radius: 16px;
+  color: #fff;
+  background: linear-gradient(120deg, #e4002b, #ff4b3e);
+  box-shadow: 0 10px 30px rgba(228, 0, 43, .25);
+}
+.premium-lock .premium-lock-icon { font-size: 32px; margin-bottom: 8px; }
+.premium-lock h2 { font-size: 18px; margin: 0 0 8px; }
+.premium-lock p { margin: 0 0 16px; opacity: .95; font-size: 14px; }
+.btn-premium {
+  display: inline-block;
+  background: #fff;
+  color: #e4002b;
+  font-weight: 700;
+  padding: 10px 18px;
+  border-radius: 999px;
+  text-decoration: none;
+}
+.btn-premium:hover { filter: brightness(.95); }

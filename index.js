@@ -70,19 +70,25 @@
       let activeUser = null;
       let staffUsers = readStaffUsers();
 
-      const ROLE_LABELS = {admin:'Administrador', editor:'Editor', kitchen:'Cocina', driver:'Driver'};
+      // 'superadmin' es un rol fijo más (como 'admin'), pero solo puede existir
+      // UN usuario con ese rol (se valida al crear/editar usuarios en openUser).
+      // Es el único que ve el interruptor de plan Premium/Básico en Configuración.
+      const ROLE_LABELS = {admin:'Administrador', editor:'Editor', kitchen:'Cocina', driver:'Driver', superadmin:'Super Administrador'};
       const NAV_PERMS = {
-        dispatch: ['admin','editor','kitchen','driver'],
-        clients: ['admin','editor','driver'],
-        drivers: ['admin','editor'],
-        routes: ['admin','editor'],
-        plans: ['admin','editor'],
-        payroll: ['admin','editor','driver'],
-        inventory: ['admin','editor','kitchen'],
-        users: ['admin'],
-        audit: ['admin'],
-        settings: ['admin','editor','kitchen','driver']
+        dispatch: ['admin','editor','kitchen','driver','superadmin'],
+        clients: ['admin','editor','driver','superadmin'],
+        drivers: ['admin','editor','superadmin'],
+        routes: ['admin','editor','superadmin'],
+        plans: ['admin','editor','superadmin'],
+        payroll: ['admin','editor','driver','superadmin'],
+        inventory: ['admin','editor','kitchen','superadmin'],
+        users: ['admin','superadmin'],
+        audit: ['admin','superadmin'],
+        settings: ['admin','editor','kitchen','driver','superadmin']
       };
+      // Funciones que solo están disponibles con el plan Premium activo. El
+      // Super Administrador siempre las ve, tenga el plan que tenga la cuenta.
+      const PREMIUM_FEATURES = ['payroll','inventory','audit'];
 
       const ROLE_PAGE_OPTIONS = [
         ['dispatch','Día de trabajo',true],
@@ -96,7 +102,10 @@
         ['settings','Configuración',false]
       ];
       const role = () => activeUser?.role || 'driver';
-      const isAdmin = () => role() === 'admin';
+      // El Super Administrador tiene todos los permisos de Administrador
+      // (isAdmin() lo incluye), más el interruptor de plan (isSuperAdmin()).
+      const isAdmin = () => role() === 'admin' || role() === 'superadmin';
+      const isSuperAdmin = () => role() === 'superadmin';
       const isDriverRole = () => role() === 'driver';
       const isKitchenRole = () => role() === 'kitchen';
       const isBuiltinRole = () => !!ROLE_LABELS[role()];
@@ -104,9 +113,9 @@
   
       function roleLabel(r){ return ROLE_LABELS[r] || customRole(r)?.label || r || 'Usuario'; }
 
-      const canManage = () => role() === 'admin' || role() === 'editor';
+      const canManage = () => ['admin','editor','superadmin'].includes(role());
       // Puede administrar el inventario de cocina.
-      const canManageInventory = () => ['admin','editor','kitchen'].includes(role());
+      const canManageInventory = () => ['admin','editor','kitchen','superadmin'].includes(role());
       function canAccessPage(page){
         if (page === 'users') return isAdmin();
         if (isBuiltinRole()) return (NAV_PERMS[page] || []).includes(role());
@@ -117,6 +126,15 @@
         if (page === 'users') return isAdmin();
         if (isBuiltinRole()) return !!BUILTIN_EDIT[page]?.();
         return !!customRole(role())?.pages?.[page]?.edit;
+      }
+      // --- Plan Premium/Básico (cuenta completa, lo activa solo el Super Admin) ---
+      const isPremium = () => state.settings.plan === 'premium';
+      // true si la persona actual debe ver el contenido real de una función
+      // premium (porque hay Premium activo, o porque es el Super Admin).
+      const hasPremiumAccess = () => isPremium() || isSuperAdmin();
+      function premiumLockHtml(featureLabel){
+        const wa = state.settings.whatsappNumber ? `https://wa.me/${state.settings.whatsappNumber}?text=${encodeURIComponent(`Hola, quiero activar el plan Premium para desbloquear ${featureLabel}.`)}` : '';
+        return `<div class="premium-lock"><div class="premium-lock-icon">🔒</div><h2>${esc(featureLabel)} es una función Premium</h2><p>Esta cuenta está en el plan Básico. Contacta a tu proveedor para activar el plan Premium y desbloquear esta función.</p>${wa?`<a class="btn-premium" href="${wa}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div>`;
       }
       function logAudit(action, entityType, entityLabel, entityId, details){
         window.SupabaseDB?.dbInsertAudit({
@@ -145,11 +163,11 @@
         plans: [
           {id:'p_balance', name:'Balance', type:'General', items:{shots:1,proteins:1,juices:1,breakfast:1,snack1:1,lunch:1,snack2:1,dinner:1}},
           {id:'p_light', name:'Light', type:'General', items:{shots:0,proteins:1,juices:1,breakfast:1,snack1:0,lunch:1,snack2:0,dinner:1}}
-        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}, whatsappNumber:'', instagramUrl:'', instagramHandle:'', adImageUrl:'', renewalWarningDays:3, menuItems: DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label})), customRoles: []}
+        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}, whatsappNumber:'', instagramUrl:'', instagramHandle:'', adImageUrl:'', renewalWarningDays:3, menuItems: DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label})), customRoles: [], plan: 'basico'}
       });
       function normalize() {
         state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
-        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3;
+        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3; state.settings.plan = (state.settings.plan==='premium')?'premium':'basico';
         if (!Array.isArray(state.settings.menuItems) || !state.settings.menuItems.length) state.settings.menuItems = DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label}));
         if (!Array.isArray(state.settings.customRoles)) state.settings.customRoles = [];
         if (!state.routes.some(r => r.open)) state.routes.unshift({id:'r_open',name:'Ruta abierta',description:'Drivers disponibles sin ruta de trabajo',open:true,order:0});
@@ -356,7 +374,10 @@
       function readScheduleRows(f){ return f._getSchedule ? f._getSchedule() : []; }
       function status(c,date=state.currentDate){
         if (!day(date).laborable) return 'No laborable';
-        if (c.returnDate && date>=c.returnDate) return 'Activo';
+        // El regreso automático a "Activo" por fecha de retorno es una función
+        // Premium. En plan Básico la fecha de retorno queda solo como dato
+        // informativo: el pase a Activo requiere un clic manual en "Activar".
+        if (c.returnDate && date>=c.returnDate && hasPremiumAccess()) return 'Activo';
         if (c.pauseStart && date >= c.pauseStart && (!c.returnDate || date < c.returnDate)) return 'Pausado';
         if (c.pauseDates?.includes(date)) return 'Pausado';
         if (c.startDate && c.startDate > date) return 'Programado';
@@ -365,6 +386,7 @@
       }
       function badge(s){ const cl=({Activo:'active',Pausado:'paused','Retorno pendiente':'pending',Programado:'pending','No laborable':'off'})[s] || 'done'; return `<span class="badge ${cl}">${esc(s)}</span>`; }
       function syncReturnDates(date=state.currentDate){
+        if(!hasPremiumAccess()) return; // reactivación automática: solo Premium
         let changed=false;
         state.clients.forEach(c=>{
           if(c.returnDate && date>=c.returnDate && c.status!=='Activo'){
@@ -537,7 +559,7 @@
         const rows=c=>{const p=plan(c.planId);return `<tr data-id="${c.id}"><td>${n(c.order)||''}</td><td><b>${esc(c.name)}</b><br><small class="muted">CI: ${esc(c.carnet||'—')}</small></td><td>${esc(routeName(c.routeId))}${c.schedule?.length?` <span class="badge off" title="${esc(scheduleSummary(c))}">Variable</span>`:''}</td><td>${esc(c.address1||'—')}</td><td>${esc(c.phone1||'—')}</td><td>${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:20px;height:20px;object-fit:cover;border-radius:5px;vertical-align:-5px;margin-right:4px">`:''}${esc(planName(c.planId))}</td><td>${esc(driverName(c.driverId))}</td><td>${badge(status(c))}</td><td>${n(c.paidDays)}</td><td>${n(c.consumedDays)}</td><td>${esc(c.specialDiet||'—')}</td><td>${canEditPage('clients')?`${status(c)==='Pausado'?`<button class="icon-btn" data-action="resume-client" data-id="${c.id}">Activar</button>`:`<button class="icon-btn" data-action="pause-client" data-id="${c.id}">Pausar</button>`}<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button><button class="icon-btn delete" data-action="delete-client" data-id="${c.id}">×</button>`:'—'}</td></tr>`;};
         $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canEditPage('clients')?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+table(list,[['Orden','order'],['Cliente / carnet','name'],['Ruta','route'],['Dirección','address1'],['Teléfono','phone1'],['Plan','plan'],['Driver','driver'],['Estado','status'],['Días pagados','paidDays'],['Consumidos','consumedDays'],['Dieta especial','specialDiet'],['Acciones','id']],rows,'clients'); bindSearch('clients-search','clients',renderClients);
       }
-      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label class="wide">Link de Google Maps (Dirección 1)<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps (Dirección 2)<input type="url" name="maps2" value="${esc(c.maps2)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno<input name="returnDate" type="date" value="${esc(c.returnDate)}"></label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide"><label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button></div></div>`; }
+      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label class="wide">Link de Google Maps (Dirección 1)<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps (Dirección 2)<input type="url" name="maps2" value="${esc(c.maps2)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno<input name="returnDate" type="date" value="${esc(c.returnDate)}"></label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${hasPremiumAccess()?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
       function scrollToRow(id){
         requestAnimationFrame(()=>{
           const row=document.querySelector(`tr[data-id="${id}"]`);
@@ -703,6 +725,7 @@
       async function deleteInventoryLink(id){ const link=state.inventory.links.find(x=>x.id===id); if(!link||!confirm('¿Eliminar este vínculo de consumo?'))return; state.inventory.links=state.inventory.links.filter(x=>x.id!==id);const saved=await save();renderInventory();notice(saved?'Vínculo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); if(saved) logAudit('Vínculo de consumo eliminado','inventory-link',kitchenItem(link.inventoryId)?.name||link.inventoryId,id,{}); }
       function renderInventory(){
         if(!canAccessPage('inventory')) return;
+        if(!hasPremiumAccess()){ $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina.')+premiumLockHtml('Inventario'); return; }
         const itemRows=item=>{const links=state.inventory.links.filter(l=>l.inventoryId===item.id);const low=n(item.stock)<=n(item.minimum);return `<tr><td><b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}</td><td>${esc(item.unit||'unidades')}</td><td>${n(item.stock)}</td><td>${n(item.minimum)}</td><td>${links.length?links.map(l=>`${n(l.quantity)} × ${esc(menuItems().find(([key])=>key===l.clientItemKey)?.[1]||l.clientItemKey)}`).join('<br>'):'—'}</td><td>${canEditPage('inventory')?`<button class="icon-btn" data-action="edit-inventory-item" data-id="${item.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-item" data-id="${item.id}">×</button>`:'—'}</td></tr>`;};
         const linkRows=link=>`<tr><td>${esc(kitchenItem(link.inventoryId)?.name||'Producto eliminado')}</td><td>${esc(menuItems().find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey)}</td><td>${n(link.quantity)}</td><td>${canEditPage('inventory')?`<button class="icon-btn" data-action="edit-inventory-link" data-id="${link.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-link" data-id="${link.id}">×</button>`:'—'}</td></tr>`;
         const recent=state.inventory.movements.slice(0,12);
@@ -732,7 +755,7 @@
       }
 
       function monthDates(month){const [y,m]=month.split('-').map(Number),end=new Date(y,m,0).getDate();return Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
-      function renderPayroll(){ if(!canAccessPage('payroll')) return; const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const dayValues=d=>dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const rows=d=>{const values=dayValues(d);const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
+      function renderPayroll(){ if(!canAccessPage('payroll')) return; if(!hasPremiumAccess()){ $('#payroll-page').innerHTML=pageHead('Sueldos','Cálculo de tarifas por driver.')+premiumLockHtml('Sueldos'); return; } const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const dayValues=d=>dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const rows=d=>{const values=dayValues(d);const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
         const dayTotals=dates.map((date,i)=>list.reduce((sum,d)=>sum+n(dayValues(d)[i]),0));
         const grandTotal=dayTotals.reduce((a,v)=>a+v,0);
         const totalsRow=`<tfoot><tr class="table-totals"><td>Total (carreras/día)</td>${dayTotals.map(v=>`<td>${v||'—'}</td>`).join('')}<td>${grandTotal}</td><td>—</td><td>—</td></tr></tfoot>`;
@@ -758,6 +781,7 @@
       let auditEntries=null;
       async function renderAudit(forceRefresh){
         if(!canAccessPage('audit')) return;
+        if(!hasPremiumAccess()){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios.')+premiumLockHtml('Auditoría'); return; }
         const actions='<button class="outline" data-action="refresh-audit">🔄 Actualizar</button>';
         if(forceRefresh||auditEntries===null){
           $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+'<p class="muted">Cargando historial…</p>';
@@ -772,7 +796,7 @@
         $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+`<div class="toolbar"><input id="audit-search" class="search" placeholder="Buscar por persona, acción o registro…" value="${esc(ui.search.audit||'')}"><span class="spacer"></span><span class="muted">${list.length} eventos</span></div>`+table(list,[['Fecha','at'],['Quién','actor_name'],['Acción','action'],['Registro','entity_label'],['Detalle','details']],rows,'audit');
         bindSearch('audit-search','audit',renderAudit);
       }
-      function userForm(u={}){const d=u.driverId?driver(u.driverId):{};const showDriver=u.role==='driver';return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'}></label><label>Rol<select name="role" id="user-role-select"><option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="kitchen" ${u.role==='kitchen'?'selected':''}>Cocina</option><option value="driver" ${(!u.role||u.role==='driver')?'selected':''}>Driver</option>${(state.settings.customRoles||[]).map(r=>`<option value="${r.id}" ${u.role===r.id?'selected':''}>${esc(r.label)}</option>`).join('')}</select></label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Carnet${showDriver?' *':''}<input name="carnet" value="${esc(d.carnet)}" ${showDriver?'required':''}></label><label class="driver-field" ${showDriver?'':'hidden'}>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="driver-field wide" ${showDriver?'':'hidden'}>Dirección de domicilio<input name="address" value="${esc(d.address)}"></label><p class="muted wide driver-field-hint" ${showDriver?'hidden':''}>Solo el rol Driver necesita ficha de driver y ruta asignada.</p></div>`;}
+      function userForm(u={}){const d=u.driverId?driver(u.driverId):{};const showDriver=u.role==='driver';return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'}></label><label>Rol<select name="role" id="user-role-select">${isSuperAdmin()?`<option value="superadmin" ${u.role==='superadmin'?'selected':''}>Super Administrador</option>`:''}<option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="kitchen" ${u.role==='kitchen'?'selected':''}>Cocina</option><option value="driver" ${(!u.role||u.role==='driver')?'selected':''}>Driver</option>${(state.settings.customRoles||[]).map(r=>`<option value="${r.id}" ${u.role===r.id?'selected':''}>${esc(r.label)}</option>`).join('')}</select>${isSuperAdmin()?'<p class="muted" style="margin-top:4px">Solo puede haber un Super Administrador.</p>':''}</label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Carnet${showDriver?' *':''}<input name="carnet" value="${esc(d.carnet)}" ${showDriver?'required':''}></label><label class="driver-field" ${showDriver?'':'hidden'}>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="driver-field wide" ${showDriver?'':'hidden'}>Dirección de domicilio<input name="address" value="${esc(d.address)}"></label><p class="muted wide driver-field-hint" ${showDriver?'hidden':''}>Solo el rol Driver necesita ficha de driver y ruta asignada.</p></div>`;}
       function roleForm(r={}){
         const pages=r.pages||{};
         return `<div class="form-grid"><label class="wide">Nombre del rol *<input name="label" required value="${esc(r.label)}" placeholder="Ej.: Supervisor de zona"></label>
@@ -826,6 +850,11 @@
         const data=Object.fromEntries(new FormData(f));
         if(staffUsers.some(x=>x.username===data.username&&x.id!==u?.id)){notice('Ese usuario ya existe.',true);return false;}
         if(staffUsers.some(x=>x.email.toLowerCase()===data.email.toLowerCase()&&x.id!==u?.id)){notice('Ese correo ya está registrado.',true);return false;}
+        if(data.role==='superadmin'){
+          if(!isSuperAdmin()){notice('Solo el Super Administrador puede asignar ese rol.',true);return false;}
+          if(staffUsers.some(x=>x.role==='superadmin'&&x.id!==u?.id)){notice('Ya existe un Super Administrador. Solo puede haber uno.',true);return false;}
+        }
+        if(u?.role==='superadmin'&&data.role!=='superadmin'&&!isSuperAdmin()){notice('Solo el propio Super Administrador puede quitarse ese rol.',true);return false;}
         let passwordHash=u?.passwordHash||'';
         if(data.password){
           passwordHash=await window.SupabaseDB?.rpc('hash_password',{p_password:data.password});
@@ -910,6 +939,15 @@
             </label>
             <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="outline" data-action="export-json">Exportar JSON</button><button class="outline" data-action="import-json">Importar JSON</button></div>
           </div>
+          ${isSuperAdmin()?`<div class="card card-pad stack">
+            <h3>Plan de la cuenta</h3>
+            <p class="muted">Solo tú, como Super Administrador, puedes cambiar esto. En plan Básico, Sueldos, Inventario, Auditoría, Horario semanal, Imprimir dietas especiales, el Portal de clientes y la reactivación automática por fecha de retorno quedan bloqueados para el resto del equipo.</p>
+            <p>Plan actual: <b>${isPremium()?'Premium':'Básico'}</b></p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="primary" id="activate-premium-btn" ${isPremium()?'disabled':''}>Activar Premium</button>
+              <button type="button" class="outline" id="activate-basic-btn" ${!isPremium()?'disabled':''}>Volver a Básico</button>
+            </div>
+          </div>`:''}
         </div>`;
         $('#my-theme').onchange=e=>{localStorage.setItem(UI_THEME_KEY,e.target.value);render();};
         $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column;state.settings.hiddenColumns=input.checked?state.settings.hiddenColumns.filter(x=>x!==key):[...state.settings.hiddenColumns,key];save();notice('Columnas actualizadas.');});
@@ -920,9 +958,11 @@
         $('#instagram-handle').onchange=async e=>{state.settings.instagramHandle=e.target.value.trim();const saved=await save();notice(saved?'Usuario de Instagram actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
         $('#ad-image-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.adImageUrl=await readImageAsDataURL(file,960,.85);const saved=await save();renderSettings();notice(saved?'Imagen publicitaria actualizada.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
         $('#renewal-warning-days').onchange=async e=>{state.settings.renewalWarningDays=Math.max(0,n(e.target.value));e.target.value=state.settings.renewalWarningDays;const saved=await save();notice(saved?'Aviso de renovación actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
+        $('#activate-premium-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;state.settings.plan='premium';const saved=await save();renderSettings();notice(saved?'Plan Premium activado.':'Se activó localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit('Plan cambiado a Premium','settings','Plan de la cuenta','',{});});
+        $('#activate-basic-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;if(!confirm('¿Volver al plan Básico? El equipo perderá acceso a las funciones Premium.'))return;state.settings.plan='basico';const saved=await save();renderSettings();notice(saved?'Plan Básico activado.':'Se cambió localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit('Plan cambiado a Básico','settings','Plan de la cuenta','',{});});
       }
       function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
-      async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
+      async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);if(u?.role==='superadmin'&&!isSuperAdmin()){notice('No puedes eliminar al Super Administrador.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
 
       async function exportProcessedDaySnapshot(date,clientIds){
         const activeClients=clientIds?state.clients.filter(c=>clientIds.includes(c.id)):state.clients.filter(c=>status(c,date)==='Activo');
@@ -1040,6 +1080,7 @@
       }
       async function exportDiets(){
         if(isDriverRole()) return exportRouteOrder();
+        if(!hasPremiumAccess()){ notice('Imprimir dietas especiales es una función Premium. Contacta a tu proveedor para activarla.',true); return; }
         const date=state.currentDate;
         const activeClients=state.clients.filter(c=>status(c,date)==='Activo');
         if(!await ensureExcelJS()){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
