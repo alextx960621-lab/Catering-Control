@@ -51,8 +51,10 @@ const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
 const STAFF_APP_URL = './index.html';
 const CLIENT_PORTAL_URL = './cliente.html';
 const CLIENT_SESSION_KEY = `${APP_CONFIG.storagePrefix}-client-session-v1`;
-// Preferencia de tema personal (por navegador), compartida con el panel de
-// staff (index.html) para que la elección de acá se mantenga al entrar.
+// Tema de la pantalla de login (por navegador, todavía no hay nadie
+// logueado). Al entrar, index.html y cliente.html usan este valor solo como
+// punto de partida la primera vez que cada usuario/cliente inicia sesión;
+// de ahí en adelante cada uno tiene su propio tema, independiente del resto.
 const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
 const themeSelect = document.getElementById('theme-select');
 const savedTheme = localStorage.getItem(UI_THEME_KEY) || 'light';

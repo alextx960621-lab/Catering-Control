@@ -21,6 +21,13 @@
       const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
 
       const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
+      // Tema PERSONAL de cada usuario del panel (no del navegador): se
+      // indexa por el id de quien inició sesión, igual que las columnas, así
+      // dos personas que comparten la misma compu no se pisan el tema. La
+      // clave vieja (UI_THEME_KEY) se sigue usando solo en login.html, donde
+      // todavía no hay nadie logueado, y sirve como valor inicial la primera
+      // vez que cada usuario entra (después cada quien tiene el suyo).
+      const USER_THEME_KEY = `${APP_CONFIG.storagePrefix}-user-theme-v1`;
       const SIDEBAR_COLLAPSED_KEY = `${APP_CONFIG.storagePrefix}-sidebar-collapsed-v1`;
       // Ancho/orden de columnas: preferencia PERSONAL de cada usuario del
       // panel, no de la empresa. Por eso vive aparte en localStorage (nunca
@@ -110,6 +117,23 @@
         store[ukey] ||= { columnWidths:{}, dispatchColumnOrder:[], hiddenColumns:[] };
         store[ukey].hiddenColumns=hidden;
         writeColPrefsStore(store);
+      }
+      function readUserThemeStore(){ try { return JSON.parse(localStorage.getItem(USER_THEME_KEY)) || {}; } catch (_) { return {}; } }
+      // Tema del usuario activo. La primera vez que un usuario entra, toma
+      // como punto de partida lo que estaba elegido en la pantalla de login
+      // (o 'light' si no había nada) y de ahí en más queda solo suyo.
+      function userTheme(){
+        const store=readUserThemeStore(), key=activeUser?.id || 'default';
+        if(!store[key]){
+          store[key]=localStorage.getItem(UI_THEME_KEY)||'light';
+          localStorage.setItem(USER_THEME_KEY,JSON.stringify(store));
+        }
+        return store[key];
+      }
+      function saveUserTheme(theme){
+        const store=readUserThemeStore(), key=activeUser?.id || 'default';
+        store[key]=theme;
+        localStorage.setItem(USER_THEME_KEY,JSON.stringify(store));
       }
 
       // 'superadmin' es un rol fijo más (como 'admin'), pero solo puede existir
@@ -452,7 +476,7 @@
       }
       function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${colgroupHtml(headers,group)}<thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
       function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); }
-      function render(){ document.documentElement.dataset.theme=localStorage.getItem(UI_THEME_KEY)||state.settings.theme; $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); }
+      function render(){ document.documentElement.dataset.theme=userTheme(); $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); }
       function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { fn(); enableTableTools(); } }
       function enableTableTools(){
       function syncTableWidth(tbl,cols){
@@ -918,14 +942,14 @@
         const columnsCard=`<div class="card card-pad stack">
             <h3>Tu tema</h3>
             <p class="muted">Solo afecta a tu navegador, no a los demás usuarios.</p>
-            <label>Tema<select id="my-theme"><option value="light" ${(localStorage.getItem(UI_THEME_KEY)||'light')==='light'?'selected':''}>Claro</option><option value="night" ${localStorage.getItem(UI_THEME_KEY)==='night'?'selected':''}>Nocturno</option><option value="forest" ${localStorage.getItem(UI_THEME_KEY)==='forest'?'selected':''}>Bosque</option></select></label>
+            <label>Tema<select id="my-theme"><option value="light" ${userTheme()==='light'?'selected':''}>Claro</option><option value="night" ${userTheme()==='night'?'selected':''}>Nocturno</option><option value="forest" ${userTheme()==='forest'?'selected':''}>Bosque</option></select></label>
             <h3 style="margin-top:10px">Columnas visibles</h3>
             <p class="muted">Afecta a la tabla de Día de trabajo. Es personal: no se comparte con otros usuarios. Allí también puedes arrastrar los encabezados para cambiar su orden.</p>
             <div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!userColPrefs().hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div>
           </div>`;
         if(!isAdmin()){
           $('#settings-page').innerHTML=pageHead('Configuración','Elige tu tema y qué columnas ver en la tabla de Día de trabajo.')+`<div class="two-col">${columnsCard}</div>`;
-          $('#my-theme').onchange=e=>{localStorage.setItem(UI_THEME_KEY,e.target.value);render();};
+          $('#my-theme').onchange=e=>{saveUserTheme(e.target.value);render();};
           $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column,hidden=userColPrefs().hiddenColumns;saveHiddenColumns(input.checked?hidden.filter(x=>x!==key):[...hidden,key]);notice('Columnas actualizadas.');});
           return;
         }
@@ -984,7 +1008,7 @@
             </div>
           </div>`:''}
         </div>`;
-        $('#my-theme').onchange=e=>{localStorage.setItem(UI_THEME_KEY,e.target.value);render();};
+        $('#my-theme').onchange=e=>{saveUserTheme(e.target.value);render();};
         $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column,hidden=userColPrefs().hiddenColumns;saveHiddenColumns(input.checked?hidden.filter(x=>x!==key):[...hidden,key]);notice('Columnas actualizadas.');});
         $('#company-name').onchange=async e=>{state.settings.companyName=e.target.value.trim();const saved=await save();applyBranding();notice(saved?'Nombre de la empresa actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
         $('#logo-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.logoUrl=await readImageAsDataURL(file,240,.85);const saved=await save();applyBranding();renderSettings();notice(saved?'Logo actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
