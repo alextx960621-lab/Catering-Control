@@ -6,3 +6,7 @@ git pull origin main
 git add .
 git commit -m "Descripción de los cambios"
 git push origin main
+
+git add -A
+git commit -m "Sincronizando con carpeta local"
+git push origin main --force

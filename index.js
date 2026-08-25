@@ -235,7 +235,23 @@
           {id:'p_light', name:'Light', type:'General', items:{shots:0,proteins:1,juices:1,breakfast:1,snack1:0,lunch:1,snack2:0,dinner:1}}
         ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}, whatsappNumber:'', premiumWhatsapp:'', instagramUrl:'', instagramHandle:'', adImageUrl:'', renewalWarningDays:3, menuItems: DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label})), customRoles: [], plan: 'basico', premiumUntil: ''}
       });
-      function normalize() {
+      // Fecha "de confianza" para el vencimiento de Premium: se pide al
+      // servidor de Supabase (no al reloj del dispositivo), así cambiar la
+      // fecha de la PC o el celular no adelanta ni atrasa el vencimiento.
+      // Requiere una función SQL en Supabase (ver nota junto al botón de
+      // activar Premium). Si no hay conexión o la función no existe todavía,
+      // usa la última fecha de servidor que se haya podido obtener en esta
+      // sesión — y si nunca se pudo obtener ninguna, cae a la fecha local
+      // solo como último recurso (arranque en frío, sin internet).
+      let cachedServerDate = today();
+      async function serverToday(){
+        try{
+          const d = await window.SupabaseDB?.rpc('get_server_date');
+          if(typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)){ cachedServerDate = d.slice(0,10); }
+        }catch(_){}
+        return cachedServerDate;
+      }
+      function normalize(refDate) {
         state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
         state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.premiumWhatsapp ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3; state.settings.plan = (state.settings.plan==='premium')?'premium':'basico'; state.settings.premiumUntil ??= '';
         // Premium por tiempo limitado: si el Super Admin activó Premium con
@@ -243,7 +259,7 @@
         // vuelve sola a Básico. Se revisa acá (en cada carga de datos) para
         // que el downgrade ocurra sin depender de que alguien entre como
         // Super Admin a apagarlo manualmente.
-        if (state.settings.plan === 'premium' && state.settings.premiumUntil && state.settings.premiumUntil < today()) {
+        if (state.settings.plan === 'premium' && state.settings.premiumUntil && state.settings.premiumUntil < (refDate || cachedServerDate)) {
           state.settings.plan = 'basico'; state.settings.premiumUntil = '';
         }
         if (!Array.isArray(state.settings.menuItems) || !state.settings.menuItems.length) state.settings.menuItems = DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label}));
@@ -1041,8 +1057,9 @@
           ${isSuperAdmin()?`<div class="card card-pad stack">
             <h3>Plan de la cuenta</h3>
             <p class="muted">Solo tú, como Super Administrador, puedes cambiar esto. En plan Básico, Sueldos, Inventario, Auditoría, Horario semanal, Imprimir dietas especiales, el Portal de clientes y la reactivación automática por fecha de retorno quedan bloqueados para el resto del equipo.</p>
-            <p>Plan actual: <b>${isPremium()?'Premium':'Básico'}</b>${isPremium()&&state.settings.premiumUntil?` · vence el ${state.settings.premiumUntil.split('-').reverse().join('/')} (${Math.max(0,Math.ceil((new Date(state.settings.premiumUntil)-new Date(today()))/86400000))} días restantes)`:''}${isPremium()&&!state.settings.premiumUntil?' · sin vencimiento':''}</p>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <p class="muted">El vencimiento se calcula contra la fecha del servidor de Supabase, no contra el reloj de esta PC o celular — así nadie lo altera cambiando la fecha del dispositivo. Necesita la función <code>get_server_date</code> creada en Supabase (ver instrucciones del desarrollador).</p>
+            <p>Plan actual: <b>${isPremium()?'Premium':'Básico'}</b>${isPremium()&&state.settings.premiumUntil?` · vence el ${state.settings.premiumUntil.split('-').reverse().join('/')} (${Math.max(0,Math.ceil((new Date(state.settings.premiumUntil)-new Date(cachedServerDate))/86400000))} días restantes)`:''}${isPremium()&&!state.settings.premiumUntil?' · sin vencimiento':''}</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
               <label class="field" style="width:150px">Días de Premium<input type="number" id="premium-days" min="1" placeholder="Ej: 30"></label>
               <button type="button" class="primary" id="activate-premium-days-btn">Activar por esos días</button>
               <button type="button" class="outline" id="activate-premium-btn" ${isPremium()&&!state.settings.premiumUntil?'disabled':''}>Activar sin vencimiento</button>
@@ -1063,7 +1080,7 @@
         $('#ad-image-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.adImageUrl=await readImageAsDataURL(file,960,.85);const saved=await save();renderSettings();notice(saved?'Imagen publicitaria actualizada.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
         $('#renewal-warning-days').onchange=async e=>{state.settings.renewalWarningDays=Math.max(0,n(e.target.value));e.target.value=state.settings.renewalWarningDays;const saved=await save();notice(saved?'Aviso de renovación actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
         $('#activate-premium-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;state.settings.plan='premium';state.settings.premiumUntil='';const saved=await save();renderSettings();notice(saved?'Plan Premium activado sin vencimiento.':'Se activó localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit('Plan cambiado a Premium (sin vencimiento)','settings','Plan de la cuenta','',{});});
-        $('#activate-premium-days-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;const days=n($('#premium-days').value);if(days<=0){notice('Ingresa una cantidad de días válida.',true);return;}const until=new Date(today());until.setDate(until.getDate()+days);const untilStr=until.toISOString().slice(0,10);state.settings.plan='premium';state.settings.premiumUntil=untilStr;const saved=await save();renderSettings();notice(saved?`Plan Premium activado por ${days} días (vence el ${untilStr.split('-').reverse().join('/')}).`:'Se activó localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit(`Plan cambiado a Premium por ${days} días`,'settings','Plan de la cuenta','',{premiumUntil:untilStr});});
+        $('#activate-premium-days-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;const days=n($('#premium-days').value);if(days<=0){notice('Ingresa una cantidad de días válida.',true);return;}const base=await serverToday();const until=new Date(base+'T00:00:00Z');until.setUTCDate(until.getUTCDate()+days);const untilStr=until.toISOString().slice(0,10);state.settings.plan='premium';state.settings.premiumUntil=untilStr;const saved=await save();renderSettings();notice(saved?`Plan Premium activado por ${days} días (vence el ${untilStr.split('-').reverse().join('/')}).`:'Se activó localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit(`Plan cambiado a Premium por ${days} días`,'settings','Plan de la cuenta','',{premiumUntil:untilStr});});
         $('#activate-basic-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;if(!confirm('¿Volver al plan Básico? El equipo perderá acceso a las funciones Premium.'))return;state.settings.plan='basico';state.settings.premiumUntil='';const saved=await save();renderSettings();notice(saved?'Plan Básico activado.':'Se cambió localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit('Plan cambiado a Básico','settings','Plan de la cuenta','',{});});
         $('#premium-whatsapp')?.addEventListener('change',async e=>{if(!isSuperAdmin())return;state.settings.premiumWhatsapp=e.target.value.trim().replace(/[^\d]/g,'');e.target.value=state.settings.premiumWhatsapp;const saved=await save();notice(saved?'Tu WhatsApp de upgrade actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);});
       }
@@ -1357,7 +1374,7 @@
         try{ await operationsSaveQueue; }catch(_){}
         sessionStorage.removeItem(STAFF_SESSION_KEY);
         location.href='./login.html';
-      };$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();normalize();render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{
+      };$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();const sd=await serverToday();normalize(sd);render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{
         const file=e.target.files[0];if(!file)return;
         const r=new FileReader();
         r.onload=async()=>{
@@ -1385,7 +1402,7 @@
       document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
       if(!activeUser){ window.location.replace('./login.html'); return; }
-      load(); applyBranding(); loadFromServer().then(() => { normalize(); render(); applyBranding(); }); render(); activate('dispatch');
+      load(); applyBranding(); loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate('dispatch');
       // Si se cierra la pestaña o se recarga mientras hay un guardado en
       // curso (p. ej. justo después de resizar una columna), el navegador
       // puede cortar esa subida a Supabase a mitad de camino — el cambio
