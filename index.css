@@ -339,6 +339,25 @@
     .toolbar .search { width: 230px; }
     .toolbar .field { width: 175px; }
     .toolbar .spacer { flex: 1; }
+    /* iOS Safari a veces renderiza input[type="date"] con un ancho interno
+       mayor al que indica el CSS (el widget nativo ignora width/min-width
+       en ciertas versiones), desbordando su contenedor — mismo bug ya
+       documentado abajo para el campo bloqueado del Driver. Acá el campo
+       sigue siendo editable (Admin/Editor), así que en vez de reemplazar
+       el input por un div, se envuelve en un contenedor con overflow:hidden
+       que recorta visualmente cualquier desborde sin afectar el tap para
+       abrir el selector nativo. */
+    .date-input-wrap {
+      width: 100%;
+      overflow: hidden;
+      border-radius: 7px;
+    }
+    .date-input-wrap input[type="date"] {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      display: block;
+    }
 
     .card {
       border: 1px solid var(--line);
