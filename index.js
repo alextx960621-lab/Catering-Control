@@ -513,13 +513,31 @@
       // interpretar el gesto como "arrastrar la columna" en vez de
       // "resizear", y el ancho no cambiaba. Con el grip aparte, cada gesto
       // tiene su propia zona y ya no compiten entre sí.
-      function th(label,key,group){ const s=ui.sort[group]; const dragHandle=(group==='dispatch'||group==='clients')?'<span class="col-drag-handle" aria-hidden="true" title="Arrastra para reordenar la columna">⋮⋮</span>':''; return `<th data-sort="${key}" data-group="${group}">${dragHandle}${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
+      // Grupos cuya función de render efectivamente consulta el orden
+      // guardado (userColPrefs().columnOrder[group]) para armar sus
+      // columnas — el tirador ⋮⋮ solo se muestra para estos. Payroll queda
+      // afuera a propósito: sus columnas son los días del mes en secuencia
+      // y no tendría sentido reordenarlas.
+      const REORDERABLE_GROUPS=new Set(['dispatch','clients','drivers','routes','plans','inventory','inventory-links','inventory-movements','users','audit']);
+      function th(label,key,group){ const s=ui.sort[group]; const dragHandle=REORDERABLE_GROUPS.has(group)?'<span class="col-drag-handle" aria-hidden="true" title="Arrastra para reordenar la columna">⋮⋮</span>':''; return `<th data-sort="${key}" data-group="${group}">${dragHandle}${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
       function defaultColWidth(label){ return Math.min(240, Math.max(70, String(label).length*8+56)); }
       function colgroupHtml(cols, group){
         const saved = userColPrefs().columnWidths?.[group] || {};
         return `<colgroup>${cols.map(([label,key])=>`<col data-col-key="${esc(key)}" style="width:${n(saved[key])||defaultColWidth(label)}px">`).join('')}</colgroup>`;
       }
       function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${colgroupHtml(headers,group)}<thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
+      // Arma una tabla con columnas reordenables por arrastre (mismo tirador
+      // ⋮⋮ en todas las tablas): "definitions" es [{key,label,cell(item)}],
+      // el orden guardado por el usuario para este "group" (ver
+      // saveColumnOrder/enableTableTools) decide en qué posición va cada
+      // una. Evita repetir esta lógica en cada página.
+      function orderedTable(list, definitions, group, idFn){
+        const allKeys=definitions.map(d=>d.key), wanted=userColPrefs().columnOrder[group]||[];
+        const columns=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
+        const headers=columns.map(c=>[c.label,c.key]);
+        const rows=item=>`<tr${idFn?` data-id="${idFn(item)}"`:''}>${columns.map(c=>`<td>${c.cell(item)}</td>`).join('')}</tr>`;
+        return table(list,headers,rows,group);
+      }
       function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); }
       function render(){ document.documentElement.dataset.theme=userTheme(); $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); }
       function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
@@ -536,17 +554,6 @@
           $$('.resize-handle',tbl).forEach((handle,index)=>{
             const headCell=handle.parentElement, col=cols[index];
             if(!col) return;
-            // En celular la última columna (Acciones) queda "pegada" al
-            // borde derecho con position:sticky para que siempre se vea al
-            // hacer scroll horizontal (ver regla @media 850px más abajo en
-            // el CSS). Eso deja su tirador de resize literalmente en el
-            // borde de la pantalla: no hay espacio físico para arrastrar el
-            // dedo hacia la derecha y agrandarla, así que cualquier
-            // movimiento terminaba achicándola. Para esa columna se invierte
-            // el sentido: arrastrar hacia la izquierda (donde sí hay lugar)
-            // la agranda, hacia la derecha la achica — igual que al
-            // redimensionar un panel anclado al borde derecho.
-            const isLastStickyCol = index === cols.length - 1 && window.matchMedia('(max-width: 850px)').matches;
             // Pointer Events cubre mouse, dedo y lápiz con un solo listener
             // (antes había un onmousedown Y un ontouchstart por separado).
             handle.onpointerdown=e=>{
@@ -554,7 +561,7 @@
               handle.setPointerCapture(e.pointerId);
               document.body.classList.add('col-dragging');
               const initial=col.getBoundingClientRect().width, start=e.clientX;
-              const move=ev=>{ const delta=ev.clientX-start; const width=Math.max(28,Math.round(initial+(isLastStickyCol?-delta:delta))); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
+              const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.clientX-start)); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
               const up=()=>{
                 handle.removeEventListener('pointermove',move);
                 handle.removeEventListener('pointerup',up);
@@ -586,12 +593,26 @@
         // Pointer Events en vez del drag-and-drop nativo de HTML5, que no
         // responde al dedo en la mayoría de navegadores móviles — por eso
         // antes solo se podía reordenar con mouse en escritorio. Disponible
-        // en Día de trabajo y en Clientes (mismo mecanismo, generalizado).
+        // en todas las tablas listadas en REORDERABLE_GROUPS. La tabla se
+        // ubica buscando un <th data-group="..."> y subiendo al <table> que
+        // lo contiene, en vez de un selector de contenedor por página —
+        // así sirve para cualquier tabla nueva sin tener que listar su
+        // selector acá (Inventario, por ejemplo, tiene tres tablas en la
+        // misma página).
         [
-          { sel:'#dispatch-page .sheet table', group:'dispatch', allKeys:['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'] },
-          { sel:'#clients-page .sheet table', group:'clients', allKeys:['order','name','route','address1','maps','phone1','plan','driver','status','paidDays','consumedDays','specialDiet','id'] }
-        ].forEach(({sel,group,allKeys})=>{
-          const tbl=$(sel);
+          { group:'dispatch', allKeys:['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'] },
+          { group:'clients', allKeys:['order','name','route','address1','maps','phone1','plan','driver','status','paidDays','consumedDays','specialDiet','id'] },
+          { group:'drivers', allKeys:['order','firstName','carnet','phone','address','route','id'] },
+          { group:'routes', allKeys:['order','name','type','description','clients','drivers','id'] },
+          { group:'plans', allKeys:['name','type',...menuItems().map(([key])=>key),'id'] },
+          { group:'inventory', allKeys:['name','unit','stock','minimum','links','id'] },
+          { group:'inventory-links', allKeys:['inventoryId','clientItemKey','quantity','id'] },
+          { group:'inventory-movements', allKeys:['date','inventoryId','quantity','type','note','id'] },
+          { group:'users', allKeys:['username','name','email','role','route','id'] },
+          { group:'audit', allKeys:['at','actor_name','action','entity_label','details'] }
+        ].forEach(({group,allKeys})=>{
+          const sampleHead=document.querySelector(`th[data-group="${group}"]`);
+          const tbl=sampleHead?.closest('table');
           if(!tbl) return;
           const heads=$$(`thead th[data-group="${group}"]`,tbl);
           $$('.col-drag-handle',tbl).forEach(grip=>{
@@ -731,11 +752,7 @@
           {key:'specialDiet',label:'Dieta especial',cell:c=>esc(c.specialDiet||'—')},
           {key:'id',label:'Acciones',cell:c=>canEditPage('clients')?`${status(c)==='Pausado'?`<button class="icon-btn" data-action="resume-client" data-id="${c.id}">Activar</button>`:`<button class="icon-btn" data-action="pause-client" data-id="${c.id}">Pausar</button>`}<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button><button class="icon-btn delete" data-action="delete-client" data-id="${c.id}">×</button>`:'—'}
         ];
-        const allKeys=definitions.map(x=>x.key), wanted=userColPrefs().columnOrder.clients||[];
-        const columns=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
-        const headers=columns.map(col=>[col.label,col.key]);
-        const rows=c=>`<tr data-id="${c.id}">${columns.map(col=>`<td>${col.cell(c)}</td>`).join('')}</tr>`;
-        $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canEditPage('clients')?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+table(list,headers,rows,'clients'); bindSearch('clients-search','clients',renderClients);
+        $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canEditPage('clients')?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+orderedTable(list,definitions,'clients',c=>c.id); bindSearch('clients-search','clients',renderClients);
       }
       function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label class="wide">Link de Google Maps (Dirección 1)<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps (Dirección 2)<input type="url" name="maps2" value="${esc(c.maps2)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno${hasPremiumAccess()?`<input name="returnDate" type="date" value="${esc(c.returnDate)}">`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${hasPremiumAccess()?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
       function scrollToRow(id){
@@ -793,7 +810,23 @@
         renderClients();notice(`Servicio de ${c.name} activado.`);scrollToRow(c.id);
         logAudit('Cliente reactivado','client',c.name,c.id,{});
       }
-      function renderDrivers(){ if(!canAccessPage('drivers')) return; const q=(ui.search.drivers||'').toLowerCase();let list=state.drivers.filter(d=>!q||[d.firstName,d.lastName,d.carnet,d.phone,d.address,routeName(d.routeId)].join(' ').toLowerCase().includes(q));list=sort(list,'order','drivers');const rows=d=>`<tr><td>${n(d.order)||''}</td><td style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><b>${esc(d.firstName)} ${esc(d.lastName)}</b></td><td>${esc(d.carnet||'—')}</td><td>${esc(d.phone||'—')}</td><td>${esc(d.address||'—')}</td><td>${esc(routeName(d.routeId))}</td><td>${canEditPage('drivers')?`<button class="icon-btn" data-action="edit-driver" data-id="${d.id}">Editar</button><button class="icon-btn delete" data-action="delete-driver" data-id="${d.id}">×</button>`:'—'}</td></tr>`;$('#drivers-page').innerHTML=pageHead('Drivers','Personal de entrega registrado.',canEditPage('drivers')?'<button class="primary" data-action="add-driver">+ Añadir driver</button>':'')+`<div class="toolbar"><input id="drivers-search" class="search" placeholder="Buscar driver…" value="${esc(ui.search.drivers||'')}"></div>`+table(list,[['Orden','order'],['Nombre','firstName'],['Carnet','carnet'],['Teléfono','phone'],['Dirección domicilio','address'],['Ruta','route'],['Acciones','id']],rows,'drivers');bindSearch('drivers-search','drivers',renderDrivers);}
+      function renderDrivers(){
+        if(!canAccessPage('drivers')) return;
+        const q=(ui.search.drivers||'').toLowerCase();
+        let list=state.drivers.filter(d=>!q||[d.firstName,d.lastName,d.carnet,d.phone,d.address,routeName(d.routeId)].join(' ').toLowerCase().includes(q));
+        list=sort(list,'order','drivers');
+        const definitions=[
+          {key:'order',label:'Orden',cell:d=>n(d.order)||''},
+          {key:'firstName',label:'Nombre',cell:d=>`<div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><b>${esc(d.firstName)} ${esc(d.lastName)}</b></div>`},
+          {key:'carnet',label:'Carnet',cell:d=>esc(d.carnet||'—')},
+          {key:'phone',label:'Teléfono',cell:d=>esc(d.phone||'—')},
+          {key:'address',label:'Dirección domicilio',cell:d=>esc(d.address||'—')},
+          {key:'route',label:'Ruta',cell:d=>esc(routeName(d.routeId))},
+          {key:'id',label:'Acciones',cell:d=>canEditPage('drivers')?`<button class="icon-btn" data-action="edit-driver" data-id="${d.id}">Editar</button><button class="icon-btn delete" data-action="delete-driver" data-id="${d.id}">×</button>`:'—'}
+        ];
+        $('#drivers-page').innerHTML=pageHead('Drivers','Personal de entrega registrado.',canEditPage('drivers')?'<button class="primary" data-action="add-driver">+ Añadir driver</button>':'')+`<div class="toolbar"><input id="drivers-search" class="search" placeholder="Buscar driver…" value="${esc(ui.search.drivers||'')}"></div>`+orderedTable(list,definitions,'drivers');
+        bindSearch('drivers-search','drivers',renderDrivers);
+      }
       function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label>Orden<input name="order" type="number" min="0" value="${esc(d.order)}"></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="outline" onclick="removeDriverPhoto('${d.id}')">Quitar foto</button>`:''}</div></label></div>`;}
       async function removeDriverPhoto(id){const d=driver(id);if(!d)return;d.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openDriver(id);}
       function openDriver(id){const isNew=!id;const d0=id?driver(id):null;showModal(d0?'Editar driver':'Añadir driver',driverForm(d0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}let d=d0;if(d){Object.assign(d,data);state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);
@@ -802,13 +835,35 @@
       }else{d={id:uid('d'),...data};state.drivers.push(d);}const saved=await save();if(!saved)return false;renderDrivers();notice('Driver guardado.');logAudit(isNew?'Driver creado':'Driver editado','driver',`${d.firstName||''} ${d.lastName||''}`.trim(),d.id,{});});}
       const ROUTE_TYPES={short:['Corta','done'],long:['Larga','pending'],verylong:['Muy larga','warn']};
       function routeTypeBadge(r){const [label,cl]=ROUTE_TYPES[r.type]||ROUTE_TYPES.short;return `<span class="badge ${cl}">${label}</span>`;}
-      function renderRoutes(){ if(!canAccessPage('routes')) return; const q=(ui.search.routes||'').toLowerCase();let list=state.routes.filter(r=>!q||[r.name,r.description].join(' ').toLowerCase().includes(q));list=sort(list,'order','routes');const rows=r=>`<tr><td>${n(r.order)||''}</td><td><b>${esc(r.name)}</b>${r.open?' <span class="badge off">Abierta</span>':''}</td><td>${routeTypeBadge(r)}</td><td>${esc(r.description||'—')}</td><td>${state.clients.filter(c=>c.routeId===r.id).length}</td><td>${state.drivers.filter(d=>d.routeId===r.id).length}</td><td>${canEditPage('routes')&&!r.open?`<button class="icon-btn" data-action="edit-route" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-route" data-id="${r.id}">×</button>`:'—'}</td></tr>`;$('#routes-page').innerHTML=pageHead('Rutas','Incluye una ruta abierta para drivers disponibles sin ruta de trabajo.',canEditPage('routes')?'<button class="primary" data-action="add-route">+ Crear ruta</button>':'')+`<div class="toolbar"><input id="routes-search" class="search" placeholder="Buscar ruta…" value="${esc(ui.search.routes||'')}"></div>`+table(list,[['Orden','order'],['Ruta','name'],['Tipo','type'],['Descripción','description'],['Clientes','clients'],['Drivers','drivers'],['Acciones','id']],rows,'routes');bindSearch('routes-search','routes',renderRoutes);}
+      function renderRoutes(){
+        if(!canAccessPage('routes')) return;
+        const q=(ui.search.routes||'').toLowerCase();
+        let list=state.routes.filter(r=>!q||[r.name,r.description].join(' ').toLowerCase().includes(q));
+        list=sort(list,'order','routes');
+        const definitions=[
+          {key:'order',label:'Orden',cell:r=>n(r.order)||''},
+          {key:'name',label:'Ruta',cell:r=>`<b>${esc(r.name)}</b>${r.open?' <span class="badge off">Abierta</span>':''}`},
+          {key:'type',label:'Tipo',cell:routeTypeBadge},
+          {key:'description',label:'Descripción',cell:r=>esc(r.description||'—')},
+          {key:'clients',label:'Clientes',cell:r=>state.clients.filter(c=>c.routeId===r.id).length},
+          {key:'drivers',label:'Drivers',cell:r=>state.drivers.filter(d=>d.routeId===r.id).length},
+          {key:'id',label:'Acciones',cell:r=>canEditPage('routes')&&!r.open?`<button class="icon-btn" data-action="edit-route" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-route" data-id="${r.id}">×</button>`:'—'}
+        ];
+        $('#routes-page').innerHTML=pageHead('Rutas','Incluye una ruta abierta para drivers disponibles sin ruta de trabajo.',canEditPage('routes')?'<button class="primary" data-action="add-route">+ Crear ruta</button>':'')+`<div class="toolbar"><input id="routes-search" class="search" placeholder="Buscar ruta…" value="${esc(ui.search.routes||'')}"></div>`+orderedTable(list,definitions,'routes');
+        bindSearch('routes-search','routes',renderRoutes);
+      }
       function routeForm(r={}){return `<div class="form-grid"><label>Nombre de ruta *<input name="name" required value="${esc(r.name)}"></label><label>Orden<input type="number" min="0" name="order" value="${esc(r.order)}"></label><label>Tipo de ruta<select name="type"><option value="short" ${(r.type||'short')==='short'?'selected':''}>Corta</option><option value="long" ${r.type==='long'?'selected':''}>Larga</option><option value="verylong" ${r.type==='verylong'?'selected':''}>Muy larga</option></select></label><label class="wide">Descripción / zona<input name="description" value="${esc(r.description)}"></label></div>`;}
       function openRoute(id){const isNew=!id;const r0=id?route(id):null;showModal(r0?'Editar ruta':'Crear ruta',routeForm(r0||{}),f=>{const data=Object.fromEntries(new FormData(f));let r=r0;if(r)Object.assign(r,data);else{r={id:uid('r'),...data};state.routes.push(r);}save();renderRoutes();notice('Ruta guardada.');logAudit(isNew?'Ruta creada':'Ruta editada','route',r.name,r.id,{});});}
 
-      function renderPlans(){ if(!canAccessPage('plans')) return; const cols=menuItems(); let planList=sort(state.plans,'name','plans'); const rows=p=>`<tr><td style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;border-radius:8px;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><b>${esc(p.name)}</b></td><td>${esc(p.type||'General')}</td>${cols.map(([k])=>`<td>${n(p.items?.[k])}</td>`).join('')}<td>${canEditPage('plans')?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}</td></tr>`;
+      function renderPlans(){ if(!canAccessPage('plans')) return; const cols=menuItems(); let planList=sort(state.plans,'name','plans');
+        const definitions=[
+          {key:'name',label:'Plan',cell:p=>`<div style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;border-radius:8px;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><b>${esc(p.name)}</b></div>`},
+          {key:'type',label:'Tipo',cell:p=>esc(p.type||'General')},
+          ...cols.map(([key,label])=>({key,label,cell:p=>n(p.items?.[key])})),
+          {key:'id',label:'Acciones',cell:p=>canEditPage('plans')?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}
+        ];
         const menuRows=()=>cols.map(([key,label])=>`<tr><td>${esc(label)}</td><td>${canEditPage('plans')?`<button class="icon-btn" data-action="edit-menu-item" data-id="${key}">Editar</button><button class="icon-btn delete" data-action="delete-menu-item" data-id="${key}">×</button>`:'—'}</td></tr>`).join('');
-        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button><button class="primary" data-action="add-plan">+ Crear plan</button>':'')+table(planList,[['Plan','name'],['Tipo','type'],...cols.map(([key,label])=>[label,key]),['Acciones','id']],rows,'plans')
+        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button><button class="primary" data-action="add-plan">+ Crear plan</button>':'')+orderedTable(planList,definitions,'plans')
           +pageHead('Artículos del menú','Aparecen como columnas en Día de trabajo, en el Excel del día procesado y en el portal del cliente. Se pueden crear, renombrar o eliminar artículos (incluidos los que vienen por defecto).')
           +`<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Artículo</th><th>Acciones</th></tr></thead><tbody>${cols.length?menuRows():'<tr><td colspan="2" class="empty">No hay artículos definidos.</td></tr>'}</tbody></table></div>`;
       }
@@ -903,12 +958,31 @@
       function renderInventory(){
         if(!canAccessPage('inventory')) return;
         if(!hasPremiumAccess()){ $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina.')+premiumLockHtml('Inventario'); return; }
-        const itemRows=item=>{const links=state.inventory.links.filter(l=>l.inventoryId===item.id);const low=n(item.stock)<=n(item.minimum);return `<tr><td><b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}</td><td>${esc(item.unit||'unidades')}</td><td>${n(item.stock)}</td><td>${n(item.minimum)}</td><td>${links.length?links.map(l=>`${n(l.quantity)} × ${esc(menuItems().find(([key])=>key===l.clientItemKey)?.[1]||l.clientItemKey)}`).join('<br>'):'—'}</td><td>${canEditPage('inventory')?`<button class="icon-btn" data-action="edit-inventory-item" data-id="${item.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-item" data-id="${item.id}">×</button>`:'—'}</td></tr>`;};
-        const linkRows=link=>`<tr><td>${esc(kitchenItem(link.inventoryId)?.name||'Producto eliminado')}</td><td>${esc(menuItems().find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey)}</td><td>${n(link.quantity)}</td><td>${canEditPage('inventory')?`<button class="icon-btn" data-action="edit-inventory-link" data-id="${link.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-link" data-id="${link.id}">×</button>`:'—'}</td></tr>`;
+        const itemDefs=[
+          {key:'name',label:'Producto',cell:item=>{const low=n(item.stock)<=n(item.minimum);return `<b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}`;}},
+          {key:'unit',label:'Unidad',cell:item=>esc(item.unit||'unidades')},
+          {key:'stock',label:'Stock',cell:item=>n(item.stock)},
+          {key:'minimum',label:'Mínimo',cell:item=>n(item.minimum)},
+          {key:'links',label:'Se descuenta con',cell:item=>{const links=state.inventory.links.filter(l=>l.inventoryId===item.id);return links.length?links.map(l=>`${n(l.quantity)} × ${esc(menuItems().find(([key])=>key===l.clientItemKey)?.[1]||l.clientItemKey)}`).join('<br>'):'—';}},
+          {key:'id',label:'Acciones',cell:item=>canEditPage('inventory')?`<button class="icon-btn" data-action="edit-inventory-item" data-id="${item.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-item" data-id="${item.id}">×</button>`:'—'}
+        ];
+        const linkDefs=[
+          {key:'inventoryId',label:'Producto de cocina',cell:link=>esc(kitchenItem(link.inventoryId)?.name||'Producto eliminado')},
+          {key:'clientItemKey',label:'Artículo entregado',cell:link=>esc(menuItems().find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey)},
+          {key:'quantity',label:'Cantidad por entrega',cell:link=>n(link.quantity)},
+          {key:'id',label:'Acciones',cell:link=>canEditPage('inventory')?`<button class="icon-btn" data-action="edit-inventory-link" data-id="${link.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-link" data-id="${link.id}">×</button>`:'—'}
+        ];
+        const movementDefs=[
+          {key:'date',label:'Fecha',cell:m=>esc(m.date)},
+          {key:'inventoryId',label:'Producto',cell:m=>esc(kitchenItem(m.inventoryId)?.name||'Producto eliminado')},
+          {key:'quantity',label:'Cantidad',cell:m=>m.quantity>0?`+${n(m.quantity)}`:n(m.quantity)},
+          {key:'type',label:'Tipo',cell:m=>m.type==='entry'?'Ingreso':m.type==='waste'?'Merma':m.type==='delivery'?'Entrega procesada':'Uso'},
+          {key:'note',label:'Detalle',cell:m=>esc(m.note||'—')},
+          {key:'id',label:'Acciones',cell:m=>canEditPage('inventory')&&m.type!=='delivery'?`<button class="icon-btn" data-action="edit-inventory-movement" data-id="${m.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-movement" data-id="${m.id}">×</button>`:'—'}
+        ];
         const recent=state.inventory.movements.slice(0,12);
-        const movementRows=m=>`<tr><td>${esc(m.date)}</td><td>${esc(kitchenItem(m.inventoryId)?.name||'Producto eliminado')}</td><td>${m.quantity>0?`+${n(m.quantity)}`:n(m.quantity)}</td><td>${m.type==='entry'?'Ingreso':m.type==='waste'?'Merma':m.type==='delivery'?'Entrega procesada':'Uso'}</td><td>${esc(m.note||'—')}</td><td>${canEditPage('inventory')&&m.type!=='delivery'?`<button class="icon-btn" data-action="edit-inventory-movement" data-id="${m.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-movement" data-id="${m.id}">×</button>`:'—'}</td></tr>`;
         const actions=canEditPage('inventory')?`<button class="primary" data-action="add-inventory-item">+ Producto de cocina</button><button class="outline" data-action="add-inventory-entry">+ Ingreso</button><button class="outline" data-action="add-inventory-use">− Uso</button><button class="outline" data-action="add-inventory-waste">− Merma</button><button class="outline" data-action="add-inventory-link">Vincular consumo</button>`:'';
-        $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina. Los vínculos descuentan insumos automáticamente al procesar pedidos activos.',actions)+`<div class="two-col"><div class="card card-pad"><h3 style="margin-bottom:12px">Productos de cocina</h3>${table(state.inventory.items,[['Producto','name'],['Unidad','unit'],['Stock','stock'],['Mínimo','minimum'],['Se descuenta con','links'],['Acciones','id']],itemRows,'inventory')}</div><div class="card card-pad"><h3 style="margin-bottom:12px">Vínculos de consumo</h3>${table(state.inventory.links,[['Producto de cocina','inventoryId'],['Artículo entregado','clientItemKey'],['Cantidad por entrega','quantity'],['Acciones','id']],linkRows,'inventory-links')}</div></div><div class="card card-pad" style="margin-top:18px"><h3 style="margin-bottom:12px">Últimos movimientos</h3>${table(recent,[['Fecha','date'],['Producto','inventoryId'],['Cantidad','quantity'],['Tipo','type'],['Detalle','note'],['Acciones','id']],movementRows,'inventory-movements')}</div>`;
+        $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina. Los vínculos descuentan insumos automáticamente al procesar pedidos activos.',actions)+`<div class="two-col"><div class="card card-pad"><h3 style="margin-bottom:12px">Productos de cocina</h3>${orderedTable(state.inventory.items,itemDefs,'inventory')}</div><div class="card card-pad"><h3 style="margin-bottom:12px">Vínculos de consumo</h3>${orderedTable(state.inventory.links,linkDefs,'inventory-links')}</div></div><div class="card card-pad" style="margin-top:18px"><h3 style="margin-bottom:12px">Últimos movimientos</h3>${orderedTable(recent,movementDefs,'inventory-movements')}</div>`;
       }
       function applyInventoryForProcessedDay(date){
         const active=state.clients.filter(c=>status(c,date)==='Activo');
@@ -947,11 +1021,18 @@
         $('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<input id="payroll-month" type="month" value="${ui.month}"></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet table-responsive"><table class="table table-hover align-middle mb-0 payroll">${colgroupHtml(headers,'payroll')}<thead><tr>${headers.map(h=>th(h[0],h[1],'payroll')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody>${list.length?totalsRow:''}</table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
 
       function renderUsers(){if(!canAccessPage('users'))return;
-        const rows=u=>`<tr><td><b>${esc(u.username)}</b></td><td>${esc(u.name)}</td><td>${esc(u.email||'—')}</td><td>${badge(roleLabel(u.role))}</td><td>${u.role==='driver'?esc(routeName(u.routeId)):'—'}</td><td><button class="icon-btn" data-action="edit-user" data-id="${u.id}">Editar</button>${u.id!==activeUser.id?`<button class="icon-btn delete" data-action="delete-user" data-id="${u.id}">×</button>`:''}</td></tr>`;
+        const userDefs=[
+          {key:'username',label:'Usuario',cell:u=>`<b>${esc(u.username)}</b>`},
+          {key:'name',label:'Nombre',cell:u=>esc(u.name)},
+          {key:'email',label:'Correo',cell:u=>esc(u.email||'—')},
+          {key:'role',label:'Rol',cell:u=>badge(roleLabel(u.role))},
+          {key:'route',label:'Ruta asignada',cell:u=>u.role==='driver'?esc(routeName(u.routeId)):'—'},
+          {key:'id',label:'Acciones',cell:u=>`<button class="icon-btn" data-action="edit-user" data-id="${u.id}">Editar</button>${u.id!==activeUser.id?`<button class="icon-btn delete" data-action="delete-user" data-id="${u.id}">×</button>`:''}`}
+        ];
         const roleSummary=r=>ROLE_PAGE_OPTIONS.filter(([key])=>r.pages?.[key]?.view).map(([key,label,editable])=>editable&&r.pages[key].edit?`${label} (editar)`:label).join(', ')||'Sin páginas asignadas';
         const roleRows=r=>{const inUse=staffUsers.filter(u=>u.role===r.id).length;return `<tr><td><b>${esc(r.label)}</b>${inUse?` <small class="muted">(${inUse} usuario${inUse===1?'':'s'})</small>`:''}</td><td>${esc(roleSummary(r))}</td><td><button class="icon-btn" data-action="edit-role" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-role" data-id="${r.id}">×</button></td></tr>`;};
         $('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Roles fijos: Administrador, Editor, Cocina y Driver. También se pueden crear roles a medida.', '<button class="outline" data-action="add-role">+ Crear rol</button><button class="primary" data-action="add-user">+ Crear usuario</button>')
-          +table(staffUsers,[['Usuario','username'],['Nombre','name'],['Correo','email'],['Rol','role'],['Ruta asignada','route'],['Acciones','id']],rows,'users')
+          +orderedTable(staffUsers,userDefs,'users')
           +pageHead('Roles personalizados','Qué páginas puede ver y editar cada rol creado a medida. Administrador, Editor, Cocina y Driver son fijos y no aparecen aquí.')
           +`<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Rol</th><th>Permisos</th><th>Acciones</th></tr></thead><tbody>${(state.settings.customRoles||[]).length?state.settings.customRoles.map(roleRows).join(''):'<tr><td colspan="3" class="empty">No hay roles personalizados todavía.</td></tr>'}</tbody></table></div>`;
       }
@@ -969,8 +1050,14 @@
         const q=(ui.search.audit||'').toLowerCase();
         let list=auditEntries.filter(e=>!q||[e.actor_name,e.actor_role,e.action,e.entity_type,e.entity_label].join(' ').toLowerCase().includes(q));
         list=sort(list,'at','audit');
-        const rows=e=>`<tr><td>${new Date(e.at).toLocaleString('es-BO',{dateStyle:'short',timeStyle:'short'})}</td><td>${esc(e.actor_name||'—')}<br><small class="muted">${esc(roleLabel(e.actor_role))}</small></td><td>${esc(e.action)}</td><td>${esc(e.entity_label||e.entity_type||'—')}</td><td>${Object.keys(e.details||{}).length?esc(Object.entries(e.details).map(([k,v])=>`${k}: ${v}`).join(' · ')):'—'}</td></tr>`;
-        $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+`<div class="toolbar"><input id="audit-search" class="search" placeholder="Buscar por persona, acción o registro…" value="${esc(ui.search.audit||'')}"><span class="spacer"></span><span class="muted">${list.length} eventos</span></div>`+table(list,[['Fecha','at'],['Quién','actor_name'],['Acción','action'],['Registro','entity_label'],['Detalle','details']],rows,'audit');
+        const definitions=[
+          {key:'at',label:'Fecha',cell:e=>new Date(e.at).toLocaleString('es-BO',{dateStyle:'short',timeStyle:'short'})},
+          {key:'actor_name',label:'Quién',cell:e=>`${esc(e.actor_name||'—')}<br><small class="muted">${esc(roleLabel(e.actor_role))}</small>`},
+          {key:'action',label:'Acción',cell:e=>esc(e.action)},
+          {key:'entity_label',label:'Registro',cell:e=>esc(e.entity_label||e.entity_type||'—')},
+          {key:'details',label:'Detalle',cell:e=>Object.keys(e.details||{}).length?esc(Object.entries(e.details).map(([k,v])=>`${k}: ${v}`).join(' · ')):'—'}
+        ];
+        $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+`<div class="toolbar"><input id="audit-search" class="search" placeholder="Buscar por persona, acción o registro…" value="${esc(ui.search.audit||'')}"><span class="spacer"></span><span class="muted">${list.length} eventos</span></div>`+orderedTable(list,definitions,'audit');
         bindSearch('audit-search','audit',renderAudit);
       }
       function userForm(u={}){const d=u.driverId?driver(u.driverId):{};const showDriver=u.role==='driver';return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'} autocomplete="new-password"></label><label>${u.id?'Confirmar nueva contraseña':'Confirmar contraseña *'}<input type="password" name="passwordConfirm" ${u.id?'':'required'} autocomplete="new-password"></label><label>Rol<select name="role" id="user-role-select">${isSuperAdmin()?`<option value="superadmin" ${u.role==='superadmin'?'selected':''}>Super Administrador</option>`:''}<option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="kitchen" ${u.role==='kitchen'?'selected':''}>Cocina</option><option value="driver" ${(!u.role||u.role==='driver')?'selected':''}>Driver</option>${(state.settings.customRoles||[]).map(r=>`<option value="${r.id}" ${u.role===r.id?'selected':''}>${esc(r.label)}</option>`).join('')}</select>${isSuperAdmin()?'<p class="muted" style="margin-top:4px">Solo puede haber un Super Administrador.</p>':''}</label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Carnet${showDriver?' *':''}<input name="carnet" value="${esc(d.carnet)}" ${showDriver?'required':''}></label><label class="driver-field" ${showDriver?'':'hidden'}>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="driver-field wide" ${showDriver?'':'hidden'}>Dirección de domicilio<input name="address" value="${esc(d.address)}"></label><p class="muted wide driver-field-hint" ${showDriver?'hidden':''}>Solo el rol Driver necesita ficha de driver y ruta asignada.</p></div>`;}

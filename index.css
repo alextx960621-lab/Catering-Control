@@ -964,21 +964,12 @@
       .sheet { max-height: calc(100vh - 280px); }
       .form-grid { grid-template-columns: 1fr; }
       .items-grid { grid-template-columns: repeat(2, 1fr); border-radius: 10px; }
-      /* Fija la columna de Acciones a la derecha para que los botones de
-         Editar/Pausar/Eliminar siempre sean alcanzables sin desplazar toda
-         la tabla horizontalmente, incluso con el teléfono en vertical. */
-      .sheet table.table th:last-child,
-      .sheet table.table td:last-child,
-      #dispatch-table th:last-child,
-      #dispatch-table td:last-child {
-        position: sticky;
-        right: 0;
-        z-index: 3;
-        background: var(--surface);
-        box-shadow: -6px 0 8px -6px rgba(0,0,0,.18);
-      }
-      .sheet table.table th:last-child { z-index: 4; background: var(--surface-2); }
-      #dispatch-table th:last-child { z-index: 4; background: var(--surface-2); }
+      /* Antes la columna de Acciones quedaba fija (position:sticky) al
+         borde derecho en celular para no tener que hacer scroll horizontal
+         para llegar a los botones. Se sacó: en pantallas angostas esa
+         columna fija terminaba ocupando demasiado espacio permanente (y
+         complicaba el resize/drag de esa columna, ver notas en index.js) —
+         ahora se recorre con scroll horizontal como cualquier otra. */
     }
     @media (max-width: 480px) {
       .summary-grid { grid-template-columns: 1fr 1fr; }
