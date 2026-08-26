@@ -59,6 +59,12 @@
       --warning: #bd7b1d;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* Red de seguridad: si algún elemento (con texto largo, un grid, etc.)
+       termina midiendo más que el ancho de la pantalla, que el navegador
+       recorte en vez de dejar que la página entera se corra hacia la
+       derecha y se "salga" de la pantalla — que es justo lo que se veía en
+       iOS con el campo "Día de trabajo". */
+    html, body { overflow-x: hidden; max-width: 100%; }
     body {
       margin: 0;
       background: var(--bg);
@@ -148,7 +154,12 @@
     h1, h2, h3, p { margin-top: 0; }
     .muted { color: var(--muted); }
     .stack { display: grid; gap: 12px; }
-    label { display: grid; gap: 5px; font-weight: 650; font-size: 12px; }
+    /* min-width:0 evita el bug clásico de Grid/Flex donde, si el contenido
+       (texto largo, una fecha, etc.) no tiene dónde cortarse, el navegador
+       lo deja crecer más allá del ancho del contenedor en vez de recortarlo
+       — Safari/iOS es más estricto con esto que Chrome, por eso se notaba
+       ahí y no en escritorio. */
+    label { display: grid; gap: 5px; font-weight: 650; font-size: 12px; min-width: 0; }
 
     /* ===== APP LAYOUT ===== */
     #app {
@@ -870,7 +881,7 @@
         gap: 8px;
         align-items: stretch;
       }
-      .toolbar .search, .toolbar .field { width: 100%; }
+      .toolbar .search, .toolbar .field { width: 100%; min-width: 0; }
       /* Algunos navegadores móviles (sobre todo Safari/iOS) achican el
          ancho real del widget nativo de input[type=date] cuando está
          disabled (como pasa con "Día de trabajo" para el rol Driver),
@@ -886,6 +897,7 @@
          input; pointer-events:none bloquea la edición igual. */
       .field-locked {
         width: 100%;
+        min-width: 0;
         min-height: 36px;
         padding: 8px 10px;
         border: 1px solid var(--line);
