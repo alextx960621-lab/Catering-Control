@@ -1,4 +1,0 @@
-User-agent: *
-Disallow: /login.html
-Disallow: /index.html
-Disallow: /cliente.html

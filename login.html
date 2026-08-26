@@ -11,6 +11,15 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="./supabase-client.js" defer></script>
   <link rel="stylesheet" href="./login.css">
+
+  <!-- ===== PWA: manifest + íconos + color de tema ===== -->
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#0d6efd">
+  <link rel="icon" href="./icons/favicon-32.png" type="image/png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Catering">
 </head>
 <body class="d-flex align-items-center py-4">
   <main class="container">
@@ -69,5 +78,15 @@
 
 <script src="./login.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous" defer></script>
+<script>
+  // Registro del Service Worker (hace que la app se pueda instalar y
+  // cargue instantáneo). Si falla (navegador viejo, http sin https, etc.)
+  // la app sigue funcionando normal, solo sin esta mejora.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(err => console.warn('[PWA] No se pudo registrar el Service Worker:', err));
+    });
+  }
+</script>
 </body>
 </html>
