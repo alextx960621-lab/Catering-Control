@@ -748,8 +748,13 @@
     .pause-option input { width: auto; min-height: auto; margin-top: 3px; }
     .rate-row input { padding: 5px 6px; }
 
-    /* ===== MENÚ LATERAL RETRÁCTIL (solo escritorio) ===== */
-    @media (min-width: 851px) {
+    /* ===== MENÚ LATERAL RETRÁCTIL (solo escritorio) =====
+       Se exige, además del ancho, que el dispositivo tenga mouse real
+       (hover:hover, pointer:fine). Así, si un celular alguna vez reporta
+       un ancho "de escritorio" (ej. con "Solicitar sitio de escritorio"
+       activado en Chrome), el menú angosto de solo-íconos NO se activa —
+       evita que se corte por falta de alto de pantalla en un teléfono. */
+    @media (min-width: 851px) and (hover: hover) and (pointer: fine) {
       #app.sidebar-collapsed {
         grid-template-columns: 72px 1fr;
       }
