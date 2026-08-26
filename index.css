@@ -354,7 +354,7 @@
       width: 100%;
       display: flex;
     }
-    .date-input-wrap input[type="date"] {
+    .date-input-wrap input[type="date"], .date-input-wrap input[type="month"] {
       flex: 1 1 0;
       width: 0;
       min-width: 0;

@@ -664,7 +664,13 @@
         const activeOrders=routeScoped.filter(c=>status(c,date)==='Activo');
         let list=routeScoped.filter(c=>matchesBase(c) && matchesStatus(c));
         list=sort(list,'order','dispatch');
-        const editableField=(c,field,val,type='text')=>`<input class="day-edit" data-id="${c.id}" data-field="${field}" type="${type}" value="${esc(val)}" ${canEditDispatchField(c,field)?'':'disabled'}>`;
+        const editableField=(c,field,val,type='text')=>{
+          const input=`<input class="day-edit" data-id="${c.id}" data-field="${field}" type="${type}" value="${esc(val)}" ${canEditDispatchField(c,field)?'':'disabled'}>`;
+          // Mismo bug de iOS que "Día de trabajo" y el mes de Sueldos: un
+          // input[type="date"] editable dentro de una celda también se
+          // desborda del ancho de la columna si no se envuelve igual.
+          return type==='date'?`<div class="date-input-wrap">${input}</div>`:input;
+        };
         const itemValue=(c,key)=>{
           const ownItems=c.items && Object.keys(c.items).length ? c.items : plan(c.planId)?.items || {};
           return n(ownItems[key]);
@@ -1018,7 +1024,7 @@
         // grupo 'payroll' (una clave fija por día del mes: 'd1'…'d31', para
         // que el ancho no se resetee al cambiar de mes).
         const headers=[['Driver / Ruta','driver'],...dates.map((d,i)=>[String(Number(d.slice(-2))),`d${i+1}`]),['Total','total'],['Día tarifa','rate'],['Monto Bs','amount']];
-        $('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<input id="payroll-month" type="month" value="${ui.month}"></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet table-responsive"><table class="table table-hover align-middle mb-0 payroll">${colgroupHtml(headers,'payroll')}<thead><tr>${headers.map(h=>th(h[0],h[1],'payroll')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody>${list.length?totalsRow:''}</table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
+        $('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<div class="date-input-wrap"><input id="payroll-month" type="month" value="${ui.month}"></div></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet table-responsive"><table class="table table-hover align-middle mb-0 payroll">${colgroupHtml(headers,'payroll')}<thead><tr>${headers.map(h=>th(h[0],h[1],'payroll')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody>${list.length?totalsRow:''}</table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
 
       function renderUsers(){if(!canAccessPage('users'))return;
         const userDefs=[
