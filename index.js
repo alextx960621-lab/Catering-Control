@@ -93,28 +93,37 @@
       function userColPrefs(){
         const store=readColPrefsStore(), key=activeUser?.id || 'default';
         if(!store[key]){
-          store[key]={ columnWidths: state.settings.columnWidths || {}, dispatchColumnOrder: state.settings.dispatchColumnOrder || [], hiddenColumns: state.settings.hiddenColumns || [] };
+          store[key]={ columnWidths: state.settings.columnWidths || {}, columnOrder: { dispatch: state.settings.dispatchColumnOrder || [] }, hiddenColumns: state.settings.hiddenColumns || [] };
           writeColPrefsStore(store);
         }
         store[key].hiddenColumns ??= [];
+        // columnOrder es genérico por tabla ({dispatch:[...], clients:[...]});
+        // antes solo existía "dispatchColumnOrder" suelto — si un usuario ya
+        // tenía uno guardado de una versión anterior, se migra una sola vez
+        // para no perder el orden que ya había personalizado.
+        store[key].columnOrder ??= {};
+        if(store[key].dispatchColumnOrder?.length && !store[key].columnOrder.dispatch?.length){
+          store[key].columnOrder.dispatch=store[key].dispatchColumnOrder;
+        }
         return store[key];
       }
       function saveColumnWidth(group,key,width){
         const store=readColPrefsStore(), ukey=activeUser?.id || 'default';
-        store[ukey] ||= { columnWidths:{}, dispatchColumnOrder:[], hiddenColumns:[] };
+        store[ukey] ||= { columnWidths:{}, columnOrder:{}, hiddenColumns:[] };
         store[ukey].columnWidths[group] ||= {};
         store[ukey].columnWidths[group][key]=width;
         writeColPrefsStore(store);
       }
-      function saveColumnOrder(order){
+      function saveColumnOrder(group,order){
         const store=readColPrefsStore(), ukey=activeUser?.id || 'default';
-        store[ukey] ||= { columnWidths:{}, dispatchColumnOrder:[], hiddenColumns:[] };
-        store[ukey].dispatchColumnOrder=order;
+        store[ukey] ||= { columnWidths:{}, columnOrder:{}, hiddenColumns:[] };
+        store[ukey].columnOrder ||= {};
+        store[ukey].columnOrder[group]=order;
         writeColPrefsStore(store);
       }
       function saveHiddenColumns(hidden){
         const store=readColPrefsStore(), ukey=activeUser?.id || 'default';
-        store[ukey] ||= { columnWidths:{}, dispatchColumnOrder:[], hiddenColumns:[] };
+        store[ukey] ||= { columnWidths:{}, columnOrder:{}, hiddenColumns:[] };
         store[ukey].hiddenColumns=hidden;
         writeColPrefsStore(store);
       }
@@ -504,7 +513,7 @@
       // interpretar el gesto como "arrastrar la columna" en vez de
       // "resizear", y el ancho no cambiaba. Con el grip aparte, cada gesto
       // tiene su propia zona y ya no compiten entre sí.
-      function th(label,key,group){ const s=ui.sort[group]; const dragHandle=group==='dispatch'?'<span class="col-drag-handle" aria-hidden="true" title="Arrastra para reordenar la columna">⋮⋮</span>':''; return `<th data-sort="${key}" data-group="${group}">${dragHandle}${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
+      function th(label,key,group){ const s=ui.sort[group]; const dragHandle=(group==='dispatch'||group==='clients')?'<span class="col-drag-handle" aria-hidden="true" title="Arrastra para reordenar la columna">⋮⋮</span>':''; return `<th data-sort="${key}" data-group="${group}">${dragHandle}${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
       function defaultColWidth(label){ return Math.min(240, Math.max(70, String(label).length*8+56)); }
       function colgroupHtml(cols, group){
         const saved = userColPrefs().columnWidths?.[group] || {};
@@ -527,17 +536,30 @@
           $$('.resize-handle',tbl).forEach((handle,index)=>{
             const headCell=handle.parentElement, col=cols[index];
             if(!col) return;
+            // En celular la última columna (Acciones) queda "pegada" al
+            // borde derecho con position:sticky para que siempre se vea al
+            // hacer scroll horizontal (ver regla @media 850px más abajo en
+            // el CSS). Eso deja su tirador de resize literalmente en el
+            // borde de la pantalla: no hay espacio físico para arrastrar el
+            // dedo hacia la derecha y agrandarla, así que cualquier
+            // movimiento terminaba achicándola. Para esa columna se invierte
+            // el sentido: arrastrar hacia la izquierda (donde sí hay lugar)
+            // la agranda, hacia la derecha la achica — igual que al
+            // redimensionar un panel anclado al borde derecho.
+            const isLastStickyCol = index === cols.length - 1 && window.matchMedia('(max-width: 850px)').matches;
             // Pointer Events cubre mouse, dedo y lápiz con un solo listener
             // (antes había un onmousedown Y un ontouchstart por separado).
             handle.onpointerdown=e=>{
               e.preventDefault(); e.stopPropagation();
               handle.setPointerCapture(e.pointerId);
+              document.body.classList.add('col-dragging');
               const initial=col.getBoundingClientRect().width, start=e.clientX;
-              const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.clientX-start)); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
+              const move=ev=>{ const delta=ev.clientX-start; const width=Math.max(28,Math.round(initial+(isLastStickyCol?-delta:delta))); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
               const up=()=>{
                 handle.removeEventListener('pointermove',move);
                 handle.removeEventListener('pointerup',up);
                 handle.removeEventListener('pointercancel',up);
+                document.body.classList.remove('col-dragging');
                 const group=headCell.dataset.group, key=headCell.dataset.sort;
                 if(group && key) saveColumnWidth(group,key,parseInt(col.style.width,10));
               };
@@ -545,24 +567,42 @@
               handle.addEventListener('pointerup',up);
               handle.addEventListener('pointercancel',up);
             };
+            // Doble clic / doble tap sobre el tirador: restablece esta
+            // columna a su ancho por defecto y borra el valor guardado.
+            // Sirve, entre otras cosas, para corregir de un toque una
+            // columna que quedó mal guardada (por ejemplo, muy angosta).
+            handle.ondblclick=e=>{
+              e.preventDefault(); e.stopPropagation();
+              const group=headCell.dataset.group, key=headCell.dataset.sort;
+              const labelClone=headCell.cloneNode(true);
+              labelClone.querySelectorAll('.col-drag-handle,.resize-handle,.sort-ind').forEach(el=>el.remove());
+              const width=defaultColWidth(labelClone.textContent.trim());
+              col.style.width=width+'px'; syncTableWidth(tbl,cols);
+              if(group && key) saveColumnWidth(group,key,width);
+            };
           });
         });
-        // Reordenar columnas de Día de trabajo: el tirador ⋮⋮ (separado del
-        // de resize) también usa Pointer Events en vez del drag-and-drop
-        // nativo de HTML5, que no responde al dedo en la mayoría de
-        // navegadores móviles — por eso antes solo se podía reordenar con
-        // mouse en escritorio.
-        const dispatchTable=$('#dispatch-page .sheet table');
-        if(dispatchTable){
-          const heads=$$('thead th[data-group="dispatch"]',dispatchTable);
-          $$('.col-drag-handle',dispatchTable).forEach(grip=>{
+        // Reordenar columnas: el tirador ⋮⋮ (separado del de resize) usa
+        // Pointer Events en vez del drag-and-drop nativo de HTML5, que no
+        // responde al dedo en la mayoría de navegadores móviles — por eso
+        // antes solo se podía reordenar con mouse en escritorio. Disponible
+        // en Día de trabajo y en Clientes (mismo mecanismo, generalizado).
+        [
+          { sel:'#dispatch-page .sheet table', group:'dispatch', allKeys:['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'] },
+          { sel:'#clients-page .sheet table', group:'clients', allKeys:['order','name','route','address1','maps','phone1','plan','driver','status','paidDays','consumedDays','specialDiet','id'] }
+        ].forEach(({sel,group,allKeys})=>{
+          const tbl=$(sel);
+          if(!tbl) return;
+          const heads=$$(`thead th[data-group="${group}"]`,tbl);
+          $$('.col-drag-handle',tbl).forEach(grip=>{
             const head=grip.parentElement;
             grip.onpointerdown=e=>{
               e.preventDefault(); e.stopPropagation();
+              document.body.classList.add('col-dragging');
               const sourceKey=head.dataset.sort;
               let targetHead=head;
               const move=ev=>{
-                const el=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('th[data-group="dispatch"]');
+                const el=document.elementFromPoint(ev.clientX,ev.clientY)?.closest(`th[data-group="${group}"]`);
                 heads.forEach(h=>h.classList.remove('drag-over'));
                 targetHead=(el && el!==head)?el:head;
                 if(targetHead!==head) targetHead.classList.add('drag-over');
@@ -571,23 +611,27 @@
                 document.removeEventListener('pointermove',move);
                 document.removeEventListener('pointerup',up);
                 document.removeEventListener('pointercancel',up);
+                document.body.classList.remove('col-dragging');
                 heads.forEach(h=>h.classList.remove('drag-over'));
                 const targetKey=targetHead.dataset.sort;
                 if(!sourceKey || sourceKey===targetKey) return;
-                const all=['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'];
-                const currentOrder=userColPrefs().dispatchColumnOrder;
-                const order=currentOrder.length?[...currentOrder]:all;
-                all.forEach(key=>{if(!order.includes(key))order.push(key);});
+                const currentOrder=userColPrefs().columnOrder[group]||[];
+                const order=currentOrder.length?[...currentOrder]:[...allKeys];
+                allKeys.forEach(key=>{if(!order.includes(key))order.push(key);});
                 const from=order.indexOf(sourceKey), to=order.indexOf(targetKey);
                 order.splice(to,0,order.splice(from,1)[0]);
-                saveColumnOrder(order); renderDispatch();
+                // renderPage (no solo renderDispatch/renderClients) para que
+                // enableTableTools() vuelva a atar los eventos de los
+                // tiradores nuevos — si no, tras reordenar una vez quedaban
+                // sin funcionar hasta cambiar de página y volver.
+                saveColumnOrder(group,order); renderPage(ui.page);
               };
               document.addEventListener('pointermove',move);
               document.addEventListener('pointerup',up);
               document.addEventListener('pointercancel',up);
             };
           });
-        }
+        });
       }
 
       function renderDispatch(){
@@ -629,7 +673,7 @@
           {key:'returnDate',label:'Fecha de retorno',cell:c=>hasPremiumAccess()?(canEditPage('dispatch')?editableField(c,'returnDate',c.returnDate||'','date'):esc(c.returnDate||'—')):'<span class="muted" title="Función Premium">🔒 Premium</span>'},
           {key:'id',label:'Acciones',cell:c=>canEditPage('dispatch')?`<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button>`:'—'}
         ];
-        const allKeys=definitions.map(x=>x.key), wanted=userColPrefs().dispatchColumnOrder;
+        const allKeys=definitions.map(x=>x.key), wanted=userColPrefs().columnOrder.dispatch||[];
         const arranged=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
         const columns=arranged.filter(x=>!userColPrefs().hiddenColumns.includes(x.key));
         const numericKeys=new Set([...menuItems().map(([key])=>key),'career','bags','remaining']);
@@ -671,8 +715,27 @@
       function renderClients(){
         if(!canAccessPage('clients')) return;
         const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c)===activeUser.routeId):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
-        const rows=c=>{const p=plan(c.planId);return `<tr data-id="${c.id}"><td>${n(c.order)||''}</td><td><b>${esc(c.name)}</b><br><small class="muted">CI: ${esc(c.carnet||'—')}</small></td><td>${esc(routeName(c.routeId))}${c.schedule?.length?` <span class="badge off" title="${esc(scheduleSummary(c))}">Variable</span>`:''}</td><td>${esc(c.address1||'—')}</td><td>${esc(c.phone1||'—')}</td><td>${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:20px;height:20px;object-fit:cover;border-radius:5px;vertical-align:-5px;margin-right:4px">`:''}${esc(planName(c.planId))}</td><td>${esc(driverName(c.driverId))}</td><td>${badge(status(c))}</td><td>${n(c.paidDays)}</td><td>${n(c.consumedDays)}</td><td>${esc(c.specialDiet||'—')}</td><td>${canEditPage('clients')?`${status(c)==='Pausado'?`<button class="icon-btn" data-action="resume-client" data-id="${c.id}">Activar</button>`:`<button class="icon-btn" data-action="pause-client" data-id="${c.id}">Pausar</button>`}<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button><button class="icon-btn delete" data-action="delete-client" data-id="${c.id}">×</button>`:'—'}</td></tr>`;};
-        $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canEditPage('clients')?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+table(list,[['Orden','order'],['Cliente / carnet','name'],['Ruta','route'],['Dirección','address1'],['Teléfono','phone1'],['Plan','plan'],['Driver','driver'],['Estado','status'],['Días pagados','paidDays'],['Consumidos','consumedDays'],['Dieta especial','specialDiet'],['Acciones','id']],rows,'clients'); bindSearch('clients-search','clients',renderClients);
+        const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(c.maps)}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(c.maps2)}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
+        const definitions=[
+          {key:'order',label:'Orden',cell:c=>n(c.order)||''},
+          {key:'name',label:'Cliente / carnet',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">CI: ${esc(c.carnet||'—')}</small>`},
+          {key:'route',label:'Ruta',cell:c=>`${esc(routeName(c.routeId))}${c.schedule?.length?` <span class="badge off" title="${esc(scheduleSummary(c))}">Variable</span>`:''}`},
+          {key:'address1',label:'Dirección',cell:c=>esc(c.address1||'—')},
+          {key:'maps',label:'Google Maps',cell:mapsLinks},
+          {key:'phone1',label:'Teléfono',cell:c=>esc(c.phone1||'—')},
+          {key:'plan',label:'Plan',cell:c=>{const p=plan(c.planId);return `${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:20px;height:20px;object-fit:cover;border-radius:5px;vertical-align:-5px;margin-right:4px">`:''}${esc(planName(c.planId))}`;}},
+          {key:'driver',label:'Driver',cell:c=>esc(driverName(c.driverId))},
+          {key:'status',label:'Estado',cell:c=>badge(status(c))},
+          {key:'paidDays',label:'Días pagados',cell:c=>n(c.paidDays)},
+          {key:'consumedDays',label:'Consumidos',cell:c=>n(c.consumedDays)},
+          {key:'specialDiet',label:'Dieta especial',cell:c=>esc(c.specialDiet||'—')},
+          {key:'id',label:'Acciones',cell:c=>canEditPage('clients')?`${status(c)==='Pausado'?`<button class="icon-btn" data-action="resume-client" data-id="${c.id}">Activar</button>`:`<button class="icon-btn" data-action="pause-client" data-id="${c.id}">Pausar</button>`}<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button><button class="icon-btn delete" data-action="delete-client" data-id="${c.id}">×</button>`:'—'}
+        ];
+        const allKeys=definitions.map(x=>x.key), wanted=userColPrefs().columnOrder.clients||[];
+        const columns=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
+        const headers=columns.map(col=>[col.label,col.key]);
+        const rows=c=>`<tr data-id="${c.id}">${columns.map(col=>`<td>${col.cell(c)}</td>`).join('')}</tr>`;
+        $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canEditPage('clients')?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+table(list,headers,rows,'clients'); bindSearch('clients-search','clients',renderClients);
       }
       function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label class="wide">Link de Google Maps (Dirección 1)<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps (Dirección 2)<input type="url" name="maps2" value="${esc(c.maps2)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno${hasPremiumAccess()?`<input name="returnDate" type="date" value="${esc(c.returnDate)}">`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${hasPremiumAccess()?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
       function scrollToRow(id){

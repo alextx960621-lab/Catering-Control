@@ -450,6 +450,15 @@
       touch-action: none;
     }
     th { position: sticky; }
+    /* Mientras se arrastra un tirador (resize o reordenar columnas), el
+       gesto pasa por encima del texto de los encabezados/celdas y el
+       navegador arranca una selección de texto en el medio del drag. Se
+       bloquea la selección en toda la página mientras dura el arrastre
+       (la clase la agrega/saca JS en pointerdown/pointerup). */
+    body.col-dragging, body.col-dragging * {
+      user-select: none !important;
+      -webkit-user-select: none !important;
+    }
     th .resize-handle:hover { background: var(--primary); }
     /* Tirador para reordenar columnas en Día de trabajo (separado del de
        resize, ver nota en index.js) */
