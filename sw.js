@@ -16,7 +16,7 @@
    usuarios bajen la versión nueva en vez de quedarse con la vieja cacheada.
    ========================================================================== */
 
-const CACHE_NAME = 'catering-control-v1';
+const CACHE_NAME = 'catering-control-v1.1';
 
 // Archivos propios del "cascarón" de la app (ajusta los ?v=N si cambian).
 const PRECACHE_URLS = [
@@ -31,6 +31,7 @@ const PRECACHE_URLS = [
   './cliente.js',
   './config.js',
   './supabase-client.js',
+  './pwa-register.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -46,8 +47,20 @@ self.addEventListener('install', event => {
       // allSettled en vez de addAll: si un solo archivo falla (ej. todavía
       // no subiste algún ícono), no tira abajo la instalación completa.
       Promise.allSettled(PRECACHE_URLS.map(url => cache.add(url)))
-    ).then(() => self.skipWaiting())
+    )
+    // OJO: antes acá se llamaba a self.skipWaiting() automáticamente, lo
+    // que activaba la versión nueva sin avisar al usuario (podía cambiarle
+    // el código debajo de los pies a mitad de una tarea). Ahora la versión
+    // nueva se queda "esperando" hasta que pwa-register.js le mande el
+    // mensaje SKIP_WAITING — es decir, hasta que el usuario toque el
+    // cartel "Hay una actualización, toca para recargar".
   );
+});
+
+// Mensaje que manda pwa-register.js cuando el usuario toca "Recargar" en
+// el aviso de actualización — recién ahí esta versión nueva toma el control.
+self.addEventListener('message', event => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
