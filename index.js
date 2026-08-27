@@ -231,7 +231,7 @@
         if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && effectiveRouteId(c) === activeUser.routeId;
         return false;
       }
-      let ui = { page:'dispatch', search:{}, sort:{}, route:'', month:today().slice(0,7) };
+      let ui = { page:'dispatch', search:{}, sort:{}, route:'', month:today().slice(0,7), forceLiveDispatch:false };
       let state;
 
       const seed = () => ({
@@ -715,9 +715,31 @@
         });
       }
 
-      function renderDispatch(){
+      // Guarda en memoria las fotos ya descargadas de Supabase en esta
+      // sesión (fecha → snapshot o null) para no volver a pedirlas cada
+      // vez que se re-renderiza la misma fecha.
+      let dispatchHistorialCache = {};
+      async function renderDispatch(){
         syncReturnDates(state.currentDate);
-        const date=state.currentDate, d=day(date), q=(ui.search.dispatch||'').toLowerCase(), rf=isDriverRole()?activeUser.routeId:ui.route, sf=ui.dispatchStatus||'all';
+        const date=state.currentDate, d=day(date);
+        // Un día que YA fue procesado (y no es el de hoy) se muestra con la
+        // "foto" congelada que se guardó en Supabase al tocar "Procesar
+        // día" — así, si después editás la dirección/ruta/plan de un
+        // cliente, el historial de ese día no cambia, queda tal cual
+        // estaba. El día de hoy siempre se ve en vivo (todavía se puede
+        // seguir editando). Si esa fecha no tiene foto guardada (se
+        // procesó antes de tener esta función, o no hay conexión), se cae
+        // a los datos en vivo de siempre, como pasaba hasta ahora.
+        if(d.processed && date!==today() && !ui.forceLiveDispatch){
+          if(!(date in dispatchHistorialCache)){
+            $('#dispatch-page').innerHTML=pageHead('Día de trabajo','Cargando historial de este día…');
+            const snap=(await window.SupabaseDB?.dbGetSnapshot(date))||null;
+            dispatchHistorialCache[date]=snap;
+            if(state.currentDate!==date||ui.page!=='dispatch') return; // el usuario ya cambió de fecha/página mientras cargaba
+          }
+          if(dispatchHistorialCache[date]){ renderDispatchHistorial(date,dispatchHistorialCache[date]); return; }
+        }
+        const q=(ui.search.dispatch||'').toLowerCase(), rf=isDriverRole()?activeUser.routeId:ui.route, sf=ui.dispatchStatus||'all';
         const matchesBase=c=>(!rf || effectiveRouteId(c,date)===rf) && (!q || [c.name,c.carnet,c.address1,c.phone1,c.phone2,c.specialDiet,c.notes].join(' ').toLowerCase().includes(q));
         const matchesStatus=c=>sf==='all' || status(c,date)===sf;
         const routeScoped=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c,date)===activeUser.routeId):state.clients;
@@ -782,10 +804,28 @@
         $('#dispatch-page').innerHTML=pageHead('Día de trabajo','La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`${printButtons}${canEditPage('dispatch')?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}`)+
           `<div class="toolbar"><label class="field">Día de trabajo${isDriverRole()?`<div class="field-locked" aria-disabled="true">${esc(date.split('-').reverse().join('/'))}</div>`:`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`}</label>${routeField}<label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${canEditPage('dispatch')?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
           `<div class="sheet"><table id="dispatch-table">${colgroupHtml(columns.map(c=>[c.label,c.key]),'dispatch')}<thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
-        $('#work-date')?.addEventListener('change',e=>{ if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); save(); renderDispatch(); });
+        $('#work-date')?.addEventListener('change',e=>{ if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch(); });
         $('#dispatch-route')?.addEventListener('change',e=>{ui.route=e.target.value;renderDispatch();}); $('#dispatch-status')?.addEventListener('change',e=>{ui.dispatchStatus=e.target.value;renderDispatch();}); $('#work-status')?.addEventListener('change',e=>{if(!canEditPage('dispatch'))return;day().laborable=e.target.value==='work';save();renderDispatch();}); bindSearch('dispatch-search','dispatch',renderDispatch);
         $$('.day-edit').forEach(i=>i.onchange=()=>{const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return; if(!canEditDispatchField(c,i.dataset.field))return; c[i.dataset.field]=i.value; save(); if(i.dataset.field==='returnDate'){syncReturnDates(state.currentDate);renderDispatch();notice('Fecha de retorno actualizada. El pedido volverá a Activo en esa fecha.');}});
         enableTableTools();
+      }
+      // Tabla de solo lectura para un día ya procesado: usa el "payload"
+      // guardado en db_dispatch_snapshots (nombre, ruta, dirección, plan...
+      // ya resueltos como texto plano), no los datos actuales del cliente.
+      function renderDispatchHistorial(date,snap){
+        const rows=snap.payload?.clientes||[];
+        const itemLabels=[...new Set(rows.flatMap(c=>Object.keys(c.items||{})))];
+        const savedAt=snap.created_at?new Date(snap.created_at).toLocaleString('es-BO',{dateStyle:'short',timeStyle:'short'}):'';
+        const headCols=['Orden','Cliente','Ruta','Driver','Plan',...itemLabels,'Dirección','Teléfono 1','Teléfono 2','Dieta especial','Observaciones','Carreras','Bolsas','Estado','Servicios restantes'];
+        const rowHtml=c=>`<tr>`+
+          `<td>${n(c.orden)}</td><td><b>${esc(c.nombre)}</b></td><td>${esc(c.ruta)}</td><td>${esc(c.driver)}</td><td>${esc(c.plan)}</td>`+
+          itemLabels.map(l=>`<td>${n(c.items?.[l])}</td>`).join('')+
+          `<td>${esc(c.direccion||'—')}</td><td>${esc(c.telefono1||'—')}</td><td>${esc(c.telefono2||'—')}</td><td>${esc(c.dietaEspecial||'—')}</td><td>${esc(c.observaciones||'—')}</td><td>${n(c.carreras)}</td><td>${n(c.bolsas)}</td><td>${badge(c.estado)}</td><td>${c.serviciosRestantes??'—'}</td>`+
+          `</tr>`;
+        $('#dispatch-page').innerHTML=pageHead('Día de trabajo',`Historial guardado el ${savedAt} · ${rows.length} pedidos atendidos ese día. Son datos congelados: no cambian aunque después edites al cliente.`,canEditPage('dispatch')?'<button class="outline" data-action="dispatch-force-live">Ver datos actuales en vez del historial</button>':'')+
+          `<div class="toolbar"><label class="field">Día de trabajo${isDriverRole()?`<div class="field-locked" aria-disabled="true">${esc(date.split('-').reverse().join('/'))}</div>`:`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`}</label><span class="spacer"></span><span class="badge off" title="Estos datos vienen del historial guardado, no de la ficha actual del cliente">📷 Viendo historial</span></div>`+
+          `<div class="sheet"><table>${colgroupHtml(headCols.map(h=>[h,h]),'dispatch-historial')}<thead><tr>${headCols.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="${headCols.length}" class="empty">Ese día no tuvo pedidos atendidos.</td></tr>`}</tbody></table></div>`;
+        $('#work-date')?.addEventListener('change',e=>{ if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch(); });
       }
       function bindSearch(id,key,fn){
         const el=$('#'+id);
@@ -1591,7 +1631,7 @@
         const processedIds=activeClients.map(c=>c.id);
         activeClients.forEach(c=>c.consumedDays=n(c.consumedDays)+1);
         applyInventoryForProcessedDay(state.currentDate);
-        d.processed=true;d.processedClientIds=processedIds;save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel)…');
+        d.processed=true;d.processedClientIds=processedIds;delete dispatchHistorialCache[state.currentDate];save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel)…');
         logAudit('Día procesado','day',state.currentDate,state.currentDate,{clientesAtendidos:processedIds.length});
         // Se sube en paralelo (sin await): no hace falta esperarla para
         // seguir usando la app ni para que se descargue el Excel.
@@ -1606,7 +1646,7 @@
         const ids=d.processedClientIds||state.clients.filter(c=>status(c)==='Activo').map(c=>c.id);
         state.clients.filter(c=>ids.includes(c.id)).forEach(c=>c.consumedDays=Math.max(0,n(c.consumedDays)-1));
         revertInventoryForProcessedDay(state.currentDate);
-        d.processed=false;d.processedClientIds=[];save();renderDispatch();notice('Día desprocesado. El inventario y los días consumidos fueron restaurados.');
+        d.processed=false;d.processedClientIds=[];delete dispatchHistorialCache[state.currentDate];save();renderDispatch();notice('Día desprocesado. El inventario y los días consumidos fueron restaurados.');
         logAudit('Día desprocesado','day',state.currentDate,state.currentDate,{});
       }
       function toggleDayPause(id){
@@ -1751,7 +1791,7 @@
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
       }
-      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
 
         const ACTION_PERMS={
           "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),
