@@ -15,9 +15,21 @@ html { font-size:15px; }
       --bs-btn-disabled-bg: var(--brand);
       --bs-btn-disabled-border-color: var(--brand);
       filter: brightness(1);
-      transition: filter .15s;
+      transition: filter .15s, transform .15s ease, box-shadow .15s ease;
     }
     .btn-primary:hover, .btn-primary:active { filter: brightness(.92); }
+    /* Mismo lenguaje visual que el botón Salir del portal de clientes:
+       píldora + sombra de color + se levanta un poco al pasar el mouse. */
+    .btn-primary, #whatsapp-support-btn {
+      border-radius: 999px;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 35%, transparent);
+    }
+    .btn-primary:hover, #whatsapp-support-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 22px color-mix(in srgb, var(--brand) 40%, transparent);
+    }
+    .btn-primary:active { transform: translateY(0) scale(.98); }
+    #whatsapp-support-btn { transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
     .login-card { max-width:420px; }
     .login-card .card { overflow:hidden; }
     .brand-row { display:flex; align-items:center; gap:16px; }

@@ -76,29 +76,40 @@
     button {
       border: 0;
       cursor: pointer;
-      border-radius: 8px;
-      padding: 8px 14px;
+      border-radius: 999px;
+      padding: 9px 18px;
       font-weight: 650;
       color: var(--text);
       background: var(--surface-2);
       min-height: 36px;
-      transition: background .15s, transform .1s, box-shadow .15s;
+      box-shadow: 0 2px 8px rgba(0,0,0,.07);
+      transition: background .15s, transform .12s ease, box-shadow .15s ease, filter .15s ease;
     }
-    button:hover { filter: brightness(.97); transform: translateY(-1px); }
-    button:active { transform: translateY(0); }
+    button:hover { filter: brightness(.97); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,.13); }
+    button:active { transform: translateY(0); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
     button.primary {
-      background: var(--primary);
+      background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 78%, white 22%), var(--primary));
       color: var(--primary-ink);
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 38%, transparent);
     }
-    button.danger { background: var(--danger); color: #fff; }
+    button.primary:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 42%, transparent); }
+    button.danger {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--danger) 78%, white 22%), var(--danger));
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--danger) 38%, transparent);
+    }
+    button.danger:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--danger) 42%, transparent); }
     button.outline {
       background: transparent;
       border: 1px solid var(--line);
+      box-shadow: none;
     }
+    button.outline:hover { background: var(--surface-2); box-shadow: none; }
     button:disabled {
       cursor: not-allowed;
       opacity: .52;
       transform: none !important;
+      box-shadow: none !important;
     }
     input, select, textarea {
       width: 100%;

@@ -40,3 +40,13 @@
        quede tapado debajo. */
     main.portal{padding-top:66px}
     @media (max-width:480px){main.portal{padding-top:60px}}
+    /* Botones del portal, mismo lenguaje visual que .client-logout-btn:
+       píldora + sombra de color + se levanta un poco al pasar el mouse.
+       No toca colores: cada .btn-* de Bootstrap conserva el suyo. */
+    .portal .btn{border-radius:999px;font-weight:650;box-shadow:0 3px 10px rgba(0,0,0,.08);transition:transform .15s ease,box-shadow .15s ease,filter .15s ease}
+    .portal .btn:hover{transform:translateY(-2px);filter:brightness(1.03)}
+    .portal .btn:active{transform:translateY(0) scale(.98)}
+    .portal .btn-primary{background:linear-gradient(135deg,#4c8bff,#0d6efd);border-color:transparent;box-shadow:0 4px 14px rgba(13,110,253,.35)}
+    .portal .btn-primary:hover{box-shadow:0 8px 22px rgba(13,110,253,.4)}
+    .portal .btn-success{background:linear-gradient(135deg,#28b16b,#198754);border-color:transparent;box-shadow:0 4px 14px rgba(25,135,84,.32)}
+    .portal .btn-success:hover{box-shadow:0 8px 22px rgba(25,135,84,.38)}
