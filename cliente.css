@@ -9,3 +9,28 @@
     .renewal-banner .bounce{display:inline-block;animation:renewal-bounce 1.4s ease-in-out infinite}
     .renewal-banner .btn-light{font-weight:700}
     @keyframes renewal-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+    /* Botón "Salir" del portal de cliente: position:fixed lo saca del flujo
+       del documento, así que da igual dónde viva en el HTML — siempre queda
+       clavado arriba a la derecha, visible aunque el cliente scrollee. */
+    .client-logout-btn{
+      position:fixed;
+      top:14px;
+      right:14px;
+      z-index:1050;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      border:none;
+      border-radius:999px;
+      padding:11px 18px;
+      font:600 14.5px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+      color:#fff;
+      background:linear-gradient(135deg,#ff7a7a,#e4002b);
+      box-shadow:0 6px 18px rgba(228,0,43,.3),0 2px 6px rgba(0,0,0,.14);
+      cursor:pointer;
+      transition:transform .15s ease,box-shadow .15s ease,filter .15s ease;
+    }
+    .client-logout-btn:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(228,0,43,.34),0 3px 8px rgba(0,0,0,.16);filter:brightness(1.05)}
+    .client-logout-btn:active{transform:translateY(0) scale(.97)}
+    .client-logout-btn svg{flex:0 0 auto;display:block}
+    @media (max-width:480px){.client-logout-btn{top:10px;right:10px;padding:10px 14px}}

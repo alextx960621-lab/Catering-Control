@@ -12,48 +12,52 @@
     const style = document.createElement('style');
     style.id = 'pwa-ui-styles';
     style.textContent = `
-      @keyframes pwaSlideUp {
-        from { opacity: 0; transform: translateY(14px) scale(.96); }
+      @keyframes pwaDropIn {
+        from { opacity: 0; transform: translateY(-10px) scale(.97); }
         to   { opacity: 1; transform: translateY(0) scale(1); }
       }
-      .pwa-fab {
+      /* Contenedor único, centrado arriba de la pantalla — si en algún
+         momento coinciden "instalar" y "actualización disponible", se
+         apilan uno debajo del otro en vez de superponerse. */
+      .pwa-stack {
         position: fixed;
+        top: max(12px, env(safe-area-inset-top, 0px));
+        left: 50%;
+        transform: translateX(-50%);
         z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 9px;
+        width: min(94vw, 420px);
+        pointer-events: none;
+      }
+      .pwa-banner {
+        pointer-events: auto;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 9px;
-        line-height: 1;
+        gap: 10px;
+        line-height: 1.15;
         border: none;
-        border-radius: 999px;
-        font: 600 14px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+        border-radius: 14px;
+        font: 600 14px/1.15 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
         letter-spacing: .01em;
         cursor: pointer;
         color: #fff;
-        padding: 13px 20px 13px 16px;
-        box-shadow: 0 6px 20px rgba(0,0,0,.22), 0 2px 6px rgba(0,0,0,.14);
-        animation: pwaSlideUp .35s cubic-bezier(.2,.8,.2,1) both;
+        padding: 13px 18px;
+        box-shadow: 0 10px 26px rgba(0,0,0,.16), 0 2px 8px rgba(0,0,0,.10);
+        animation: pwaDropIn .3s cubic-bezier(.2,.8,.2,1) both;
         transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
       }
-      .pwa-fab:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0,0,0,.26), 0 3px 8px rgba(0,0,0,.16); filter: brightness(1.04); }
-      .pwa-fab:active { transform: translateY(0) scale(.98); }
-      .pwa-fab:disabled { opacity: .65; cursor: default; transform: none; }
-      .pwa-fab svg { flex: 0 0 auto; display: block; }
-      .pwa-install {
-        right: 18px;
-        bottom: 18px;
-        background: linear-gradient(135deg, #2f7bff, #0d6efd);
-      }
-      .pwa-update {
-        left: 50%;
-        bottom: 18px;
-        transform: translateX(-50%);
-        background: linear-gradient(135deg, #23a866, #198754);
-      }
-      .pwa-update:hover { transform: translateX(-50%) translateY(-2px); }
-      .pwa-update:active { transform: translateX(-50%) scale(.98); }
+      .pwa-banner:hover { transform: translateY(1px); filter: brightness(1.05); }
+      .pwa-banner:active { transform: scale(.98); }
+      .pwa-banner:disabled { opacity: .65; cursor: default; }
+      .pwa-banner svg { flex: 0 0 auto; display: block; }
+      .pwa-install { background: linear-gradient(135deg, #2f7bff, #0d6efd); }
+      .pwa-update { background: linear-gradient(135deg, #23a866, #198754); }
       @media (max-width: 480px) {
-        .pwa-fab { padding: 12px 18px 12px 14px; font-size: 13.5px; }
+        .pwa-banner { padding: 12px 14px; font-size: 13px; }
       }
     `;
     document.head.appendChild(style);
@@ -69,15 +73,26 @@
      tocarlo, abre el diálogo nativo de instalación. Así el usuario ve
      algo que tocar en vez de depender del banner automático (que a veces
      tarda varias visitas en aparecer). */
+  function ensureStack() {
+    let stack = document.getElementById('pwa-stack');
+    if (!stack) {
+      injectStyles();
+      stack = document.createElement('div');
+      stack.id = 'pwa-stack';
+      stack.className = 'pwa-stack';
+      document.body.appendChild(stack);
+    }
+    return stack;
+  }
+
   let deferredPrompt = null;
   let installBtn = null;
 
   function showInstallButton() {
     // Si ya está instalada (abierta como app), no mostrar el botón.
     if (installBtn || window.matchMedia('(display-mode: standalone)').matches) return;
-    injectStyles();
     installBtn = document.createElement('button');
-    installBtn.className = 'pwa-fab pwa-install';
+    installBtn.className = 'pwa-banner pwa-install';
     installBtn.innerHTML = `${ICON_DOWNLOAD}<span>Instalar app</span>`;
     installBtn.setAttribute('aria-label', 'Instalar la aplicación');
     installBtn.addEventListener('click', async () => {
@@ -88,7 +103,8 @@
       deferredPrompt = null;
       hideInstallButton();
     });
-    document.body.appendChild(installBtn);
+    // El de "actualización" va primero si ambos coinciden (es más urgente).
+    ensureStack().appendChild(installBtn);
   }
   function hideInstallButton() {
     if (installBtn) { installBtn.remove(); installBtn = null; }
@@ -108,16 +124,15 @@
      control: le muestra un cartel y, si toca "Recargar", activa la
      versión nueva al instante. */
   function showUpdateToast(worker) {
-    injectStyles();
     const toast = document.createElement('button');
-    toast.className = 'pwa-fab pwa-update';
+    toast.className = 'pwa-banner pwa-update';
     toast.innerHTML = `${ICON_REFRESH}<span>Actualización disponible — recargar</span>`;
     toast.addEventListener('click', () => {
       toast.disabled = true;
       toast.innerHTML = `${ICON_REFRESH}<span>Actualizando…</span>`;
       worker.postMessage('SKIP_WAITING');
     });
-    document.body.appendChild(toast);
+    ensureStack().prepend(toast); // primero: es más urgente que "instalar"
   }
 
   window.addEventListener('load', () => {
