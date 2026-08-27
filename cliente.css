@@ -34,3 +34,9 @@
     .client-logout-btn:active{transform:translateY(0) scale(.97)}
     .client-logout-btn svg{flex:0 0 auto;display:block}
     @media (max-width:480px){.client-logout-btn{top:10px;right:10px;padding:10px 14px}}
+    /* El botón de Salir es fixed y vive siempre arriba a la derecha, así
+       que no hay margen que "moverlo" — en cambio se le da ese espacio al
+       contenido de abajo (el header, con el selector de Tema) para que no
+       quede tapado debajo. */
+    main.portal{padding-top:66px}
+    @media (max-width:480px){main.portal{padding-top:60px}}
