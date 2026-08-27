@@ -274,7 +274,17 @@
         if (!Array.isArray(state.settings.menuItems) || !state.settings.menuItems.length) state.settings.menuItems = DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label}));
         if (!Array.isArray(state.settings.customRoles)) state.settings.customRoles = [];
         if (!state.routes.some(r => r.open)) state.routes.unshift({id:'r_open',name:'Ruta abierta',description:'Drivers disponibles sin ruta de trabajo',open:true,order:0});
-        state.clients.forEach(c => { c.items ||= {}; c.order ??= ''; c.status ||= 'Activo'; c.returnDate ??= c.estimatedReturn || ''; c.paidDays ??= 0; c.consumedDays ??= 0; });
+        state.clients.forEach(c => {
+          c.items ||= {}; c.order ??= ''; c.status ||= 'Activo'; c.returnDate ??= c.estimatedReturn || ''; c.paidDays ??= 0; c.consumedDays ??= 0;
+          // La fecha de retorno solo tiene sentido cuando el estado es
+          // "Programado". El <input type="date"> en iOS no deja vaciarlo con
+          // el teclado (siempre exige un valor), así que una fecha vieja
+          // podía quedar "pegada" aunque el estado ya fuera otro (Activo,
+          // Pausado, Retorno pendiente) — eso generaba estados inconsistentes.
+          // Se limpia acá solo, cada vez que se cargan los datos, sin que
+          // nadie tenga que editar al cliente a mano.
+          if (c.status !== 'Programado' && c.returnDate) c.returnDate = '';
+        });
       }
       let operationsSaveQueue=Promise.resolve(true);
       let saveInFlight=false;
@@ -407,6 +417,16 @@
         } catch (_) { setDatabaseStatus('error'); return false; }
       }
       function day(date=state.currentDate){ return state.days[date] ||= {laborable:true, processed:false, rates:{}, processedClientIds:[]}; }
+      // Última fecha con el día ya procesado (o null si todavía no se procesó
+      // ninguno). Se usa para exigir que "Programado" siempre apunte a una
+      // fecha futura real, nunca a un día que ya se cerró/entregó.
+      function lastProcessedDate(){
+        const dates=Object.keys(state.days).filter(d=>state.days[d]?.processed);
+        return dates.length?dates.sort().at(-1):null;
+      }
+      function nextDay(dateStr){
+        const d=new Date(dateStr+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+1); return d.toISOString().slice(0,10);
+      }
       function route(id){ return state.routes.find(x=>x.id===id); }
       function plan(id){ return state.plans.find(x=>x.id===id); }
       function driver(id){ return state.drivers.find(x=>x.id===id); }
@@ -427,7 +447,16 @@
         return (c.schedule||[]).find(e=>(e.days||[]).includes(wd)) || null;
       }
       function effectiveRouteId(c,date=state.currentDate){ return scheduleEntryFor(c,date)?.routeId || c.routeId; }
-      function effectiveDriverId(c,date=state.currentDate){ return scheduleEntryFor(c,date)?.driverId || c.driverId; }
+      // El driver de una franja horaria ya NO se elige aparte: se deduce de
+      // quién tiene asignada esa ruta (misma lógica que el driver base del
+      // cliente). Así, al asignar la ruta de la franja, ese driver queda
+      // contabilizado automáticamente en sus sueldos y pedidos de ese día
+      // — sin poder quedar desincronizado de a quién le corresponde la ruta.
+      function effectiveDriverId(c,date=state.currentDate){
+        const entry=scheduleEntryFor(c,date);
+        if(entry?.routeId) return driverForRoute(entry.routeId)?.id || '';
+        return c.driverId;
+      }
       function effectiveAddress(c,date=state.currentDate){
         const e=scheduleEntryFor(c,date), key=(e?.address==='address2')?'address2':'address1';
         return c[key]||c.address1||'';
@@ -449,7 +478,6 @@
         return `<div class="schedule-row" data-idx="${idx}" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px">
           <div style="display:flex;gap:6px;flex-wrap:wrap">${WEEKDAYS.map(w=>`<label style="display:flex;flex-direction:column;align-items:center;font-size:11px;gap:2px"><span>${w.l}</span><input type="checkbox" class="sched-day" value="${w.v}" ${days.includes(w.v)?'checked':''}></label>`).join('')}</div>
           <select class="sched-route">${options(state.routes,e.routeId,'Ruta base')}</select>
-          <select class="sched-driver">${options(state.drivers,e.driverId,'Driver base',d=>`${d.firstName} ${d.lastName}`)}</select>
           <select class="sched-address"><option value="address1" ${(!e.address||e.address==='address1')?'selected':''}>Dirección 1</option><option value="address2" ${e.address==='address2'?'selected':''}>Dirección 2</option></select>
           <button type="button" class="icon-btn delete sched-remove" title="Quitar franja">×</button>
         </div>`;
@@ -470,7 +498,6 @@
         form._getSchedule=()=>[...container.querySelectorAll('.schedule-row')].map(row=>({
           days:[...row.querySelectorAll('.sched-day:checked')].map(cb=>Number(cb.value)),
           routeId:row.querySelector('.sched-route').value,
-          driverId:row.querySelector('.sched-driver').value,
           address:row.querySelector('.sched-address').value
         })).filter(e=>e.days.length>0);
       }
@@ -760,7 +787,7 @@
         ];
         $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canEditPage('clients')?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+orderedTable(list,definitions,'clients',c=>c.id); bindSearch('clients-search','clients',renderClients);
       }
-      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label class="wide">Link de Google Maps (Dirección 1)<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps (Dirección 2)<input type="url" name="maps2" value="${esc(c.maps2)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno${hasPremiumAccess()?`<input name="returnDate" type="date" value="${esc(c.returnDate)}">`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${hasPremiumAccess()?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
+      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label class="wide">Link de Google Maps (Dirección 1)<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps (Dirección 2)<input type="url" name="maps2" value="${esc(c.maps2)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status" id="client-status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno${hasPremiumAccess()?`<input name="returnDate" id="client-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${c.status==='Programado'?esc(c.returnDate):''}" ${c.status==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${hasPremiumAccess()?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
       function scrollToRow(id){
         requestAnimationFrame(()=>{
           const row=document.querySelector(`tr[data-id="${id}"]`);
@@ -776,6 +803,17 @@
         showModal(c?'Editar cliente':'Añadir cliente',clientForm(c||{}),async f=>{
           const data=syncClientRouteAndDriver(Object.fromEntries(new FormData(f))); data.items=formItems(f);
           data.schedule=readScheduleRows(f);
+          // Coherencia Estado ↔ Fecha de retorno (no depende de que el JS del
+          // formulario haya corrido bien en el navegador de cada quien —
+          // ej. un campo "disabled" no viaja en el FormData, así que se
+          // resuelve acá de nuevo antes de guardar):
+          if(hasPremiumAccess() && data.returnDate) data.status='Programado';
+          if(data.status!=='Programado'){ data.returnDate=''; }
+          else if(hasPremiumAccess()){
+            if(!data.returnDate){ notice('El estado "Programado" requiere una fecha de retorno.',true); return false; }
+            const minDate=nextDay(lastProcessedDate()||state.currentDate);
+            if(data.returnDate<minDate){ notice(`La fecha de retorno debe ser posterior al último día procesado (mínimo ${minDate.split('-').reverse().join('/')}).`,true); return false; }
+          }
           if(c)Object.assign(c,data);else{c={id:uid('c'),...data};state.clients.push(c);}
           const saved=await save();
           if(!saved)return false;
@@ -790,6 +828,19 @@
           const p=plan(planField.value);
           menuItems().forEach(([key])=>{ const input=form.elements[key]; if(input) input.value=n(p?.items?.[key]); });
         };
+        // Enlace Estado ↔ Fecha de retorno: la fecha SOLO existe cuando el
+        // estado es "Programado" — así no puede volver a pasar lo del
+        // calendario de iOS (que no deja vaciar la fecha con el teclado).
+        const statusField=$('#client-status'), returnDateField=$('#client-returndate');
+        if(statusField && returnDateField){
+          statusField.addEventListener('change',()=>{
+            if(statusField.value==='Programado'){ returnDateField.disabled=false; }
+            else { returnDateField.value=''; returnDateField.disabled=true; }
+          });
+          returnDateField.addEventListener('change',()=>{
+            if(returnDateField.value) statusField.value='Programado';
+          });
+        }
         initScheduleEditor(form, c?.schedule||[]);
       }
       function openClientPause(id){
