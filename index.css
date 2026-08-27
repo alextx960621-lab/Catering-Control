@@ -234,7 +234,15 @@
       color: var(--primary);
       background: color-mix(in srgb, var(--primary) 10%, transparent);
     }
-    .nav-icon { width: 21px; text-align: center; font-size: 16px; }
+    .nav-icon { position: relative; width: 21px; text-align: center; font-size: 16px; }
+    .nav-badge {
+      position: absolute; top: -6px; right: -10px;
+      min-width: 16px; height: 16px; padding: 0 4px;
+      border-radius: 999px; background: #e5484d; color: #fff;
+      font-size: 10px; font-weight: 800; line-height: 16px; text-align: center;
+      box-shadow: 0 0 0 2px var(--surface);
+    }
+    #app.sidebar-collapsed .nav-badge { top: -4px; right: -6px; }
     .aside-bottom {
       margin-top: auto;
       padding: 12px 10px;
@@ -529,6 +537,14 @@
     .badge.done { color: #697589; background: #e8edf4; }
     .badge.off { color: #778293; background: #edf0f5; }
     .badge.warn { color: #8d5a02; background: #fff2d9; }
+    .notes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+    .note-card { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--primary); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .note-card.note-overdue { border-left-color: #e5484d; }
+    .note-card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .note-date { margin-left: auto; font-size: 12px; white-space: nowrap; }
+    .note-text { margin: 0; white-space: pre-wrap; word-break: break-word; }
+    .note-client { margin: 0; font-size: 12.5px; }
+    .note-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
     [data-theme="night"] .badge.active { color: #8cf0ce; background: #164c3b; }
     [data-theme="night"] .badge.paused { color: #ffd58e; background: #5e4318; }
     [data-theme="night"] .badge.pending { color: #d5b9ff; background: #423061; }

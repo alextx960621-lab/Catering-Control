@@ -159,5 +159,48 @@
     }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, client };
+  // ------------------------------------------------------------------------
+  // db_notas_rows: UNA FILA POR NOTA (mismo patrón que db_clientes_rows).
+  // Acá viven tanto las notas que crea el staff (recordatorios propios)
+  // como las que dejan los clientes desde su portal (RPC crear_nota_cliente,
+  // ver supabase-notas-migration.sql).
+  // ------------------------------------------------------------------------
+
+  async function dbGetNoteRows() {
+    try {
+      const { data, error } = await client.from('db_notas_rows').select('id,payload');
+      if (error) { console.error('[supabase] Error leyendo db_notas_rows:', error.message); return null; }
+      return (data || []).map(r => ({ ...r.payload, id: r.id }));
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo db_notas_rows:', err);
+      return null;
+    }
+  }
+
+  async function dbUpsertNoteRows(notesArray) {
+    if (!notesArray || !notesArray.length) return true;
+    try {
+      const rows = notesArray.map(nt => ({ id: nt.id, payload: nt, updated_at: new Date().toISOString() }));
+      const { error } = await client.from('db_notas_rows').upsert(rows, { onConflict: 'id' });
+      if (error) { console.error('[supabase] Error guardando db_notas_rows:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red guardando db_notas_rows:', err);
+      return false;
+    }
+  }
+
+  async function dbDeleteNoteRows(ids) {
+    if (!ids || !ids.length) return true;
+    try {
+      const { error } = await client.from('db_notas_rows').delete().in('id', ids);
+      if (error) { console.error('[supabase] Error borrando db_notas_rows:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red borrando db_notas_rows:', err);
+      return false;
+    }
+  }
+
+  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, client };
 })();

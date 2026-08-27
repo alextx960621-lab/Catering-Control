@@ -159,6 +159,7 @@
         inventory: ['admin','editor','kitchen','superadmin'],
         users: ['admin','superadmin'],
         audit: ['admin','superadmin'],
+        notes: ['admin','editor','superadmin'],
         settings: ['admin','editor','kitchen','driver','superadmin']
       };
       // Funciones que solo están disponibles con el plan Premium activo. El
@@ -173,6 +174,7 @@
         ['plans','Planes',true],
         ['payroll','Sueldos',true],
         ['inventory','Inventario',true],
+        ['notes','Notas',true],
         ['audit','Auditoría',false],
         ['settings','Configuración',false]
       ];
@@ -196,7 +198,7 @@
         if (isBuiltinRole()) return (NAV_PERMS[page] || []).includes(role());
         return !!customRole(role())?.pages?.[page]?.view;
       }
-      const BUILTIN_EDIT = { dispatch:canManage, clients:canManage, drivers:canManage, routes:canManage, plans:canManage, payroll:isAdmin, inventory:canManageInventory };
+      const BUILTIN_EDIT = { dispatch:canManage, clients:canManage, drivers:canManage, routes:canManage, plans:canManage, payroll:isAdmin, inventory:canManageInventory, notes:canManage };
       function canEditPage(page){
         if (page === 'users') return isAdmin();
         if (isBuiltinRole()) return !!BUILTIN_EDIT[page]?.();
@@ -242,7 +244,7 @@
         plans: [
           {id:'p_balance', name:'Balance', type:'General', items:{shots:1,proteins:1,juices:1,breakfast:1,snack1:1,lunch:1,snack2:1,dinner:1}},
           {id:'p_light', name:'Light', type:'General', items:{shots:0,proteins:1,juices:1,breakfast:1,snack1:0,lunch:1,snack2:0,dinner:1}}
-        ], drivers: [], clients: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}, whatsappNumber:'', premiumWhatsapp:'', instagramUrl:'', instagramHandle:'', adImageUrl:'', renewalWarningDays:3, menuItems: DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label})), customRoles: [], plan: 'basico', premiumUntil: ''}
+        ], drivers: [], clients: [], notes: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}, whatsappNumber:'', premiumWhatsapp:'', instagramUrl:'', instagramHandle:'', adImageUrl:'', renewalWarningDays:3, menuItems: DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label})), customRoles: [], plan: 'basico', premiumUntil: ''}
       });
       // Fecha "de confianza" para el vencimiento de Premium: se pide al
       // servidor de Supabase (no al reloj del dispositivo), así cambiar la
@@ -261,7 +263,7 @@
         return cachedServerDate;
       }
       function normalize(refDate) {
-        state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
+        state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.notes ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
         state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.premiumWhatsapp ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3; state.settings.plan = (state.settings.plan==='premium')?'premium':'basico'; state.settings.premiumUntil ??= '';
         // Premium por tiempo limitado: si el Super Admin activó Premium con
         // una fecha límite (premiumUntil) y esa fecha ya pasó, la cuenta
@@ -285,6 +287,10 @@
           // nadie tenga que editar al cliente a mano.
           if (c.status !== 'Programado' && c.returnDate) c.returnDate = '';
         });
+        state.notes.forEach(nt => {
+          nt.status ||= 'pendiente'; nt.dueDate ||= today(); nt.source ||= 'staff'; nt.text ||= '';
+          nt.clientId ??= ''; nt.clientName ??= ''; nt.read ??= (nt.source!=='cliente');
+        });
       }
       let operationsSaveQueue=Promise.resolve(true);
       let saveInFlight=false;
@@ -295,6 +301,7 @@
         if(text)text.textContent=kind==='saving'?'Guardando…':kind==='ok'?'Sincronizado':'Error de guardado';
       }
       let lastSavedClients=new Map();
+      let lastSavedNotes=new Map();
       let lastSyncedClientes=null, lastSyncedPersonal=null, lastSyncedInventario=null;
       function mergeTopLevel(serverPayload, localPayload, lastSynced){
         const merged={...(serverPayload||{})};
@@ -322,6 +329,26 @@
         ]);
         if(okUpsert) changed.forEach(c=>lastSavedClients.set(c.id,JSON.stringify(c)));
         if(okDelete) deletedIds.forEach(id=>lastSavedClients.delete(id));
+        return okUpsert&&okDelete;
+      }
+      function diffNotes(){
+        const changed=[],currentIds=new Set();
+        for(const nt of state.notes){
+          currentIds.add(nt.id);
+          const json=JSON.stringify(nt);
+          if(lastSavedNotes.get(nt.id)!==json) changed.push(nt);
+        }
+        const deletedIds=[...lastSavedNotes.keys()].filter(id=>!currentIds.has(id));
+        return {changed,deletedIds};
+      }
+      async function saveNoteRows(){
+        const db=window.SupabaseDB,{changed,deletedIds}=diffNotes();
+        const [okUpsert,okDelete]=await Promise.all([
+          db.dbUpsertNoteRows(changed),
+          db.dbDeleteNoteRows(deletedIds)
+        ]);
+        if(okUpsert) changed.forEach(nt=>lastSavedNotes.set(nt.id,JSON.stringify(nt)));
+        if(okDelete) deletedIds.forEach(id=>lastSavedNotes.delete(id));
         return okUpsert&&okDelete;
       }
       function blockChanged(local,lastSynced){
@@ -353,13 +380,14 @@
             state.plans=mergedClientes.plans; state.days=mergedClientes.days; state.currentDate=mergedClientes.currentDate;
             state.drivers=mergedPersonal.drivers; state.routes=mergedPersonal.routes; state.settings=mergedPersonal.settings; staffUsers=mergedPersonal.staffUsers;
             state.inventory=mergedInventario.inventory;
-            const [okClientes,okClientRows,okPersonal,okInventario]=await Promise.all([
+            const [okClientes,okClientRows,okNoteRows,okPersonal,okInventario]=await Promise.all([
               needClientes?db.dbSet('clientes',mergedClientes):Promise.resolve(true),
               saveClientRows(),
+              saveNoteRows(),
               needPersonal?db.dbSet('personal',mergedPersonal):Promise.resolve(true),
               needInventario?db.dbSet('inventario',mergedInventario):Promise.resolve(true)
             ]);
-            const ok=okClientes&&okClientRows&&okPersonal&&okInventario;
+            const ok=okClientes&&okClientRows&&okNoteRows&&okPersonal&&okInventario;
             if(ok){
               if(needClientes)lastSyncedClientes=JSON.parse(JSON.stringify(mergedClientes));
               if(needPersonal)lastSyncedPersonal=JSON.parse(JSON.stringify(mergedPersonal));
@@ -379,8 +407,8 @@
         try {
           const db=window.SupabaseDB;
           if(!db) throw new Error('Supabase no está disponible');
-          const [clientesData,clientRows,personalData,inventarioData]=await Promise.all([
-            db.dbGet('clientes'), db.dbGetClientRows(), db.dbGet('personal'), db.dbGet('inventario')
+          const [clientesData,clientRows,noteRows,personalData,inventarioData]=await Promise.all([
+            db.dbGet('clientes'), db.dbGetClientRows(), db.dbGetNoteRows(), db.dbGet('personal'), db.dbGet('inventario')
           ]);
           let gotAny=false;
           if (clientesData) {
@@ -394,6 +422,11 @@
             gotAny=true;
             state.clients = clientRows;
             lastSavedClients = new Map(clientRows.map(c=>[c.id, JSON.stringify(c)]));
+          }
+          if (noteRows) {
+            gotAny=true;
+            state.notes = noteRows;
+            lastSavedNotes = new Map(noteRows.map(nt=>[nt.id, JSON.stringify(nt)]));
           }
           if (personalData) {
             gotAny=true;
@@ -565,9 +598,9 @@
         const rows=item=>`<tr${idFn?` data-id="${idFn(item)}"`:''}>${columns.map(c=>`<td>${c.cell(item)}</td>`).join('')}</tr>`;
         return table(list,headers,rows,group);
       }
-      function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); }
-      function render(){ document.documentElement.dataset.theme=userTheme(); $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); }
-      function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
+      function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); updateNotesBadge(); }
+      function render(){ document.documentElement.dataset.theme=userTheme(); $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); updateNotesBadge(); }
+      function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,notes:renderNotes,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
       function enableTableTools(){
       function syncTableWidth(tbl,cols){
         cols=cols||$$('colgroup col',tbl);
@@ -866,6 +899,112 @@
         if(!saved){notice('No se pudo guardar la reactivación en la base de datos. Intenta nuevamente.',true);return;}
         renderClients();notice(`Servicio de ${c.name} activado.`);scrollToRow(c.id);
         logAudit('Cliente reactivado','client',c.name,c.id,{});
+      }
+      // ================= NOTAS =================
+      // Recordatorios internos (staff) + mensajes que dejan los clientes
+      // desde su portal (fuente 'cliente', ver cliente.js / RPC
+      // crear_nota_cliente). Una nota "vive" hasta que se marca Cumplida;
+      // mientras tanto, si su fecha ya llegó o pasó, cuenta para el badge
+      // rojo del menú (como los no leídos de una bandeja de mensajes).
+      function notesDueToday(){ return state.notes.filter(nt=>nt.status==='pendiente' && nt.dueDate<=state.currentDate); }
+      function updateNotesBadge(){
+        const el=$('#notes-badge'); if(!el) return;
+        const count=canAccessPage('notes')?notesDueToday().length:0;
+        el.textContent=count>99?'99+':String(count);
+        el.hidden=count===0;
+      }
+      function noteClientOptions(current){ return options(state.clients,current,'Sin vincular a un cliente'); }
+      function noteForm(nt={}){
+        return `<div class="form-grid"><label class="wide">Nota *<textarea name="text" required rows="3" placeholder="Ej.: Llamar de nuevo a Juan Pérez para ver si renueva el plan.">${esc(nt.text)}</textarea></label><label>Fecha para que aparezca *<input name="dueDate" type="date" required value="${esc(nt.dueDate||state.currentDate)}"></label><label>Cliente relacionado (opcional)<select name="clientId">${noteClientOptions(nt.clientId)}</select></label></div>`;
+      }
+      function openNote(id){
+        const nt=id?state.notes.find(x=>x.id===id):null;
+        showModal(nt?'Editar nota':'Añadir nota',noteForm(nt||{}),async f=>{
+          const data=Object.fromEntries(new FormData(f));
+          const client=data.clientId?state.clients.find(x=>x.id===data.clientId):null;
+          data.clientName=client?client.name:'';
+          if(nt){ Object.assign(nt,data); }
+          else { state.notes.push({id:uid('n'),status:'pendiente',source:'staff',read:true,createdAt:new Date().toISOString(),createdBy:activeUser?.name||roleLabel(role()),...data}); }
+          const saved=await save();
+          if(!saved)return false;
+          renderNotes();updateNotesBadge();notice('Nota guardada.');
+          logAudit(nt?'Nota editada':'Nota creada','note',data.text.slice(0,60),nt?.id||'',{fecha:data.dueDate});
+        });
+      }
+      async function markNoteDone(id){
+        const nt=state.notes.find(x=>x.id===id);if(!nt)return;
+        nt.status='cumplida';nt.completedAt=state.currentDate;nt.read=true;
+        const saved=await save();
+        if(!saved){notice('No se pudo guardar en la base de datos. Intenta nuevamente.',true);return;}
+        renderNotes();updateNotesBadge();notice('Nota marcada como cumplida.');
+        logAudit('Nota cumplida','note',nt.text.slice(0,60),nt.id,{});
+      }
+      function openNoteReschedule(id){
+        const nt=state.notes.find(x=>x.id===id);if(!nt)return;
+        const html=`<div class="form-grid"><label class="wide">Nota<textarea name="text" required rows="3">${esc(nt.text)}</textarea></label><label>Nueva fecha *<input name="dueDate" type="date" required value="${esc(nt.dueDate)}"></label></div>`;
+        showModal('Reprogramar nota',html,async f=>{
+          const data=Object.fromEntries(new FormData(f));
+          nt.text=data.text;nt.dueDate=data.dueDate;nt.status='pendiente';nt.read=true;
+          const saved=await save();
+          if(!saved)return false;
+          renderNotes();updateNotesBadge();notice('Nota reprogramada.');
+          logAudit('Nota reprogramada','note',nt.text.slice(0,60),nt.id,{nuevaFecha:data.dueDate});
+        });
+      }
+      async function deleteNote(id){
+        if(!confirm('¿Eliminar esta nota?'))return;
+        const nt=state.notes.find(x=>x.id===id);
+        state.notes=state.notes.filter(x=>x.id!==id);
+        const saved=await save();
+        if(!saved){notice('No se pudo eliminar en la base de datos.',true);return;}
+        renderNotes();updateNotesBadge();notice('Nota eliminada.');
+        if(nt)logAudit('Nota eliminada','note',nt.text.slice(0,60),id,{});
+      }
+      function renderNotes(){
+        if(!canAccessPage('notes')) return;
+        // Las notas que llegan de un cliente entran marcadas "sin leer";
+        // en cuanto alguien del staff abre la página de Notas, se dan por
+        // vistas (el badge rojo baja) aunque todavía sigan pendientes.
+        let touched=false;
+        state.notes.forEach(nt=>{ if(nt.source==='cliente' && !nt.read){ nt.read=true; touched=true; } });
+        if(touched) save();
+        const q=(ui.search.notes||'').toLowerCase();
+        const filter=ui.notesFilter||'today';
+        const t=state.currentDate;
+        let list=state.notes.filter(nt=>{
+          if(filter==='today') return nt.status==='pendiente' && nt.dueDate<=t;
+          if(filter==='upcoming') return nt.status==='pendiente' && nt.dueDate>t;
+          if(filter==='history') return nt.status==='cumplida';
+          return true;
+        });
+        if(q) list=list.filter(nt=>[nt.text,nt.clientName].join(' ').toLowerCase().includes(q));
+        list=[...list].sort((a,b)=>filter==='history'?(b.completedAt||b.dueDate).localeCompare(a.completedAt||a.dueDate):(a.dueDate.localeCompare(b.dueDate)));
+        const counts={today:notesDueToday().length,upcoming:state.notes.filter(nt=>nt.status==='pendiente'&&nt.dueDate>t).length,history:state.notes.filter(nt=>nt.status==='cumplida').length};
+        const cardHtml=nt=>{
+          const overdue=nt.status==='pendiente' && nt.dueDate<t;
+          const statusBadge=nt.status==='cumplida'?`<span class="badge active">Cumplida</span>`:(overdue?`<span class="badge warn">Atrasada</span>`:`<span class="badge pending">Pendiente</span>`);
+          const sourceBadge=nt.source==='cliente'?`<span class="badge off">Desde el portal</span>`:'';
+          const canEdit=canEditPage('notes');
+          const actions=canEdit?`<div class="note-actions">${nt.status!=='cumplida'?`<button class="outline" data-action="note-done" data-id="${nt.id}">✓ Cumplida</button><button class="outline" data-action="note-reschedule" data-id="${nt.id}">Reprogramar</button>`:`<button class="outline" data-action="note-reschedule" data-id="${nt.id}">Reabrir</button>`}<button class="icon-btn delete" data-action="delete-note" data-id="${nt.id}" title="Eliminar">×</button></div>`:'';
+          return `<div class="note-card${overdue?' note-overdue':''}">
+            <div class="note-card-top">${statusBadge}${sourceBadge}<span class="muted note-date">${esc(nt.dueDate.split('-').reverse().join('/'))}</span></div>
+            <p class="note-text">${esc(nt.text)}</p>
+            ${nt.clientName?`<p class="muted note-client">Cliente: ${esc(nt.clientName)}</p>`:''}
+            ${actions}
+          </div>`;
+        };
+        const emptyMsg={today:'No hay notas pendientes para hoy. 🎉',upcoming:'No hay notas programadas a futuro.',history:'Todavía no hay notas cumplidas.',all:'No hay notas.'}[filter];
+        $('#notes-page').innerHTML=pageHead('Notas','Recordatorios internos y mensajes que dejan los clientes desde su portal.',canEditPage('notes')?'<button class="primary" data-action="add-note">+ Añadir nota</button>':'')+
+          `<div class="toolbar"><label class="field">Ver<select id="notes-filter">
+            <option value="today" ${filter==='today'?'selected':''}>Hoy y atrasadas (${counts.today})</option>
+            <option value="upcoming" ${filter==='upcoming'?'selected':''}>Programadas a futuro (${counts.upcoming})</option>
+            <option value="history" ${filter==='history'?'selected':''}>Historial (cumplidas) (${counts.history})</option>
+            <option value="all" ${filter==='all'?'selected':''}>Todas</option>
+          </select></label><input id="notes-search" class="search" placeholder="Buscar en las notas…" value="${esc(ui.search.notes||'')}"><span class="spacer"></span><span class="muted">${list.length} notas</span></div>`+
+          (list.length?`<div class="notes-grid">${list.map(cardHtml).join('')}</div>`:`<p class="muted" style="padding:20px 4px">${emptyMsg}</p>`);
+        $('#notes-filter').onchange=e=>{ui.notesFilter=e.target.value;renderNotes();};
+        bindSearch('notes-search','notes',renderNotes);
+        updateNotesBadge();
       }
       function renderDrivers(){
         if(!canAccessPage('drivers')) return;
@@ -1541,10 +1680,11 @@
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
       }
-      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
 
         const ACTION_PERMS={
           "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),
+          "add-note":()=>canEditPage('notes'),"edit-note":()=>canEditPage('notes'),"note-done":()=>canEditPage('notes'),"note-reschedule":()=>canEditPage('notes'),"delete-note":()=>canEditPage('notes'),
           "add-driver":()=>canEditPage('drivers'),"edit-driver":()=>canEditPage('drivers'),"delete-driver":()=>canEditPage('drivers'),
           "add-route":()=>canEditPage('routes'),"edit-route":()=>canEditPage('routes'),"delete-route":()=>canEditPage('routes'),
           "add-plan":()=>canEditPage('plans'),"edit-plan":()=>canEditPage('plans'),"delete-plan":()=>canEditPage('plans'),
