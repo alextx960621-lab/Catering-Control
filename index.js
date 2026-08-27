@@ -1452,6 +1452,55 @@
       function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
       async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);if(u?.role==='superadmin'&&!isSuperAdmin()){notice('No puedes eliminar al Super Administrador.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
 
+      // Arma la "foto" del día para el historial de Supabase (db_dispatch_snapshots):
+      // todo ya resuelto en texto plano (nombre, teléfono, dirección, ruta,
+      // driver, plan, dieta especial...), no IDs — así si más adelante el
+      // cliente cambia de dirección o de ruta, el historial de este día no
+      // se ve afectado, queda tal cual estaba al procesar.
+      function buildDaySnapshotPayload(date,clientIds){
+        const activeClients=clientIds?state.clients.filter(c=>clientIds.includes(c.id)):state.clients.filter(c=>status(c,date)==='Activo');
+        const menuCols=menuItems();
+        const rows=activeClients.map(c=>{
+          const rid=effectiveRouteId(c,date);
+          const pitems=c.items||plan(c.planId)?.items||{};
+          const items={};
+          menuCols.forEach(([key,label])=>{items[label]=n(pitems[key]);});
+          return {
+            id:c.id,
+            orden:n(c.order),
+            nombre:c.name,
+            ruta:rid?routeName(rid):'Sin ruta',
+            driver:driverName(c.driverId),
+            plan:planName(c.planId),
+            direccion:effectiveAddress(c,date)||c.address1||'',
+            direccion2:c.address2||'',
+            maps:c.maps||'',
+            telefono1:c.phone1||'',
+            telefono2:c.phone2||'',
+            bolsas:n(c.bags),
+            items,
+            dietaEspecial:c.specialDiet||'',
+            observaciones:c.notes||'',
+            carreras:n(c.career||1),
+            estado:c.status,
+            serviciosRestantes:n(c.paidDays)?Math.max(0,n(c.paidDays)-n(c.consumedDays)):0
+          };
+        });
+        rows.sort((a,b)=>(a.ruta||'').localeCompare(b.ruta||'')||(a.orden||9999)-(b.orden||9999));
+        const movimientosDelDia=state.inventory.movements.filter(m=>m.date===date&&m.type==='delivery').map(m=>({
+          producto:kitchenItem(m.inventoryId)?.name||m.inventoryId,
+          cantidadDescontada:-n(m.quantity),
+          unidad:kitchenItem(m.inventoryId)?.unit||'',
+          nota:m.note||''
+        }));
+        return {
+          fecha:date,
+          empresa:state.settings?.companyName||APP_CONFIG.companyName,
+          totalClientes:rows.length,
+          clientes:rows,
+          inventarioDescontado:movimientosDelDia
+        };
+      }
       async function exportProcessedDaySnapshot(date,clientIds){
         const activeClients=clientIds?state.clients.filter(c=>clientIds.includes(c.id)):state.clients.filter(c=>status(c,date)==='Activo');
         const menuCols=menuItems();
@@ -1544,6 +1593,9 @@
         applyInventoryForProcessedDay(state.currentDate);
         d.processed=true;d.processedClientIds=processedIds;save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel)…');
         logAudit('Día procesado','day',state.currentDate,state.currentDate,{clientesAtendidos:processedIds.length});
+        // Se sube en paralelo (sin await): no hace falta esperarla para
+        // seguir usando la app ni para que se descargue el Excel.
+        window.SupabaseDB?.dbUpsertSnapshot(state.currentDate,buildDaySnapshotPayload(state.currentDate,processedIds));
         exportProcessedDaySnapshot(state.currentDate,processedIds);
       }
       function unprocessDay(){

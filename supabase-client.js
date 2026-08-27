@@ -202,5 +202,53 @@
     }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, client };
+  // ------------------------------------------------------------------------
+  // db_dispatch_snapshots: UNA FILA POR FECHA con la "foto" completa de
+  // cómo se veía el día al momento de tocar "Procesar día" (nombre,
+  // teléfono, dirección, ruta, driver, plan, bolsas, dieta especial, etc.
+  // ya resueltos, no IDs) — así el historial no cambia si después se edita
+  // un cliente. Se borran solas a los 30 días vía pg_cron (ver
+  // supabase-dispatch-snapshots-migration.sql), sin que el usuario haga nada.
+  // ------------------------------------------------------------------------
+
+  // Guarda (upsert) la foto del día. Se llama en paralelo al procesar el
+  // día — no hace falta esperarla para seguir usando la app.
+  async function dbUpsertSnapshot(date, payload) {
+    try {
+      const { error } = await client
+        .from('db_dispatch_snapshots')
+        .upsert({ date, payload, created_at: new Date().toISOString() }, { onConflict: 'date' });
+      if (error) { console.error('[supabase] Error guardando snapshot del día:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red guardando snapshot del día:', err);
+      return false;
+    }
+  }
+
+  // Trae la foto guardada de una fecha puntual (para importar/ver el historial).
+  async function dbGetSnapshot(date) {
+    try {
+      const { data, error } = await client.from('db_dispatch_snapshots').select('date,payload,created_at').eq('date', date).maybeSingle();
+      if (error) { console.error('[supabase] Error leyendo snapshot del día:', error.message); return null; }
+      return data || null;
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo snapshot del día:', err);
+      return null;
+    }
+  }
+
+  // Lista las fechas con foto guardada (para mostrar un selector de historial).
+  async function dbListSnapshotDates() {
+    try {
+      const { data, error } = await client.from('db_dispatch_snapshots').select('date,created_at').order('date', { ascending: false });
+      if (error) { console.error('[supabase] Error listando snapshots:', error.message); return null; }
+      return data || [];
+    } catch (err) {
+      console.error('[supabase] Fallo de red listando snapshots:', err);
+      return null;
+    }
+  }
+
+  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, client };
 })();
