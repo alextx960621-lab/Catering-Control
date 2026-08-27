@@ -16,7 +16,7 @@
    usuarios bajen la versión nueva en vez de quedarse con la vieja cacheada.
    ========================================================================== */
 
-const CACHE_NAME = 'catering-control-v8';
+const CACHE_NAME = 'catering-control-v9';
 
 // Archivos propios del "cascarón" de la app (ajusta los ?v=N si cambian).
 const PRECACHE_URLS = [
