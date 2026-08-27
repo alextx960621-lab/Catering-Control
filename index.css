@@ -819,6 +819,18 @@
     /* ===== RESPONSIVE ===== */
     @media (max-width: 850px) {
       .collapse-toggle { display: none; }
+      /* Las notas se muestran como tarjetas (no como filas de tabla como
+         el resto de las páginas), así que por diseño ocupan más alto por
+         elemento. En celular se compactan bastante más que en escritorio
+         para que no se sienta "larga" la página con solo 2-3 notas
+         visibles en pantalla. */
+      .notes-grid { grid-template-columns: 1fr; gap: 8px; }
+      .note-card { padding: 10px 12px; gap: 4px; border-left-width: 3px; }
+      .note-card-top { gap: 6px; }
+      .note-text { font-size: 13.5px; }
+      .note-client { font-size: 11.5px; }
+      .note-actions { gap: 6px; margin-top: 2px; }
+      .note-actions .outline, .note-actions .icon-btn { padding: 4px 8px; font-size: 12px; }
       #app {
         grid-template-columns: 1fr;
       }

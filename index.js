@@ -803,13 +803,24 @@
         if(!canAccessPage('clients')) return;
         const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c)===activeUser.routeId):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
         const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(c.maps)}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(c.maps2)}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
+        // wa.me necesita el número completo con código de país y sin
+        // espacios/guiones/+. Los números guardados suelen ser locales (8
+        // dígitos en Bolivia), así que si no trae ya un código de país se
+        // le antepone 591; si el cliente ya guardó el número completo
+        // (más de 8 dígitos), se respeta tal cual.
+        const waLink=phone=>{
+          const digits=(phone||'').replace(/\D/g,'');
+          if(!digits) return '—';
+          const full=digits.length<=8?`591${digits}`:digits;
+          return `<a href="https://wa.me/${full}" target="_blank" rel="noopener" title="Abrir chat de WhatsApp">${esc(phone)}</a>`;
+        };
         const definitions=[
           {key:'order',label:'Orden',cell:c=>n(c.order)||''},
           {key:'name',label:'Cliente / carnet',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">CI: ${esc(c.carnet||'—')}</small>`},
           {key:'route',label:'Ruta',cell:c=>`${esc(routeName(c.routeId))}${c.schedule?.length?` <span class="badge off" title="${esc(scheduleSummary(c))}">Variable</span>`:''}`},
           {key:'address1',label:'Dirección',cell:c=>esc(c.address1||'—')},
           {key:'maps',label:'Google Maps',cell:mapsLinks},
-          {key:'phone1',label:'Teléfono',cell:c=>esc(c.phone1||'—')},
+          {key:'phone1',label:'Teléfono',cell:c=>waLink(c.phone1)},
           {key:'plan',label:'Plan',cell:c=>{const p=plan(c.planId);return `${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:20px;height:20px;object-fit:cover;border-radius:5px;vertical-align:-5px;margin-right:4px">`:''}${esc(planName(c.planId))}`;}},
           {key:'driver',label:'Driver',cell:c=>esc(driverName(c.driverId))},
           {key:'status',label:'Estado',cell:c=>badge(status(c))},
@@ -909,7 +920,7 @@
       function notesDueToday(){ return state.notes.filter(nt=>nt.status==='pendiente' && nt.dueDate<=state.currentDate); }
       function updateNotesBadge(){
         const el=$('#notes-badge'); if(!el) return;
-        const count=canAccessPage('notes')?notesDueToday().length:0;
+        const count=(canAccessPage('notes')&&hasPremiumAccess())?notesDueToday().length:0;
         el.textContent=count>99?'99+':String(count);
         el.hidden=count===0;
       }
@@ -928,7 +939,7 @@
           const saved=await save();
           if(!saved)return false;
           renderNotes();updateNotesBadge();notice('Nota guardada.');
-          logAudit(nt?'Nota editada':'Nota creada','note',data.text.slice(0,60),nt?.id||'',{fecha:data.dueDate});
+          logAudit(nt?'Nota editada':'Nota creada','note',data.clientName||nt?.createdBy||activeUser?.name||'Nota interna',nt?.id||'',{texto:data.text.slice(0,60),fecha:data.dueDate});
         });
       }
       async function markNoteDone(id){
@@ -937,7 +948,7 @@
         const saved=await save();
         if(!saved){notice('No se pudo guardar en la base de datos. Intenta nuevamente.',true);return;}
         renderNotes();updateNotesBadge();notice('Nota marcada como cumplida.');
-        logAudit('Nota cumplida','note',nt.text.slice(0,60),nt.id,{});
+        logAudit('Nota cumplida','note',nt.clientName||nt.createdBy||'Nota interna',nt.id,{texto:nt.text.slice(0,60)});
       }
       function openNoteReschedule(id){
         const nt=state.notes.find(x=>x.id===id);if(!nt)return;
@@ -948,7 +959,7 @@
           const saved=await save();
           if(!saved)return false;
           renderNotes();updateNotesBadge();notice('Nota reprogramada.');
-          logAudit('Nota reprogramada','note',nt.text.slice(0,60),nt.id,{nuevaFecha:data.dueDate});
+          logAudit('Nota reprogramada','note',nt.clientName||nt.createdBy||'Nota interna',nt.id,{texto:nt.text.slice(0,60),nuevaFecha:data.dueDate});
         });
       }
       async function deleteNote(id){
@@ -958,10 +969,11 @@
         const saved=await save();
         if(!saved){notice('No se pudo eliminar en la base de datos.',true);return;}
         renderNotes();updateNotesBadge();notice('Nota eliminada.');
-        if(nt)logAudit('Nota eliminada','note',nt.text.slice(0,60),id,{});
+        if(nt)logAudit('Nota eliminada','note',nt.clientName||nt.createdBy||'Nota interna',id,{texto:nt.text.slice(0,60)});
       }
       function renderNotes(){
         if(!canAccessPage('notes')) return;
+        if(!hasPremiumAccess()){ $('#notes-page').innerHTML=pageHead('Notas','Recordatorios internos y mensajes que dejan los clientes desde su portal.')+premiumLockHtml('Notas'); return; }
         // Las notas que llegan de un cliente entran marcadas "sin leer";
         // en cuanto alguien del staff abre la página de Notas, se dan por
         // vistas (el badge rojo baja) aunque todavía sigan pendientes.
@@ -1255,6 +1267,13 @@
         ];
         $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+`<div class="toolbar"><input id="audit-search" class="search" placeholder="Buscar por persona, acción o registro…" value="${esc(ui.search.audit||'')}"><span class="spacer"></span><span class="muted">${list.length} eventos</span></div>`+orderedTable(list,definitions,'audit');
         bindSearch('audit-search','audit',renderAudit);
+        // renderAudit es async (espera la carga del historial), pero
+        // renderPage() ata resize/reorder justo después de llamarla SIN
+        // esperar esa carga — cuando esta línea finalmente pinta la tabla
+        // real, esos eventos ya se habían enganchado (o no) sobre el
+        // "Cargando historial…" que había antes, así que la tabla nueva
+        // quedaba sin ellos. Se vuelve a enganchar acá mismo.
+        enableTableTools();
       }
       function userForm(u={}){const d=u.driverId?driver(u.driverId):{};const showDriver=u.role==='driver';return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'} autocomplete="new-password"></label><label>${u.id?'Confirmar nueva contraseña':'Confirmar contraseña *'}<input type="password" name="passwordConfirm" ${u.id?'':'required'} autocomplete="new-password"></label><label>Rol<select name="role" id="user-role-select">${isSuperAdmin()?`<option value="superadmin" ${u.role==='superadmin'?'selected':''}>Super Administrador</option>`:''}<option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="kitchen" ${u.role==='kitchen'?'selected':''}>Cocina</option><option value="driver" ${(!u.role||u.role==='driver')?'selected':''}>Driver</option>${(state.settings.customRoles||[]).map(r=>`<option value="${r.id}" ${u.role===r.id?'selected':''}>${esc(r.label)}</option>`).join('')}</select>${isSuperAdmin()?'<p class="muted" style="margin-top:4px">Solo puede haber un Super Administrador.</p>':''}</label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Carnet${showDriver?' *':''}<input name="carnet" value="${esc(d.carnet)}" ${showDriver?'required':''}></label><label class="driver-field" ${showDriver?'':'hidden'}>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="driver-field wide" ${showDriver?'':'hidden'}>Dirección de domicilio<input name="address" value="${esc(d.address)}"></label><p class="muted wide driver-field-hint" ${showDriver?'hidden':''}>Solo el rol Driver necesita ficha de driver y ruta asignada.</p></div>`;}
       function roleForm(r={}){
