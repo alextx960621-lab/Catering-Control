@@ -16,18 +16,18 @@
    usuarios bajen la versión nueva en vez de quedarse con la vieja cacheada.
    ========================================================================== */
 
-const CACHE_NAME = 'catering-control-v1';
+const CACHE_NAME = 'catering-control-v2';
 
 // Archivos propios del "cascarón" de la app (ajusta los ?v=N si cambian).
 const PRECACHE_URLS = [
   './login.html',
   './index.html',
   './cliente.html',
-  './login.css?v=2',
+  './login.css?v=3',
   './login.js',
-  './index.css?v=7',
+  './index.css?v=8',
   './index.js?v=5',
-  './cliente.css?v=4',
+  './cliente.css?v=5',
   './cliente.js?v=3',
   './config.js',
   './supabase-client.js',

@@ -561,7 +561,7 @@
       function notice(text, error=false){ const el=$('#notice'); el.textContent=text; el.className='notice show'+(error?' error':''); clearTimeout(notice.t); notice.t=setTimeout(()=>el.className='notice',2600); }
       function pageHead(title, subtitle, actions=''){ return `<div class="page-head"><div><h1>${title}</h1><p>${subtitle}</p></div><div class="head-actions">${actions}</div></div>`; }
       function options(list,current,placeholder='Seleccionar…',label=x=>x.name){ return `<option value="">${placeholder}</option>`+list.map(x=>`<option value="${esc(x.id)}" ${x.id===current?'selected':''}>${esc(label(x))}</option>`).join(''); }
-      function itemFields(values={}){ return `<div class="items-grid">${menuItems().map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<label>${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:16px;height:16px;object-fit:cover;border-radius:4px;vertical-align:-3px;margin-right:4px">`:''}${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`;}).join('')}</div>`; }
+      function itemFields(values={}){ return `<div class="items-grid">${menuItems().map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<label>${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:22px;height:22px;object-fit:cover;border-radius:5px;vertical-align:-6px;margin-right:5px">`:''}${label}<input type="number" min="0" name="${key}" value="${n(values[key])}"></label>`;}).join('')}</div>`; }
       function formItems(f){ return Object.fromEntries(menuItems().map(([key])=>[key,n(f.elements[key]?.value)])); }
       function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; const sortKey=s.key; return [...list].sort((a,b)=>String(value(a,sortKey)).localeCompare(String(value(b,sortKey)),undefined,{numeric:true})*s.dir); }
       function value(x,key){ if(key==='route') return routeName(x.routeId); if(key==='driver') return driverName(x.driverId); if(key==='plan') return planName(x.planId); return x[key] ?? ''; }
@@ -1169,7 +1169,7 @@
         if(saved) logAudit('Artículo de menú eliminado','menu-item',current.label,key,{});
       }
       function itemIconsForm(){
-        return `<p class="muted">Sube una imagen para cada artículo del menú (aparece junto a las cantidades en planes y clientes).</p>
+        return `<p class="muted">Sube una imagen para cada artículo del menú. Aparece junto a la cantidad de ese artículo cuando editas un plan o un cliente, y también en el portal de autoservicio del cliente.</p>
         <div class="toggle-list" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${menuItems().map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px">
           <div style="width:34px;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div>
           <div style="flex:1;min-width:0">
@@ -1182,6 +1182,7 @@
       function openItemIcons(){
         showModal('Asignar imagen a artículos',itemIconsForm(),()=>false); // false: este modal se cierra con la X, no "Guardar" (cada imagen se guarda al elegirla)
         $('#modal-save').hidden=true;
+        $('#modal-cancel').textContent='Cerrar'; // acá no hay nada que "cancelar": cada imagen ya quedó guardada al elegirla
         openItemIconsHandlers();
       }
       function openItemIconsHandlers(){
@@ -1511,7 +1512,12 @@
         $('#activate-basic-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;if(!confirm('¿Volver al plan Básico? El equipo perderá acceso a las funciones Premium.'))return;state.settings.plan='basico';state.settings.premiumUntil='';const saved=await save();renderSettings();notice(saved?'Plan Básico activado.':'Se cambió localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit('Plan cambiado a Básico','settings','Plan de la cuenta','',{});});
         $('#premium-whatsapp')?.addEventListener('change',async e=>{if(!isSuperAdmin())return;state.settings.premiumWhatsapp=e.target.value.trim().replace(/[^\d]/g,'');e.target.value=state.settings.premiumWhatsapp;const saved=await save();notice(saved?'Tu WhatsApp de upgrade actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);});
       }
-      function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
+      function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');
+        // Reseteo de estado por si el modal anterior lo dejó distinto (ver
+        // openItemIcons: oculta "Guardar" y cambia "Cancelar" por "Cerrar"
+        // porque ahí cada imagen se guarda sola, sin un paso aparte).
+        saveButton.hidden=false;$('#modal-cancel').textContent='Cancelar';
+        form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
       async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);if(u?.role==='superadmin'&&!isSuperAdmin()){notice('No puedes eliminar al Super Administrador.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
 
       // Arma la "foto" del día para el historial de Supabase (db_dispatch_snapshots):
