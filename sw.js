@@ -26,7 +26,7 @@ const PRECACHE_URLS = [
   './login.css?v=3',
   './login.js',
   './index.css?v=8',
-  './index.js?v=5',
+  './index.js?v=6',
   './cliente.css?v=5',
   './cliente.js?v=3',
   './config.js',

@@ -1311,7 +1311,7 @@
       async function renderAudit(forceRefresh){
         if(!canAccessPage('audit')) return;
         if(!hasPremiumAccess()){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios.')+premiumLockHtml('Auditoría'); return; }
-        const actions='<button class="outline" data-action="refresh-audit">🔄 Actualizar</button>';
+        const actions='<button class="outline" data-action="refresh-audit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>';
         if(forceRefresh||auditEntries===null){
           $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+'<p class="muted">Cargando historial…</p>';
           const rows=await window.SupabaseDB?.dbGetAuditLog(300);
