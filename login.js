@@ -51,6 +51,13 @@ updateWhatsappButton(APP_CONFIG.whatsappNumber);
 
 const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
 const STAFF_APP_URL = './index.html';
+// Los usuarios con rol "driver" ya no entran a index.html: tienen su propia
+// página, más liviana y con solo lo que un driver usa (Día de trabajo,
+// Clientes, Sueldos, Configuración). driver.html carga el mismo index.js sin
+// tocarlo, así que un driver ve exactamente las mismas funciones que tenía
+// antes dentro de index.html.
+const DRIVER_APP_URL = './driver.html';
+function staffDestination(role) { return role === 'driver' ? DRIVER_APP_URL : STAFF_APP_URL; }
 const CLIENT_PORTAL_URL = './cliente.html';
 const CLIENT_SESSION_KEY = `${APP_CONFIG.storagePrefix}-client-session-v1`;
 // Tema de la pantalla de login (por navegador, todavía no hay nadie
@@ -98,6 +105,11 @@ formStaff.addEventListener('submit',async e=>{
   const person=Array.isArray(rows)?rows[0]:null;
   if(!person){showError('Correo o contraseña incorrectos.');return;}
   sessionStorage.setItem(STAFF_SESSION_KEY,JSON.stringify({id:person.id,name:person.name,role:person.role,routeId:person.routeId||'',driverId:person.driverId||''}));
-  window.location.href=STAFF_APP_URL;
+  window.location.href=staffDestination(person.role);
 });
-if(sessionStorage.getItem(STAFF_SESSION_KEY)) window.location.href=STAFF_APP_URL;
+(() => {
+  try {
+    const existing = JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY));
+    if (existing) window.location.href = staffDestination(existing.role);
+  } catch (_) {}
+})();

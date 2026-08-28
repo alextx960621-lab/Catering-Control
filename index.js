@@ -1888,6 +1888,18 @@
       document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
       if(!activeUser){ window.location.replace('./login.html'); return; }
+      // index.js sirve tanto a index.html (staff: admin/editor/kitchen) como a
+      // driver.html (rol driver) — ambas páginas cargan este mismo archivo sin
+      // modificarlo, así el driver tiene exactamente las mismas funciones que
+      // antes tenía dentro de index.html. Lo único que decide a qué pantalla
+      // corresponde cada quien es su rol, chequeado acá una sola vez al entrar:
+      // un driver que llega a index.html (por ej. un enlace viejo guardado) se
+      // manda a driver.html, y quien no es driver pero abre driver.html se
+      // manda de vuelta a index.html. Así ya no hace falta mantener dos copias
+      // del motor de la app.
+      const onDriverApp = /driver\.html$/.test(location.pathname);
+      if (activeUser.role === 'driver' && !onDriverApp) { window.location.replace('./driver.html'); return; }
+      if (activeUser.role !== 'driver' && onDriverApp) { window.location.replace('./index.html'); return; }
       load(); applyBranding(); loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate('dispatch');
       // Si se cierra la pestaña o se recarga mientras hay un guardado en
       // curso (p. ej. justo después de resizar una columna), el navegador
