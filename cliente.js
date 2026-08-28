@@ -118,7 +118,11 @@
         if(!result){fb.className='alert alert-danger mt-3 mb-0';fb.textContent='No se pudo enviar. Intenta nuevamente o contáctanos por WhatsApp.';return;}
         textEl.value='';fb.className='alert alert-success mt-3 mb-0';fb.textContent='¡Mensaje enviado! El equipo se pondrá en contacto contigo.';
       }
-      async function requestPause(){const now=new Date();if(now.getHours()>=22){render('Ya pasó el horario de pausa automática. Ponte en contacto con Atención al Cliente.',true,true);return;}const next=nextWorkDay(workDate()),returnDate=$('#with-return').checked?$('#return-date').value:'';if($('#with-return').checked&&!returnDate){render('Selecciona una fecha de retorno o desactiva esa opción.',true);return;}if(returnDate&&returnDate<=next){render('La fecha de retorno debe ser posterior al día pausado.',true);return;}client.pauseStart=next;client.returnDate=returnDate;client.status='Pausado';client.pauseDates=(client.pauseDates||[]).filter(d=>d!==next);const saved=await save();if(!saved){render('No se pudo guardar la pausa en la base de datos. Intenta nuevamente.',true);return;}
+      async function requestPause(){const now=new Date();if(now.getHours()>=22){render('Ya pasó el horario de pausa automática. Ponte en contacto con Atención al Cliente.',true,true);return;}const next=nextWorkDay(workDate()),returnDate=$('#with-return').checked?$('#return-date').value:'';if($('#with-return').checked&&!returnDate){render('Selecciona una fecha de retorno o desactiva esa opción.',true);return;}if(returnDate&&returnDate<=next){render('La fecha de retorno debe ser posterior al día pausado.',true);return;}
+        // Coherencia Estado ↔ Fecha de retorno (misma regla que en el panel
+        // de operaciones): con fecha de retorno el estado es "Programado";
+        // sin fecha, queda "Pausado" (pausa abierta).
+        client.pauseStart=next;client.returnDate=returnDate;client.status=returnDate?'Programado':'Pausado';client.pauseDates=(client.pauseDates||[]).filter(d=>d!==next);const saved=await save();if(!saved){render('No se pudo guardar la pausa en la base de datos. Intenta nuevamente.',true);return;}
         // El panel de operaciones (index.js) registra cada pausa en el
         // historial de auditoría, pero este portal de autoservicio nunca lo
         // hacía — por eso una pausa hecha por el propio cliente no dejaba
@@ -128,14 +132,16 @@
         render(returnDate?`Pausa programada desde el ${next.split('-').reverse().join('/')} hasta el ${returnDate.split('-').reverse().join('/')}.`:`Pausa abierta desde el ${next.split('-').reverse().join('/')} sin fecha de retorno.`);}
       // Reactivación por el propio cliente, con el mismo horario límite
       // (22:00) y la misma lógica de "aplica al siguiente día laborable"
-      // que la pausa. No hace falta tocar client.status ni pauseStart: al
-      // fijar returnDate=next, stateFor() ya devuelve 'Activo' automáticamente
-      // a partir de esa fecha (revisa returnDate antes que pauseStart).
+      // que la pausa. Se actualiza el estado a "Programado" junto con la
+      // fecha (misma regla Estado ↔ Fecha de retorno que en la pausa):
+      // stateFor() ya devuelve 'Activo' automáticamente a partir de esa
+      // fecha (revisa returnDate antes que pauseStart), pero el campo
+      // status igual debe reflejar que hay una fecha de retorno cargada.
       async function requestResume(){
         const now=new Date();
         if(now.getHours()>=22){render('Ya pasó el horario de reactivación automática. Ponte en contacto con Atención al Cliente.',true,true);return;}
         const next=nextWorkDay(workDate());
-        client.returnDate=next;
+        client.returnDate=next;client.status='Programado';
         const saved=await save();
         if(!saved){render('No se pudo guardar la reactivación en la base de datos. Intenta nuevamente.',true);return;}
         window.SupabaseDB?.dbInsertAudit({actor_id:client.id,actor_name:client.name,actor_role:'cliente',action:'Cliente reactivó su servicio (autoservicio)',entity_type:'client',entity_label:client.name,entity_id:client.id,details:{reactivaDesde:next}});

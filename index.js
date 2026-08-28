@@ -806,7 +806,24 @@
           `<div class="sheet"><table id="dispatch-table">${colgroupHtml(columns.map(c=>[c.label,c.key]),'dispatch')}<thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
         $('#work-date')?.addEventListener('change',e=>{ if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch(); });
         $('#dispatch-route')?.addEventListener('change',e=>{ui.route=e.target.value;renderDispatch();}); $('#dispatch-status')?.addEventListener('change',e=>{ui.dispatchStatus=e.target.value;renderDispatch();}); $('#work-status')?.addEventListener('change',e=>{if(!canEditPage('dispatch'))return;day().laborable=e.target.value==='work';save();renderDispatch();}); bindSearch('dispatch-search','dispatch',renderDispatch);
-        $$('.day-edit').forEach(i=>i.onchange=()=>{const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return; if(!canEditDispatchField(c,i.dataset.field))return; c[i.dataset.field]=i.value; save(); if(i.dataset.field==='returnDate'){syncReturnDates(state.currentDate);renderDispatch();notice('Fecha de retorno actualizada. El pedido volverá a Activo en esa fecha.');}});
+        $$('.day-edit').forEach(i=>i.onchange=()=>{
+          const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return;
+          if(!canEditDispatchField(c,i.dataset.field))return;
+          c[i.dataset.field]=i.value;
+          // Coherencia Estado ↔ Fecha de retorno, misma regla que en
+          // Editar cliente y en Pausar cliente: la fecha de retorno solo
+          // existe junto al estado "Programado". Si se carga una fecha
+          // acá, el pedido pasa a Programado (y se marca pauseStart si no
+          // lo tenía, para que se vea "Pausado" día a día hasta esa
+          // fecha); si se borra la fecha, vuelve a "Pausado" (pausa
+          // abierta) en vez de quedar "Programado" sin fecha.
+          if(i.dataset.field==='returnDate'){
+            if(i.value){ c.status='Programado'; c.pauseStart ||= state.currentDate; }
+            else if(c.status==='Programado'){ c.status='Pausado'; }
+          }
+          save();
+          if(i.dataset.field==='returnDate'){syncReturnDates(state.currentDate);renderDispatch();notice('Fecha de retorno actualizada. El pedido volverá a Activo en esa fecha.');}
+        });
         enableTableTools();
       }
       // Tabla de solo lectura para un día ya procesado: usa el "payload"
@@ -934,7 +951,12 @@
           if(!f.elements.pauseService.checked)return false;
           const returnDate=f.elements.returnDate.value;
           if(returnDate&&returnDate<=state.currentDate){notice('La fecha de retorno debe ser posterior al inicio de la pausa.',true);return false;}
-          c.status='Pausado';c.pauseStart=state.currentDate;c.returnDate=returnDate;c.pauseDates=[];
+          // Coherencia Estado ↔ Fecha de retorno (misma regla que en Editar
+          // cliente): con fecha de retorno el estado es "Programado"; sin
+          // fecha, queda "Pausado" (pausa abierta). pauseStart se sigue
+          // guardando en los dos casos: es lo que hace que status(c,date)
+          // muestre "Pausado" día a día mientras se espera esa fecha.
+          c.status=returnDate?'Programado':'Pausado';c.pauseStart=state.currentDate;c.returnDate=returnDate;c.pauseDates=[];
           const saved=await save();if(!saved)return false;
           renderClients();notice(returnDate?'Pausa guardada con fecha de retorno.':'Pausa abierta guardada sin fecha de retorno.');
           scrollToRow(c.id);
