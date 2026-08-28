@@ -1,4 +1,16 @@
-    body{background:var(--page-bg,#f5f7fb)}.portal{max-width:1080px}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#0d6efd,#198754);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:.75rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.hidden{display:none!important}
+    /* Todos los recuadros del portal (tarjetas, header, hero, métricas,
+       opciones de pausa) comparten el mismo radio de esquina para que se
+       vea uniforme — antes .card usaba el redondeo chico por defecto de
+       Bootstrap (6px) mientras hero/ad-banner/instagram usaban 16px, y se
+       notaba el contraste "cuadrado vs. redondeado". */
+    body{background:var(--page-bg,#f5f7fb)}.portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#0d6efd,#198754);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.hidden{display:none!important}
+    /* Tarjetas de elección para el modo de pausa (ver .pause-mode-card más
+       abajo): mismo lenguaje visual que el resto (redondeado, sombra sutil)
+       y un estado "seleccionado" claro para que se entienda de un vistazo
+       cuál de las dos opciones está activa. */
+    .pause-mode-card{border-radius:1rem;cursor:pointer;transition:border-color .15s ease,background .15s ease,box-shadow .15s ease}
+    .btn-check:checked+.pause-mode-card{border-color:var(--bs-primary)!important;background:color-mix(in srgb,var(--bs-primary) 8%,var(--bs-body-bg));box-shadow:0 0 0 2px color-mix(in srgb,var(--bs-primary) 25%,transparent)}
+    .pause-mode-card:hover{border-color:color-mix(in srgb,var(--bs-primary) 45%,var(--bs-border-color))}
     [data-theme="night"]{--page-bg:#121824}
     [data-theme="forest"]{--page-bg:#dcefdc}
     [data-theme="forest"] .metric{background:#cde6cd}

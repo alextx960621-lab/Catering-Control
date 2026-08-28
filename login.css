@@ -30,6 +30,11 @@ html { font-size:15px; }
     }
     .btn-primary:active { transform: translateY(0) scale(.98); }
     #whatsapp-support-btn { transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+    /* El selector "Soy cliente / Soy del equipo" (nav-pills) usa por
+       defecto el redondeo chico de Bootstrap para cada botón interno,
+       aunque el contenedor sea rounded-pill — se notaba cuadrado al lado
+       de la tarjeta y los botones, que sí son redondeados. */
+    .nav-pills .nav-link { border-radius: 999px; }
     .login-card { max-width:420px; }
     .login-card .card { overflow:hidden; }
     .brand-row { display:flex; align-items:center; gap:16px; }
