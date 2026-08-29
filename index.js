@@ -32,9 +32,9 @@
         const desc = Object.getOwnPropertyDescriptor(proto, 'innerHTML');
         Object.defineProperty(proto, 'innerHTML', { configurable: true, enumerable: true, get: desc.get, set(html) {
           if (this.classList && this.classList.contains('page')) {
-            const before = $$('.sheet', this).map(el => el.scrollLeft);
+            const before = $$('.sheet', this).map(el => [el.scrollLeft, el.scrollTop]);
             desc.set.call(this, html);
-            $$('.sheet', this).forEach((el, i) => { if (before[i]) el.scrollLeft = before[i]; });
+            $$('.sheet', this).forEach((el, i) => { const pos = before[i]; if (pos) { el.scrollLeft = pos[0]; el.scrollTop = pos[1]; } });
           } else {
             desc.set.call(this, html);
           }
