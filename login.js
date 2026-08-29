@@ -110,7 +110,7 @@ const toggleStaffPass=document.getElementById('toggle-staff-pass'), staffPassInp
 toggleStaffPass.addEventListener('click',()=>{
   const showing=staffPassInput.type==='text';
   staffPassInput.type=showing?'password':'text';
-  toggleStaffPass.textContent=showing?'👁':'🙈';
+  toggleStaffPass.textContent=showing?'😃':'😆';
   toggleStaffPass.setAttribute('aria-label',showing?'Mostrar contraseña':'Ocultar contraseña');
 });
 function showError(msg){errorEl.textContent=msg;errorEl.classList.remove('d-none');}
