@@ -107,12 +107,12 @@
     }
     button:hover { filter: brightness(.97); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,.13); }
     button:active { transform: translateY(0); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-    button.primary {
+    button.primary, button.refresh {
       background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 78%, white 22%), var(--primary));
       color: var(--primary-ink);
       box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 38%, transparent);
     }
-    button.primary:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 42%, transparent); }
+    button.primary:hover, button.refresh:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 42%, transparent); }
     button.danger {
       background: linear-gradient(135deg, color-mix(in srgb, var(--danger) 78%, white 22%), var(--danger));
       color: #fff;
@@ -672,6 +672,9 @@
       margin-top: 5px;
       padding: 3px 6px;
       min-height: auto;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
       font-size: 10px;
       font-weight: 700;
     }

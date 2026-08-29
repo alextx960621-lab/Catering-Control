@@ -258,6 +258,13 @@
         });
       }
       function canEditDispatchField(c, field){
+        // Misma regla que en Clientes (openClient/clientForm): la fecha de
+        // retorno solo se puede tocar si el estado es "Programado". Antes
+        // acá no se chequeaba el estado, así que se podía cargar una fecha
+        // de retorno aunque el pedido solo estuviera "Pausado hoy" (el
+        // botón rápido de la columna Estado), lo cual no tiene sentido —
+        // esa pausa es solo para el día de hoy, no un regreso programado.
+        if (field === 'returnDate' && c.status !== 'Programado') return false;
         if (canEditPage('dispatch')) return true;
         if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && effectiveRouteId(c) === activeUser.routeId;
         return false;
@@ -609,12 +616,25 @@
       // columnas — el tirador ⋮⋮ solo se muestra para estos. Payroll queda
       // afuera a propósito: sus columnas son los días del mes en secuencia
       // y no tendría sentido reordenarlas.
-      const REORDERABLE_GROUPS=new Set(['dispatch','clients','drivers','routes','plans','inventory','inventory-links','inventory-movements','users','audit']);
+      const REORDERABLE_GROUPS=new Set(['dispatch','clients','drivers','routes','plans','delivery','menu-items','roles','inventory','inventory-links','inventory-movements','users','audit']);
       function th(label,key,group){ const s=ui.sort[group]; const dragHandle=REORDERABLE_GROUPS.has(group)?'<span class="col-drag-handle" aria-hidden="true" title="Arrastra para reordenar la columna">⋮⋮</span>':''; return `<th data-sort="${key}" data-group="${group}">${dragHandle}${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
-      function defaultColWidth(label){ return Math.min(240, Math.max(70, String(label).length*8+56)); }
+      // Un ancho por defecto calculado solo a partir del largo del label
+      // (ver más abajo) le queda muy angosto a algunas columnas que traen
+      // más que texto plano (badges, botones). Va por "grupo:key" para no
+      // pisar columnas con el mismo nombre en otras tablas (ej. "name" en
+      // Clientes vs. en Despacho).
+      const COL_WIDTH_OVERRIDES = {
+        'dispatch:status': 150,
+        'delivery:order': 60, 'delivery:name': 210, 'delivery:status': 220, 'delivery:id': 260
+      };
+      function defaultColWidth(label, key, group){
+        const override = COL_WIDTH_OVERRIDES[`${group}:${key}`];
+        if (override) return override;
+        return Math.min(240, Math.max(70, String(label).length*8+56));
+      }
       function colgroupHtml(cols, group){
         const saved = userColPrefs().columnWidths?.[group] || {};
-        return `<colgroup>${cols.map(([label,key])=>`<col data-col-key="${esc(key)}" style="width:${n(saved[key])||defaultColWidth(label)}px">`).join('')}</colgroup>`;
+        return `<colgroup>${cols.map(([label,key])=>`<col data-col-key="${esc(key)}" style="width:${n(saved[key])||defaultColWidth(label,key,group)}px">`).join('')}</colgroup>`;
       }
       function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${colgroupHtml(headers,group)}<thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
       // Arma una tabla con columnas reordenables por arrastre (mismo tirador
@@ -674,7 +694,7 @@
               const group=headCell.dataset.group, key=headCell.dataset.sort;
               const labelClone=headCell.cloneNode(true);
               labelClone.querySelectorAll('.col-drag-handle,.resize-handle,.sort-ind').forEach(el=>el.remove());
-              const width=defaultColWidth(labelClone.textContent.trim());
+              const width=defaultColWidth(labelClone.textContent.trim(),key,group);
               col.style.width=width+'px'; syncTableWidth(tbl,cols);
               if(group && key) saveColumnWidth(group,key,width);
             };
@@ -691,15 +711,18 @@
         // selector acá (Inventario, por ejemplo, tiene tres tablas en la
         // misma página).
         [
-          { group:'dispatch', allKeys:['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','returnDate','id'] },
+          { group:'dispatch', allKeys:['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','remaining','returnDate','id'] },
           { group:'clients', allKeys:['order','name','route','address1','maps','phone1','plan','driver','status','paidDays','consumedDays','specialDiet','id'] },
           { group:'drivers', allKeys:['order','firstName','carnet','phone','address','route','id'] },
           { group:'routes', allKeys:['order','name','type','description','clients','drivers','id'] },
           { group:'plans', allKeys:['name','type',...menuItems().map(([key])=>key),'id'] },
+          { group:'menu-items', allKeys:['label','id'] },
+          { group:'delivery', allKeys:['order','name','status','id'] },
           { group:'inventory', allKeys:['name','unit','stock','minimum','links','id'] },
           { group:'inventory-links', allKeys:['inventoryId','clientItemKey','quantity','id'] },
           { group:'inventory-movements', allKeys:['date','inventoryId','quantity','type','note','id'] },
           { group:'users', allKeys:['username','name','email','role','route','id'] },
+          { group:'roles', allKeys:['label','perms','id'] },
           { group:'audit', allKeys:['at','actor_name','action','entity_label','details'] }
         ].forEach(({group,allKeys})=>{
           const sampleHead=document.querySelector(`th[data-group="${group}"]`);
@@ -891,38 +914,36 @@
         if (isDriverRole()) renderDeliveryDriver(date); else renderDeliveryAdmin(date);
         startDeliveryPoll(date);
       }
-      // Columnas con ancho/orden editable: mismo sistema (colgroup +
-      // tirador de resize) que usan Día de trabajo y Clientes — antes esta
-      // tabla se armaba a mano sin colgroup ni resize-handle, por eso no se
-      // podía ajustar el ancho de columnas acá y, en pantallas angostas, la
-      // columna "Acciones" quedaba tan apretada que el botón "No entregado"
-      // no entraba. Con anchos por defecto ya generosos (ver DELIVERY_COLS)
-      // el botón entra de una, y además ahora se puede ensanchar a mano.
-      const DELIVERY_COLS = [['Orden', 'order', 60], ['Cliente', 'name', 210], ['Estado de entrega', 'status', 220], ['Acciones', 'actions', 260]];
-      function deliveryColgroup(){
-        const saved = userColPrefs().columnWidths?.delivery || {};
-        return `<colgroup>${DELIVERY_COLS.map(([, key, def]) => `<col data-col-key="${key}" style="width:${n(saved[key]) || def}px">`).join('')}</colgroup>`;
-      }
       function renderDeliveryDriver(date){
         const list = deliveryListFor(activeUser.routeId, date);
         const delivered = list.filter(c => deliveryRecord(date, c.id)?.status === 'entregado').length;
-        const rows = c => {
-          const rec = deliveryRecord(date, c.id);
-          const st = rec?.status;
-          const statusBadge = st === 'entregado' ? '<span class="badge active">Entregado</span>' : st === 'no_entregado' ? '<span class="badge danger">No entregado</span>' : '<span class="badge off">Pendiente</span>';
-          const detailBits = [];
-          if (rec?.at) detailBits.push(new Date(rec.at).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' }));
-          if (rec?.reason) detailBits.push(esc(rec.reason));
-          if (rec?.note) detailBits.push(esc(rec.note));
-          if (rec?.image) detailBits.push('📷 con foto');
-          const detail = detailBits.length ? `<br><small class="muted">${detailBits.join(' · ')}</small>` : '';
-          const actions = !canEditPage('delivery') ? '—' : (st === 'entregado' || st === 'no_entregado')
-            ? `<button class="icon-btn" data-action="edit-delivery" data-id="${c.id}" data-kind="${st}">Editar</button><button class="icon-btn delete" data-action="clear-delivery" data-id="${c.id}">Quitar</button>`
-            : `<button class="primary" data-action="mark-delivered" data-id="${c.id}">Entregado</button> <button class="outline" data-action="mark-not-delivered" data-id="${c.id}">No entregado</button>`;
-          return `<tr data-id="${c.id}"><td>${n(c.order) || ''}</td><td><b>${esc(c.name)}</b><br><small class="muted">${esc(c.address1 || '')}</small></td><td>${statusBadge}${detail}</td><td>${actions}</td></tr>`;
-        };
+        // Misma tabla con columnas reordenables/redimensionables que el
+        // resto de la app (orderedTable) — antes esta se armaba a mano con
+        // un colgroup propio (DELIVERY_COLS), separado del resto: se podía
+        // ensanchar pero no reordenar, e inconsistente con las demás.
+        const definitions = [
+          {key:'order',label:'Orden',cell:c=>n(c.order)||''},
+          {key:'name',label:'Cliente',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">${esc(c.address1||'')}</small>`},
+          {key:'status',label:'Estado de entrega',cell:c=>{
+            const rec=deliveryRecord(date,c.id), st=rec?.status;
+            const statusBadge = st === 'entregado' ? '<span class="badge active">Entregado</span>' : st === 'no_entregado' ? '<span class="badge danger">No entregado</span>' : '<span class="badge off">Pendiente</span>';
+            const detailBits = [];
+            if (rec?.at) detailBits.push(new Date(rec.at).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' }));
+            if (rec?.reason) detailBits.push(esc(rec.reason));
+            if (rec?.note) detailBits.push(esc(rec.note));
+            if (rec?.image) detailBits.push('📷 con foto');
+            return `${statusBadge}${detailBits.length?`<br><small class="muted">${detailBits.join(' · ')}</small>`:''}`;
+          }},
+          {key:'id',label:'Acciones',cell:c=>{
+            if (!canEditPage('delivery')) return '—';
+            const st=deliveryRecord(date,c.id)?.status;
+            return (st === 'entregado' || st === 'no_entregado')
+              ? `<button class="icon-btn" data-action="edit-delivery" data-id="${c.id}" data-kind="${st}">Editar</button><button class="icon-btn delete" data-action="clear-delivery" data-id="${c.id}">Quitar</button>`
+              : `<button class="primary" data-action="mark-delivered" data-id="${c.id}">Entregado</button> <button class="outline" data-action="mark-not-delivered" data-id="${c.id}">No entregado</button>`;
+          }}
+        ];
         $('#delivery-page').innerHTML = pageHead('Despacho', `Tu ruta: ${esc(routeName(activeUser.routeId))} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente. Se actualiza sola cada pocos segundos.`, `<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
-          `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${deliveryColgroup()}<thead><tr>${DELIVERY_COLS.map(([label, key]) => th(label, key, 'delivery')).join('')}</tr></thead><tbody>${list.length ? list.map(rows).join('') : '<tr><td colspan="4" class="empty">No hay pedidos activos para esta fecha en tu ruta.</td></tr>'}</tbody></table></div>`;
+          orderedTable(list, definitions, 'delivery', c=>c.id);
       }
       function renderDeliveryAdmin(date){
         const groups = state.routes.map(r => ({ route: r, clients: deliveryListFor(r.id, date) })).filter(g => g.clients.length);
@@ -1038,7 +1059,7 @@
         const dateField=isDriverRole()
           ?`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div><button type="button" class="outline" id="work-date-today" style="margin-top:6px" title="Volver a ver el día actual, sin procesar">Ver hoy</button>`
           :`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`;
-        $('#dispatch-page').innerHTML=pageHead('Día de trabajo',isDriverRole()?'Puedes elegir qué día ver: el día actual (en vivo) o una fecha pasada (verás lo que quedó guardado ese día).':'La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`${printButtons}${canEditPage('dispatch')?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}`)+
+        $('#dispatch-page').innerHTML=pageHead('Día de trabajo',isDriverRole()?'Puedes elegir qué día ver: el día actual (en vivo) o una fecha pasada (verás lo que quedó guardado ese día).':'La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`${canEditPage('dispatch')?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}${printButtons}`)+
           `<div class="toolbar"><label class="field">Día de trabajo${dateField}</label>${routeField}<label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${canEditPage('dispatch')?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
           `<div class="sheet"><table id="dispatch-table">${colgroupHtml(columns.map(c=>[c.label,c.key]),'dispatch')}<thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
         $('#work-date')?.addEventListener('change',e=>{
@@ -1085,7 +1106,7 @@
           :`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`;
         $('#dispatch-page').innerHTML=pageHead('Día de trabajo',`Historial guardado el ${savedAt} · ${rows.length} pedidos atendidos ese día. Son datos congelados: no cambian aunque después edites al cliente.`,canEditPage('dispatch')?'<button class="outline" data-action="dispatch-force-live">Ver datos actuales en vez del historial</button>':'')+
           `<div class="toolbar"><label class="field">Día de trabajo${dateFieldHist}</label><span class="spacer"></span><span class="badge off" title="Estos datos vienen del historial guardado, no de la ficha actual del cliente">📷 Viendo historial</span></div>`+
-          `<div class="sheet"><table>${colgroupHtml(headCols.map(h=>[h,h]),'dispatch-historial')}<thead><tr>${headCols.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="${headCols.length}" class="empty">Ese día no tuvo pedidos atendidos.</td></tr>`}</tbody></table></div>`;
+          `<div class="sheet"><table>${colgroupHtml(headCols.map(h=>[h,h]),'dispatch-historial')}<thead><tr>${headCols.map(h=>th(h,h,'dispatch-historial')).join('')}</tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="${headCols.length}" class="empty">Ese día no tuvo pedidos atendidos.</td></tr>`}</tbody></table></div>`;
         $('#work-date')?.addEventListener('change',e=>{
           if(isDriverRole()){ setDriverViewDate(e.target.value); ui.forceLiveDispatch=false; renderDispatch(); return; }
           if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch();
@@ -1380,10 +1401,17 @@
           ...cols.map(([key,label])=>({key,label,cell:p=>n(p.items?.[key])})),
           {key:'id',label:'Acciones',cell:p=>canEditPage('plans')?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}
         ];
-        const menuRows=()=>cols.map(([key,label])=>`<tr><td>${esc(label)}</td><td>${canEditPage('plans')?`<button class="icon-btn" data-action="edit-menu-item" data-id="${key}">Editar</button><button class="icon-btn delete" data-action="delete-menu-item" data-id="${key}">×</button>`:'—'}</td></tr>`).join('');
-        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button><button class="primary" data-action="add-plan">+ Crear plan</button>':'')+orderedTable(planList,definitions,'plans')
+        // Antes esta tabla se armaba a mano (sin colgroup ni tirador de
+        // resize) — quedaba inconsistente con el resto: acá no se podía
+        // ni ensanchar ni reordenar columnas. Con orderedTable() queda
+        // exactamente con las mismas funciones que Clientes, Drivers, etc.
+        const menuDefs=[
+          {key:'label',label:'Artículo',cell:m=>esc(m.label)},
+          {key:'id',label:'Acciones',cell:m=>canEditPage('plans')?`<button class="icon-btn" data-action="edit-menu-item" data-id="${m.key}">Editar</button><button class="icon-btn delete" data-action="delete-menu-item" data-id="${m.key}">×</button>`:'—'}
+        ];
+        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="primary" data-action="add-plan">+ Crear plan</button><button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button>':'')+orderedTable(planList,definitions,'plans')
           +pageHead('Artículos del menú','Aparecen como columnas en Día de trabajo, en el Excel del día procesado y en el portal del cliente. Se pueden crear, renombrar o eliminar artículos (incluidos los que vienen por defecto).')
-          +`<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Artículo</th><th>Acciones</th></tr></thead><tbody>${cols.length?menuRows():'<tr><td colspan="2" class="empty">No hay artículos definidos.</td></tr>'}</tbody></table></div>`;
+          +orderedTable(state.settings.menuItems||[],menuDefs,'menu-items',m=>m.key);
       }
       function menuItemForm(item={}){ return `<div class="form-grid"><label class="wide">Nombre del artículo *<input name="label" required value="${esc(item.label)}" placeholder="Ej.: Postre"></label></div>`; }
       function openMenuItem(key){
@@ -1549,11 +1577,17 @@
           {key:'id',label:'Acciones',cell:u=>`<button class="icon-btn" data-action="edit-user" data-id="${u.id}">Editar</button>${u.id!==activeUser.id?`<button class="icon-btn delete" data-action="delete-user" data-id="${u.id}">×</button>`:''}`}
         ];
         const roleSummary=r=>ROLE_PAGE_OPTIONS.filter(([key])=>r.pages?.[key]?.view).map(([key,label,editable])=>editable&&r.pages[key].edit?`${label} (editar)`:label).join(', ')||'Sin páginas asignadas';
-        const roleRows=r=>{const inUse=staffUsers.filter(u=>u.role===r.id).length;return `<tr><td><b>${esc(r.label)}</b>${inUse?` <small class="muted">(${inUse} usuario${inUse===1?'':'s'})</small>`:''}</td><td>${esc(roleSummary(r))}</td><td><button class="icon-btn" data-action="edit-role" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-role" data-id="${r.id}">×</button></td></tr>`;};
-        $('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Roles fijos: Administrador, Editor, Cocina y Driver. También se pueden crear roles a medida.', '<button class="outline" data-action="add-role">+ Crear rol</button><button class="primary" data-action="add-user">+ Crear usuario</button>')
+        // Misma razón que en "Artículos del menú": antes esta tabla se
+        // armaba a mano, sin colgroup ni tirador de resize.
+        const roleDefs=[
+          {key:'label',label:'Rol',cell:r=>{const inUse=staffUsers.filter(u=>u.role===r.id).length;return `<b>${esc(r.label)}</b>${inUse?` <small class="muted">(${inUse} usuario${inUse===1?'':'s'})</small>`:''}`;}},
+          {key:'perms',label:'Permisos',cell:r=>esc(roleSummary(r))},
+          {key:'id',label:'Acciones',cell:r=>`<button class="icon-btn" data-action="edit-role" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-role" data-id="${r.id}">×</button>`}
+        ];
+        $('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Roles fijos: Administrador, Editor, Cocina y Driver. También se pueden crear roles a medida.', '<button class="primary" data-action="add-user">+ Crear usuario</button><button class="outline" data-action="add-role">+ Crear rol</button>')
           +orderedTable(staffUsers,userDefs,'users')
           +pageHead('Roles personalizados','Qué páginas puede ver y editar cada rol creado a medida. Administrador, Editor, Cocina y Driver son fijos y no aparecen aquí.')
-          +`<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Rol</th><th>Permisos</th><th>Acciones</th></tr></thead><tbody>${(state.settings.customRoles||[]).length?state.settings.customRoles.map(roleRows).join(''):'<tr><td colspan="3" class="empty">No hay roles personalizados todavía.</td></tr>'}</tbody></table></div>`;
+          +orderedTable(state.settings.customRoles||[],roleDefs,'roles',r=>r.id);
       }
       let auditEntries=null;
       async function renderAudit(forceRefresh){

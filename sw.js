@@ -16,7 +16,7 @@
    usuarios bajen la versión nueva en vez de quedarse con la vieja cacheada.
    ========================================================================== */
 
-const CACHE_NAME = 'catering-control-v7';
+const CACHE_NAME = 'catering-control-v8';
 
 // Archivos propios del "cascarón" de la app (ajusta los ?v=N si cambian).
 const PRECACHE_URLS = [
@@ -26,8 +26,8 @@ const PRECACHE_URLS = [
   './cliente.html',
   './login.css?v=3',
   './login.js',
-  './index.css?v=12',
-  './index.js?v=9',
+  './index.css?v=14',
+  './index.js?v=11',
   './driver.css?v=1',
   './cliente.css?v=5',
   './cliente.js?v=3',
