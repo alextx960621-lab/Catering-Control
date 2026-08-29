@@ -568,7 +568,7 @@
               e.preventDefault(); e.stopPropagation();
               handle.setPointerCapture(e.pointerId);
               document.body.classList.add('col-dragging');
-              const initial=col.getBoundingClientRect().width, start=e.clientX;
+              const initial=headCell.getBoundingClientRect().width, start=e.clientX;
               const move=ev=>{ const width=Math.max(28,Math.round(initial+ev.clientX-start)); col.style.width=width+'px'; syncTableWidth(tbl,cols); };
               const up=()=>{
                 handle.removeEventListener('pointermove',move);
