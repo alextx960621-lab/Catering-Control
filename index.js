@@ -973,7 +973,7 @@
         requestAnimationFrame(()=>{
           const row=document.querySelector(`tr[data-id="${id}"]`);
           if(!row)return;
-          row.scrollIntoView({behavior:'smooth',block:'center',inline:'center'});
+          row.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
           row.classList.add('row-flash');
           setTimeout(()=>row.classList.remove('row-flash'),2100);
         });
