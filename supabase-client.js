@@ -1,7 +1,3 @@
-/* ==========================================================================
-   CONEXIÓN A SUPABASE (compartida por login.html, index.html y cliente.html)
-   No necesitas tocar este archivo salvo que cambies de proyecto de Supabase.
-   ========================================================================== */
 (() => {
   const SUPABASE_URL = window.APP_CONFIG?.supabaseUrl;
   const SUPABASE_KEY = window.APP_CONFIG?.supabaseKey;
@@ -18,15 +14,12 @@
 
   const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  // Tres "bases de datos" (tablas) separadas, tal como se pidió:
-  // una para clientes, otra para personal (usuarios/drivers/rutas) y otra para inventario.
   const DB_TABLES = {
     clientes: 'db_clientes',
     personal: 'db_personal',
     inventario: 'db_inventario'
   };
 
-  // Lee el bloque de datos ('payload') guardado para una de las 3 bases.
   async function dbGet(tableKey) {
     const table = DB_TABLES[tableKey];
     try {
@@ -39,7 +32,6 @@
     }
   }
 
-  // Guarda (upsert) el bloque de datos completo de una de las 3 bases.
   async function dbSet(tableKey, payload) {
     const table = DB_TABLES[tableKey];
     try {
@@ -54,9 +46,6 @@
     }
   }
 
-  // Llama a una función (RPC) creada en Supabase — se usa para el login de
-  // clientes y de staff, para que la verificación de carnet/teléfono/contraseña
-  // ocurra en el servidor y nunca haga falta descargar toda la tabla al navegador.
   async function rpc(fnName, params) {
     try {
       const { data, error } = await client.rpc(fnName, params);
@@ -68,13 +57,6 @@
     }
   }
 
-  // ------------------------------------------------------------------------
-  // db_clientes_rows: UNA FILA POR CLIENTE (en vez de un solo bloque con
-  // todos los clientes adentro, como las otras 3 bases). Con esto, guardar
-  // un cambio en un cliente ya no sube/baja la lista completa: solo esa fila.
-  // ------------------------------------------------------------------------
-
-  // Trae todos los clientes (cada uno como objeto plano, con su id).
   async function dbGetClientRows() {
     try {
       const { data, error } = await client.from('db_clientes_rows').select('id,payload');
@@ -86,8 +68,6 @@
     }
   }
 
-  // Guarda (upsert) solo los clientes que cambiaron. Puede ser 1 o varios;
-  // siempre es una sola llamada de red, sin importar cuántos sean.
   async function dbUpsertClientRows(clientsArray) {
     if (!clientsArray || !clientsArray.length) return true;
     try {
@@ -101,7 +81,6 @@
     }
   }
 
-  // Borra las filas de los clientes eliminados.
   async function dbDeleteClientRows(ids) {
     if (!ids || !ids.length) return true;
     try {
@@ -114,8 +93,6 @@
     }
   }
 
-  // Trae solo la fila de un cliente puntual (mucho más liviano que traer
-  // la lista completa, ideal para el portal de autoservicio del cliente).
   async function dbGetClientRow(id) {
     try {
       const { data, error } = await client.from('db_clientes_rows').select('id,payload').eq('id', id).maybeSingle();
@@ -127,15 +104,6 @@
     }
   }
 
-  // ------------------------------------------------------------------------
-  // db_audit_log: historial de cambios (quién hizo qué y cuándo). Es una
-  // tabla de solo AGREGAR filas — cada evento es una fila nueva, nunca se
-  // sobrescribe una fila con otra, así que no tiene el problema de
-  // "un dispositivo desactualizado borra lo que guardó otro".
-  // ------------------------------------------------------------------------
-
-  // Agrega una fila al historial. No hace falta esperar a que termine para
-  // seguir usando la app (se llama "en paralelo", sin bloquear al usuario).
   async function dbInsertAudit(entry) {
     try {
       const { error } = await client.from('db_audit_log').insert(entry);
@@ -147,7 +115,6 @@
     }
   }
 
-  // Trae los últimos N eventos del historial, del más reciente al más viejo.
   async function dbGetAuditLog(limit = 200) {
     try {
       const { data, error } = await client.from('db_audit_log').select('*').order('at', { ascending: false }).limit(limit);
@@ -158,13 +125,6 @@
       return null;
     }
   }
-
-  // ------------------------------------------------------------------------
-  // db_notas_rows: UNA FILA POR NOTA (mismo patrón que db_clientes_rows).
-  // Acá viven tanto las notas que crea el staff (recordatorios propios)
-  // como las que dejan los clientes desde su portal (RPC crear_nota_cliente,
-  // ver supabase-notas-migration.sql).
-  // ------------------------------------------------------------------------
 
   async function dbGetNoteRows() {
     try {
@@ -202,17 +162,6 @@
     }
   }
 
-  // ------------------------------------------------------------------------
-  // db_dispatch_snapshots: UNA FILA POR FECHA con la "foto" completa de
-  // cómo se veía el día al momento de tocar "Procesar día" (nombre,
-  // teléfono, dirección, ruta, driver, plan, bolsas, dieta especial, etc.
-  // ya resueltos, no IDs) — así el historial no cambia si después se edita
-  // un cliente. Se borran solas a los 30 días vía pg_cron (ver
-  // supabase-dispatch-snapshots-migration.sql), sin que el usuario haga nada.
-  // ------------------------------------------------------------------------
-
-  // Guarda (upsert) la foto del día. Se llama en paralelo al procesar el
-  // día — no hace falta esperarla para seguir usando la app.
   async function dbUpsertSnapshot(date, payload) {
     try {
       const { error } = await client
@@ -226,7 +175,6 @@
     }
   }
 
-  // Trae la foto guardada de una fecha puntual (para importar/ver el historial).
   async function dbGetSnapshot(date) {
     try {
       const { data, error } = await client.from('db_dispatch_snapshots').select('date,payload,created_at').eq('date', date).maybeSingle();
@@ -238,7 +186,6 @@
     }
   }
 
-  // Lista las fechas con foto guardada (para mostrar un selector de historial).
   async function dbListSnapshotDates() {
     try {
       const { data, error } = await client.from('db_dispatch_snapshots').select('date,created_at').order('date', { ascending: false });
@@ -250,19 +197,6 @@
     }
   }
 
-  // ------------------------------------------------------------------------
-  // db_delivery_status: UNA FILA POR (fecha, cliente) con el estado de
-  // entrega de Despacho (entregado / no entregado, observación, foto de
-  // respaldo). Es tabla aparte de db_dispatch_snapshots a propósito: acá se
-  // escribe todo el día, en paralelo, desde el celular de cada driver —
-  // si viviera dentro del bloque grande de "clientes" (como state.days),
-  // dos drivers guardando casi al mismo tiempo podrían pisarse los cambios
-  // el uno al otro. Con una fila por cliente y por día, cada guardado solo
-  // toca su propia fila. Se limpia sola pasados ~30 días vía pg_cron (ver
-  // supabase-delivery-status-migration.sql), igual que los snapshots.
-  // ------------------------------------------------------------------------
-
-  // Trae el estado de entrega de todos los clientes para UNA fecha.
   async function dbGetDeliveryRows(date) {
     try {
       const { data, error } = await client.from('db_delivery_status').select('id,client_id,payload').eq('date', date);
@@ -274,8 +208,6 @@
     }
   }
 
-  // Guarda (upsert) el estado de entrega de uno o varios clientes para una
-  // fecha. rows: [{date, clientId, payload}]. Siempre una sola llamada.
   async function dbUpsertDeliveryRows(rows) {
     if (!rows || !rows.length) return true;
     try {

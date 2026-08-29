@@ -1,21 +1,7 @@
-    /* Todos los recuadros del portal (tarjetas, header, hero, métricas,
-       opciones de pausa) comparten el mismo radio de esquina para que se
-       vea uniforme — antes .card usaba el redondeo chico por defecto de
-       Bootstrap (6px) mientras hero/ad-banner/instagram usaban 16px, y se
-       notaba el contraste "cuadrado vs. redondeado". */
-    /* Misma pareja tipográfica que index.css y login.css: Inter para texto
-       de lectura y datos (párrafos, métricas), Figtree para lo que se
-       "anuncia" (títulos, botones) — antes este archivo no definía ninguna
-       fuente propia y caía en la fuente del sistema, distinta a la del
-       resto de la app. */
     :root{--font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Figtree,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
     body{background:var(--page-bg,#f5f7fb);font-family:var(--font)}
     h1,h2,h3,.btn{font-family:var(--font-display)}
     .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#0d6efd,#198754);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.hidden{display:none!important}
-    /* Tarjetas de elección para el modo de pausa (ver .pause-mode-card más
-       abajo): mismo lenguaje visual que el resto (redondeado, sombra sutil)
-       y un estado "seleccionado" claro para que se entienda de un vistazo
-       cuál de las dos opciones está activa. */
     .pause-mode-card{border-radius:1rem;cursor:pointer;transition:border-color .15s ease,background .15s ease,box-shadow .15s ease}
     .btn-check:checked+.pause-mode-card{border-color:var(--bs-primary)!important;background:color-mix(in srgb,var(--bs-primary) 8%,var(--bs-body-bg));box-shadow:0 0 0 2px color-mix(in srgb,var(--bs-primary) 25%,transparent)}
     .pause-mode-card:hover{border-color:color-mix(in srgb,var(--bs-primary) 45%,var(--bs-border-color))}
@@ -29,14 +15,6 @@
     .renewal-banner .bounce{display:inline-block;animation:renewal-bounce 1.4s ease-in-out infinite}
     .renewal-banner .btn-light{font-weight:700}
     @keyframes renewal-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
-    /* Botón "Salir" del portal de cliente: position:fixed lo saca del flujo
-       del documento, así que da igual dónde viva en el HTML — siempre queda
-       clavado arriba a la derecha, visible aunque el cliente scrollee. */
-    /* Este rojo (#e4002b, más vivo) es ahora el --danger oficial de toda
-       la app — ver index.css, donde button.danger / #logout-btn quedaron
-       igual a este botón (antes era al revés: index.css tenía un rojo más
-       apagado, #e24c4b). Misma fórmula de gradiente/sombra en los tres
-       archivos, más variantes para los temas Nocturno y Bosque. */
     .client-logout-btn{
       position:fixed;
       top:14px;
@@ -63,15 +41,8 @@
     [data-theme="night"] .client-logout-btn:hover{box-shadow:0 8px 22px color-mix(in srgb,#ff4d4d 42%,transparent),0 3px 8px rgba(0,0,0,.14)}
     [data-theme="forest"] .client-logout-btn{background:linear-gradient(135deg,color-mix(in srgb,#b3001f 78%,white 22%),#b3001f);box-shadow:0 4px 14px color-mix(in srgb,#b3001f 38%,transparent),0 2px 6px rgba(0,0,0,.12)}
     [data-theme="forest"] .client-logout-btn:hover{box-shadow:0 8px 22px color-mix(in srgb,#b3001f 42%,transparent),0 3px 8px rgba(0,0,0,.14)}
-    /* El botón de Salir es fixed y vive siempre arriba a la derecha, así
-       que no hay margen que "moverlo" — en cambio se le da ese espacio al
-       contenido de abajo (el header, con el selector de Tema) para que no
-       quede tapado debajo. */
     main.portal{padding-top:66px}
     @media (max-width:480px){main.portal{padding-top:60px}}
-    /* Botones del portal, mismo lenguaje visual que .client-logout-btn:
-       píldora + sombra de color + se levanta un poco al pasar el mouse.
-       No toca colores: cada .btn-* de Bootstrap conserva el suyo. */
     .portal .btn{border-radius:999px;font-weight:650;box-shadow:0 3px 10px rgba(0,0,0,.08);transition:transform .15s ease,box-shadow .15s ease,filter .15s ease}
     .portal .btn:hover{transform:translateY(-2px);filter:brightness(1.03)}
     .portal .btn:active{transform:translateY(0) scale(.98)}

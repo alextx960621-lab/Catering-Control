@@ -1,19 +1,11 @@
 html { font-size:15px; }
     :root {
       --brand:#0d6efd;
-      /* Misma pareja tipográfica que index.css y cliente.css: Inter para
-         texto de lectura, Figtree para lo que se "anuncia" (nombre de la
-         empresa, botones, pestañas Cliente/Equipo). Antes login.css no
-         definía ninguna fuente propia y caía en la del sistema. */
       --font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
       --font-display:Figtree,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
     }
     body { min-height:100vh; font-family:var(--font); background:radial-gradient(circle at 20% 20%,rgba(13,110,253,.2),transparent 34%),#f5f7fb; }
     #brand-title, .btn, .nav-pills .nav-link { font-family:var(--font-display); }
-    /* Bootstrap fija sus propios valores dentro de .btn-primary (no hereda
-       una variable global de "primary"), así que para que el botón
-       "Entrar" cambie junto con el tema hay que pisar sus custom
-       properties acá directamente en vez de solo definir --brand. */
     .btn-primary {
       --bs-btn-bg: var(--brand);
       --bs-btn-border-color: var(--brand);
@@ -27,8 +19,6 @@ html { font-size:15px; }
       transition: filter .15s, transform .15s ease, box-shadow .15s ease;
     }
     .btn-primary:hover, .btn-primary:active { filter: brightness(.92); }
-    /* Mismo lenguaje visual que el botón Salir del portal de clientes:
-       píldora + sombra de color + se levanta un poco al pasar el mouse. */
     .btn-primary, #whatsapp-support-btn {
       border-radius: 999px;
       box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 35%, transparent);
@@ -39,10 +29,6 @@ html { font-size:15px; }
     }
     .btn-primary:active { transform: translateY(0) scale(.98); }
     #whatsapp-support-btn { transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
-    /* El selector "Soy cliente / Soy del equipo" (nav-pills) usa por
-       defecto el redondeo chico de Bootstrap para cada botón interno,
-       aunque el contenedor sea rounded-pill — se notaba cuadrado al lado
-       de la tarjeta y los botones, que sí son redondeados. */
     .nav-pills .nav-link { border-radius: 999px; }
     .login-card { max-width:420px; }
     .login-card .card { overflow:hidden; }

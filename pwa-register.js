@@ -1,12 +1,6 @@
-/* ==========================================================================
-   PWA: registro del Service Worker + botón "Instalar app" + aviso de
-   "hay una actualización disponible". Un solo archivo, compartido por
-   login.html, index.html y cliente.html (se agrega con <script defer>).
-   ========================================================================== */
 (() => {
   if (!('serviceWorker' in navigator)) return;
 
-  /* ---------- Estilos compartidos (una sola vez) ---------- */
   function injectStyles() {
     if (document.getElementById('pwa-ui-styles')) return;
     const style = document.createElement('style');
@@ -16,9 +10,6 @@
         from { opacity: 0; transform: translateY(-10px) scale(.97); }
         to   { opacity: 1; transform: translateY(0) scale(1); }
       }
-      /* Contenedor único, centrado arriba de la pantalla — si en algún
-         momento coinciden "instalar" y "actualización disponible", se
-         apilan uno debajo del otro en vez de superponerse. */
       .pwa-stack {
         position: fixed;
         top: max(12px, env(safe-area-inset-top, 0px));
@@ -66,13 +57,6 @@
   const ICON_DOWNLOAD = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19.5V20a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-.5"/></svg>';
   const ICON_REFRESH = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.3-6.4L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.3 6.4L3 16"/><path d="M8 21H3v-5"/></svg>';
 
-  /* ---------- Botón "Instalar app" ----------
-     Chrome dispara el evento "beforeinstallprompt" cuando detecta que el
-     sitio cumple los requisitos de instalación, pero NO muestra nada solo
-     — hay que guardar ese evento y mostrar nuestro propio botón que, al
-     tocarlo, abre el diálogo nativo de instalación. Así el usuario ve
-     algo que tocar en vez de depender del banner automático (que a veces
-     tarda varias visitas en aparecer). */
   function ensureStack() {
     let stack = document.getElementById('pwa-stack');
     if (!stack) {
@@ -89,7 +73,6 @@
   let installBtn = null;
 
   function showInstallButton() {
-    // Si ya está instalada (abierta como app), no mostrar el botón.
     if (installBtn || window.matchMedia('(display-mode: standalone)').matches) return;
     installBtn = document.createElement('button');
     installBtn.className = 'pwa-banner pwa-install';
@@ -103,7 +86,6 @@
       deferredPrompt = null;
       hideInstallButton();
     });
-    // El de "actualización" va primero si ambos coinciden (es más urgente).
     ensureStack().appendChild(installBtn);
   }
   function hideInstallButton() {
@@ -116,13 +98,6 @@
   });
   window.addEventListener('appinstalled', hideInstallButton);
 
-  /* ---------- Aviso "hay una actualización disponible" ----------
-     Cuando subes cambios nuevos (HTML/CSS/JS), el navegador descarga el
-     sw.js nuevo en segundo plano, pero por defecto se queda "esperando"
-     hasta que el usuario cierre todas las pestañas — para no interrumpir
-     a alguien a mitad de una tarea. Este aviso le da al usuario el
-     control: le muestra un cartel y, si toca "Recargar", activa la
-     versión nueva al instante. */
   function showUpdateToast(worker) {
     const toast = document.createElement('button');
     toast.className = 'pwa-banner pwa-update';
@@ -137,7 +112,6 @@
 
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').then(reg => {
-      // Por si ya había una versión nueva esperando de una visita anterior.
       if (reg.waiting) showUpdateToast(reg.waiting);
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
@@ -150,8 +124,6 @@
       });
     }).catch(err => console.warn('[PWA] No se pudo registrar el Service Worker:', err));
 
-    // Cuando el SW nuevo toma el control (tras tocar "Recargar" arriba),
-    // recargar la página una sola vez para que cargue con los archivos nuevos.
     let refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (refreshing) return;

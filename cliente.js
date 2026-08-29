@@ -1,21 +1,10 @@
 (()=>{
       'use strict';
 
-      /* La configuración de la empresa vive en config.js (un solo archivo
-         para toda la app: marca + credenciales de Supabase). */
       const APP_CONFIG = window.APP_CONFIG;
 
       const OPERATIONS_KEY=`${APP_CONFIG.storagePrefix}-operaciones-v3`,CLIENT_ROW_KEY=`${APP_CONFIG.storagePrefix}-client-row-v1`,CLIENT_SESSION_KEY=`${APP_CONFIG.storagePrefix}-client-session-v1`,THEME_KEY=`${APP_CONFIG.storagePrefix}-client-theme-v1`;
-      // Ícono del botón fijo "Salir" (ver .client-logout-btn en cliente.css):
-      // arriba a la derecha, siempre visible aunque el cliente baje en la
-      // página, para que nunca tenga que buscarlo.
       const LOGOUT_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>';
-      // Tema PERSONAL de cada cliente (no del navegador): antes THEME_KEY
-      // guardaba un solo valor compartido por todo el que abriera este
-      // portal en el mismo dispositivo. Ahora se indexa por el id del
-      // cliente que inició sesión (session.id), igual que en el panel de
-      // staff, así que si dos clientes comparten el mismo celular/compu
-      // familiar, cada uno ve su propio tema al entrar.
       const CLIENT_THEME_STORE_KEY=`${APP_CONFIG.storagePrefix}-client-theme-store-v1`;
       function readClientThemeStore(){ try{ return JSON.parse(localStorage.getItem(CLIENT_THEME_STORE_KEY))||{}; }catch(_){ return {}; } }
       function clientTheme(){
@@ -32,24 +21,11 @@
         localStorage.setItem(CLIENT_THEME_STORE_KEY,JSON.stringify(store));
       }
       const $=s=>document.querySelector(s),n=v=>Number(v)||0;
-      // Antes esta lista era fija (los mismos 8 artículos hardcodeados en
-      // index.js). Ahora el menú real vive en Configuración/Planes (panel de
-      // operaciones) y llega acá vía syncBranding() como branding.menuItems.
-      // DEFAULT_ITEMS solo se usa como respaldo si todavía no sincronizó.
       const DEFAULT_ITEMS=[['shots','Shots'],['proteins','Proteínas'],['juices','Jugos'],['breakfast','Desayuno'],['snack1','Merienda 1'],['lunch','Almuerzo'],['snack2','Merienda 2'],['dinner','Cena']];
       function menuItemsList(){ return branding.menuItems && branding.menuItems.length ? branding.menuItems : DEFAULT_ITEMS; }
       const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));let data,session,client;
       let branding={};try{branding=JSON.parse(localStorage.getItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`))||{};}catch(_){branding={};}
-      // Antes esto pedía dbGet('personal') completo: además del nombre/logo
-      // de la empresa trae staffUsers (con el hash de la contraseña de cada
-      // usuario del equipo), drivers y routes — y el portal de cliente los
-      // descargaba igual, sin necesitarlos. get_branding() (ver
-      // supabase-public-branding-migration.sql) devuelve solo el bloque
-      // "settings" (público), nunca staffUsers/drivers/routes.
       async function syncBranding(){try{const settings=await window.SupabaseDB?.rpc('get_branding',{});if(settings){branding={companyName:settings.companyName,logoUrl:settings.logoUrl,itemIcons:settings.itemIcons||{},whatsappNumber:settings.whatsappNumber,instagramUrl:settings.instagramUrl,instagramHandle:settings.instagramHandle,adImageUrl:settings.adImageUrl,renewalWarningDays:settings.renewalWarningDays,menuItems:(settings.menuItems||[]).map(m=>[m.key,m.label])};localStorage.setItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`,JSON.stringify(branding));}}catch(_){}}
-      // El Portal de clientes completo es una función Premium. get_plan_status()
-      // (ver supabase-premium-plan-migration.sql) es un RPC público de solo
-      // lectura: nunca expone staffUsers ni datos sensibles, solo {plan:'...'}.
       async function fetchIsPremium(){try{const info=await window.SupabaseDB?.rpc('get_plan_status',{});return info?.plan==='premium';}catch(_){return false;}}
       function renderLocked(){
         document.documentElement.dataset.bsTheme='light';document.documentElement.dataset.theme='light';
@@ -58,10 +34,6 @@
         <article class="card shadow-sm border-0"><div class="card-body p-4 p-md-5 text-center"><div class="fs-1 mb-2">🔒</div><h2 class="h5">El portal de clientes es una función Premium</h2><p class="text-secondary">Esta cuenta todavía está en el plan Básico. Contacta a tu proveedor para activar el plan Premium y acceder a tu plan, pausas y reactivaciones desde aquí.</p>${wa?`<a class="btn btn-success" href="${wa}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div></article>`;
         $('#logout').onclick=()=>{sessionStorage.removeItem(CLIENT_SESSION_KEY);location.href='./login.html';};
       }
-      // "data" ahora solo trae planes y días (compartidos, livianos). El
-      // cliente propio ("client") se guarda aparte, en su propia fila de la
-      // base de datos: así este portal nunca descarga la lista de los demás
-      // clientes, solo la suya.
       async function syncFromServer(){
         try{
           const [remoteMeta,remoteClient]=await Promise.all([
@@ -111,19 +83,10 @@
         <div class="col-12"><article class="card shadow-sm border-0"><div class="card-body p-4"><h2 class="h5">Déjanos un mensaje</h2><p class="text-secondary">¿Prefieres no escribir por WhatsApp? Cuéntanos qué necesitas (ej.: "Llámenme mañana para cambiar de plan") y el equipo te contacta.</p><textarea class="form-control mb-3" id="client-note-text" rows="2" placeholder="Escribe tu mensaje…"></textarea><button class="btn btn-primary" id="send-note">Enviar mensaje</button><div class="alert mt-3 mb-0 d-none" id="note-feedback"></div></div></article></div>
         ${(branding.instagramUrl||APP_CONFIG.instagramUrl)?`<div class="col-12"><a class="instagram d-flex align-items-center gap-3 rounded-4 p-3 shadow-sm" href="${esc(branding.instagramUrl||APP_CONFIG.instagramUrl)}" target="_blank" rel="noopener"><span class="fs-3">◎</span><span><b class="d-block">Seguinos en Instagram</b><small>${esc(branding.instagramHandle||APP_CONFIG.instagramHandle)} · novedades, menús y bienestar</small></span></a></div>`:''}</section>`;
         $('#theme').value=theme;$('#theme').onchange=e=>{saveClientTheme(e.target.value);render();};$('#logout').onclick=()=>{sessionStorage.removeItem(CLIENT_SESSION_KEY);location.href='./login.html';};
-        // Estos controles solo existen en la tarjeta de pausa (no en la de reactivar).
-        // Antes había un checkbox "Pausar solo, sin fecha de retorno" siempre
-        // tildado y deshabilitado (no hacía nada, solo ocupaba espacio) más
-        // otro checkbox real para agregar fecha. Ahora son dos tarjetas tipo
-        // radio, mutuamente excluyentes, cada una con su explicación.
         document.querySelectorAll('input[name="pause-mode"]').forEach(radio=>radio.addEventListener('change',()=>{
           const scheduled=$('#pause-mode-scheduled').checked,input=$('#return-date');
           $('#return-date-wrap').hidden=!scheduled;input.disabled=!scheduled;if(!scheduled)input.value='';
         }));
-        // Mismo patrón para reactivar: "mañana mismo" (por defecto) o elegir
-        // una fecha puntual — antes solo existía la opción de mañana, así
-        // que si el cliente sabía que volvía recién en dos o tres días no
-        // tenía forma de programarlo, tenía que volver a entrar cada día.
         document.querySelectorAll('input[name="resume-mode"]').forEach(radio=>radio.addEventListener('change',()=>{
           const byDate=$('#resume-mode-date')?.checked,input=$('#resume-date');
           $('#resume-date-wrap').hidden=!byDate;if(input){input.disabled=!byDate;if(!byDate)input.value='';}
@@ -132,11 +95,6 @@
         $('#resume')?.addEventListener('click',requestResume);
         $('#send-note')?.addEventListener('click',sendClientNote);
       }
-      // Nota enviada por el propio cliente: llega al menú "Notas" del staff
-      // (solo editores/admins) con fecha de hoy, en vez de tener que escribir
-      // por WhatsApp. Usa una función de Supabase (crear_nota_cliente) que
-      // solo permite insertar — el cliente nunca ve ni toca las notas del
-      // staff, ni las de otros clientes.
       async function sendClientNote(){
         const textEl=$('#client-note-text'),fb=$('#note-feedback'),btn=$('#send-note'),text=textEl.value.trim();
         if(!text){fb.className='alert alert-danger mt-3 mb-0';fb.textContent='Escribe un mensaje antes de enviarlo.';return;}
@@ -149,37 +107,15 @@
       async function requestPause(){const now=new Date();if(now.getHours()>=22){render('Ya pasó el horario de pausa automática. Ponte en contacto con Atención al Cliente.',true,true);return;}
         const next=nextWorkDay(workDate()),mode=document.querySelector('input[name="pause-mode"]:checked')?.value||'open';
         if(mode==='scheduled'&&!$('#return-date').value){render('Selecciona una fecha de retorno para esta opción.',true);return;}
-        // "Solo mañana" calcula la fecha de retorno sola: el siguiente día
-        // laborable después del que se pausa, sin que el cliente tenga que
-        // elegir nada.
         const returnDate=mode==='tomorrow'?nextWorkDay(next):mode==='scheduled'?$('#return-date').value:'';
         if(returnDate&&returnDate<=next){render('La fecha de retorno debe ser posterior al día pausado.',true);return;}
-        // Coherencia Estado ↔ Fecha de retorno (misma regla que en el panel
-        // de operaciones): con fecha de retorno el estado es "Programado";
-        // sin fecha, queda "Pausado" (pausa abierta).
         client.pauseStart=next;client.returnDate=returnDate;client.status=returnDate?'Programado':'Pausado';client.pauseDates=(client.pauseDates||[]).filter(d=>d!==next);const saved=await save();if(!saved){render('No se pudo guardar la pausa en la base de datos. Intenta nuevamente.',true);return;}
-        // El panel de operaciones (index.js) registra cada pausa en el
-        // historial de auditoría, pero este portal de autoservicio nunca lo
-        // hacía — por eso una pausa hecha por el propio cliente no dejaba
-        // rastro. Se agrega el mismo tipo de registro, identificando al
-        // cliente como el actor (no hay un rol de staff acá).
         window.SupabaseDB?.dbInsertAudit({actor_id:client.id,actor_name:client.name,actor_role:'cliente',action:'Cliente pausó su servicio (autoservicio)',entity_type:'client',entity_label:client.name,entity_id:client.id,details:{desde:next,retorno:returnDate||'sin definir',modo:mode}});
         render(mode==='tomorrow'?`Pausa de un solo día (${next.split('-').reverse().join('/')}). Se reactiva sola el ${returnDate.split('-').reverse().join('/')}.`:returnDate?`Pausa programada desde el ${next.split('-').reverse().join('/')} hasta el ${returnDate.split('-').reverse().join('/')}.`:`Pausa abierta desde el ${next.split('-').reverse().join('/')} sin fecha de retorno.`);}
-      // Reactivación por el propio cliente, con el mismo horario límite
-      // (22:00) y la misma lógica de "aplica al siguiente día laborable"
-      // que la pausa. Se actualiza el estado a "Programado" junto con la
-      // fecha (misma regla Estado ↔ Fecha de retorno que en la pausa):
-      // stateFor() ya devuelve 'Activo' automáticamente a partir de esa
-      // fecha (revisa returnDate antes que pauseStart), pero el campo
-      // status igual debe reflejar que hay una fecha de retorno cargada.
       async function requestResume(){
         const now=new Date();
         if(now.getHours()>=22){render('Ya pasó el horario de reactivación automática. Ponte en contacto con Atención al Cliente.',true,true);return;}
         const next=nextWorkDay(workDate());
-        // El botón "Confirmar reactivación" se usa en dos lugares: acá (pausa
-        // abierta, con los radios mañana/fecha) y en el cartel de "Adelantar
-        // reactivación" cuando ya había una fecha programada — ese segundo
-        // caso no tiene radios, así que por defecto se toma "mañana".
         const byDate=$('#resume-mode-date')?.checked,target=byDate?$('#resume-date')?.value:next;
         if(byDate&&!target){render('Selecciona una fecha de reactivación.',true);return;}
         if(target<next){render('La fecha de reactivación debe ser el siguiente día laborable o una posterior.',true);return;}
@@ -189,10 +125,6 @@
         window.SupabaseDB?.dbInsertAudit({actor_id:client.id,actor_name:client.name,actor_role:'cliente',action:'Cliente reactivó su servicio (autoservicio)',entity_type:'client',entity_label:client.name,entity_id:client.id,details:{reactivaDesde:target}});
         render(`Reactivación programada para el ${target.split('-').reverse().join('/')}.`);
       }
-      // Al primer ingreso (o si se limpió el navegador) todavía no hay una
-      // copia local del cliente: se busca su propia fila en la base de datos
-      // antes de mostrar el portal. En las siguientes visitas ya está en
-      // caché y se muestra al instante mientras se sincroniza de fondo.
       async function boot(){
         try{
           data=JSON.parse(localStorage.getItem(OPERATIONS_KEY))||{};

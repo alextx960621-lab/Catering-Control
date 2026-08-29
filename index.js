@@ -21,29 +21,25 @@
       const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
 
       const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
-      // Tema PERSONAL de cada usuario del panel (no del navegador): se
-      // indexa por el id de quien inició sesión, igual que las columnas, así
-      // dos personas que comparten la misma compu no se pisan el tema. La
-      // clave vieja (UI_THEME_KEY) se sigue usando solo en login.html, donde
-      // todavía no hay nadie logueado, y sirve como valor inicial la primera
-      // vez que cada usuario entra (después cada quien tiene el suyo).
       const USER_THEME_KEY = `${APP_CONFIG.storagePrefix}-user-theme-v1`;
       const SIDEBAR_COLLAPSED_KEY = `${APP_CONFIG.storagePrefix}-sidebar-collapsed-v1`;
-      // Ancho/orden de columnas: preferencia PERSONAL de cada usuario del
-      // panel, no de la empresa. Por eso vive aparte en localStorage (nunca
-      // se sube a Supabase dentro de "settings") y se indexa por el id del
-      // usuario que inició sesión, en vez de guardarse en state.settings
-      // (que es compartido y se sincroniza para todos los dispositivos).
       const COL_PREFS_KEY = `${APP_CONFIG.storagePrefix}-col-prefs-v1`;
-      // Día de trabajo que cada DRIVER decide ver, independiente del "Día de
-      // trabajo" global que fija un editor/admin (state.currentDate). Es
-      // preferencia personal (como el tema): vive en este navegador, no se
-      // sincroniza, y se indexa por el id del driver. Si no eligió nada
-      // todavía, se sigue viendo el día global (mismo comportamiento que
-      // antes de tener esta opción).
       const DRIVER_VIEW_DATE_KEY = `${APP_CONFIG.storagePrefix}-driver-viewdate-v1`;
       const $ = (s, root=document) => root.querySelector(s);
       const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+      (() => {
+        const proto = Element.prototype;
+        const desc = Object.getOwnPropertyDescriptor(proto, 'innerHTML');
+        Object.defineProperty(proto, 'innerHTML', { configurable: true, enumerable: true, get: desc.get, set(html) {
+          if (this.classList && this.classList.contains('page')) {
+            const before = $$('.sheet', this).map(el => el.scrollLeft);
+            desc.set.call(this, html);
+            $$('.sheet', this).forEach((el, i) => { if (before[i]) el.scrollLeft = before[i]; });
+          } else {
+            desc.set.call(this, html);
+          }
+        } });
+      })();
       const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));
       const n = v => Number(v) || 0;
       const uid = p => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
@@ -93,10 +89,6 @@
 
       function readColPrefsStore(){ try { return JSON.parse(localStorage.getItem(COL_PREFS_KEY)) || {}; } catch (_) { return {}; } }
       function writeColPrefsStore(store){ try { localStorage.setItem(COL_PREFS_KEY, JSON.stringify(store)); } catch (_) {} }
-      // Devuelve las preferencias de columnas del usuario activo. La primera
-      // vez que un usuario entra migra el valor viejo compartido (si había
-      // uno) para no perder de golpe lo ya personalizado; de ahí en más cada
-      // usuario tiene su propia copia y ya no se vuelven a tocar entre sí.
       function userColPrefs(){
         const store=readColPrefsStore(), key=activeUser?.id || 'default';
         if(!store[key]){
@@ -104,10 +96,6 @@
           writeColPrefsStore(store);
         }
         store[key].hiddenColumns ??= [];
-        // columnOrder es genérico por tabla ({dispatch:[...], clients:[...]});
-        // antes solo existía "dispatchColumnOrder" suelto — si un usuario ya
-        // tenía uno guardado de una versión anterior, se migra una sola vez
-        // para no perder el orden que ya había personalizado.
         store[key].columnOrder ??= {};
         if(store[key].dispatchColumnOrder?.length && !store[key].columnOrder.dispatch?.length){
           store[key].columnOrder.dispatch=store[key].dispatchColumnOrder;
@@ -135,9 +123,6 @@
         writeColPrefsStore(store);
       }
       function readUserThemeStore(){ try { return JSON.parse(localStorage.getItem(USER_THEME_KEY)) || {}; } catch (_) { return {}; } }
-      // Tema del usuario activo. La primera vez que un usuario entra, toma
-      // como punto de partida lo que estaba elegido en la pantalla de login
-      // (o 'light' si no había nada) y de ahí en más queda solo suyo.
       function userTheme(){
         const store=readUserThemeStore(), key=activeUser?.id || 'default';
         if(!store[key]){
@@ -152,11 +137,7 @@
         localStorage.setItem(USER_THEME_KEY,JSON.stringify(store));
       }
       function readDriverViewDateStore(){ try{ return JSON.parse(localStorage.getItem(DRIVER_VIEW_DATE_KEY))||{}; }catch(_){ return {}; } }
-      // Fecha real de HOY (no la del "Día de trabajo" global) — es la que
-      // usa un driver cuando elige "Día actual sin procesar".
       function realToday(){ return cachedServerDate || today(); }
-      // Devuelve la fecha que un driver eligió ver, o null si nunca la
-      // cambió (=> sigue el Día de trabajo global, como siempre).
       function driverViewDateOverride(){ return isDriverRole() ? (readDriverViewDateStore()[activeUser.id] || '') : ''; }
       function setDriverViewDate(dateStr){
         if(!isDriverRole()) return;
@@ -164,15 +145,8 @@
         if(dateStr) store[activeUser.id]=dateStr; else delete store[activeUser.id];
         localStorage.setItem(DRIVER_VIEW_DATE_KEY,JSON.stringify(store));
       }
-      // Fecha efectiva para las pantallas de un driver (Día de trabajo y
-      // Despacho): su propia elección si hizo una, si no, el Día de trabajo
-      // global fijado por el equipo de administración. Para admin/editor/
-      // cocina esto siempre es simplemente el Día de trabajo global.
       function workDate(){ return isDriverRole() ? (driverViewDateOverride() || state.currentDate) : state.currentDate; }
 
-      // 'superadmin' es un rol fijo más (como 'admin'), pero solo puede existir
-      // UN usuario con ese rol (se valida al crear/editar usuarios en openUser).
-      // Es el único que ve el interruptor de plan Premium/Básico en Configuración.
       const ROLE_LABELS = {admin:'Administrador', editor:'Editor', kitchen:'Cocina', driver:'Driver', superadmin:'Super Administrador'};
       const NAV_PERMS = {
         dispatch: ['admin','editor','kitchen','driver','superadmin'],
@@ -188,8 +162,6 @@
         notes: ['admin','editor','superadmin'],
         settings: ['admin','editor','kitchen','driver','superadmin']
       };
-      // Funciones que solo están disponibles con el plan Premium activo. El
-      // Super Administrador siempre las ve, tenga el plan que tenga la cuenta.
       const PREMIUM_FEATURES = ['payroll','inventory','audit'];
 
       const ROLE_PAGE_OPTIONS = [
@@ -206,8 +178,6 @@
         ['settings','Configuración',false]
       ];
       const role = () => activeUser?.role || 'driver';
-      // El Super Administrador tiene todos los permisos de Administrador
-      // (isAdmin() lo incluye), más el interruptor de plan (isSuperAdmin()).
       const isAdmin = () => role() === 'admin' || role() === 'superadmin';
       const isSuperAdmin = () => role() === 'superadmin';
       const isDriverRole = () => role() === 'driver';
@@ -218,11 +188,7 @@
       function roleLabel(r){ return ROLE_LABELS[r] || customRole(r)?.label || r || 'Usuario'; }
 
       const canManage = () => ['admin','editor','superadmin'].includes(role());
-      // Puede administrar el inventario de cocina.
       const canManageInventory = () => ['admin','editor','kitchen','superadmin'].includes(role());
-      // Puede marcar entregas en Despacho: a diferencia de "Día de trabajo"
-      // (solo admin/editor), acá el driver también puede marcar sus propias
-      // entregas — es la razón de ser de esta pantalla.
       const canManageDelivery = () => ['admin','editor','driver','superadmin'].includes(role());
       function canAccessPage(page){
         if (page === 'users') return isAdmin();
@@ -235,16 +201,9 @@
         if (isBuiltinRole()) return !!BUILTIN_EDIT[page]?.();
         return !!customRole(role())?.pages?.[page]?.edit;
       }
-      // --- Plan Premium/Básico (cuenta completa, lo activa solo el Super Admin) ---
       const isPremium = () => state.settings.plan === 'premium';
-      // true si la persona actual debe ver el contenido real de una función
-      // premium (porque hay Premium activo, o porque es el Super Admin).
       const hasPremiumAccess = () => isPremium() || isSuperAdmin();
       function premiumLockHtml(featureLabel){
-        // El contacto para pasar a Premium es el WhatsApp del PROVEEDOR de
-        // Catering Control (vos/los dueños de la app), no el WhatsApp de
-        // atención al cliente de la empresa que usa el panel — por eso usa
-        // premiumWhatsapp y no whatsappNumber.
         const wa = state.settings.premiumWhatsapp ? `https://wa.me/${state.settings.premiumWhatsapp}?text=${encodeURIComponent(`Hola, quiero activar el plan Premium para desbloquear ${featureLabel}.`)}` : '';
         return `<div class="premium-lock"><div class="premium-lock-icon">🔒</div><h2>${esc(featureLabel)} es una función Premium</h2><p>Esta cuenta está en el plan Básico. Contacta a tu proveedor para activar el plan Premium y desbloquear esta función.</p>${wa?`<a class="btn-premium" href="${wa}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div>`;
       }
@@ -258,12 +217,6 @@
         });
       }
       function canEditDispatchField(c, field){
-        // Misma regla que en Clientes (openClient/clientForm): la fecha de
-        // retorno solo se puede tocar si el estado es "Programado". Antes
-        // acá no se chequeaba el estado, así que se podía cargar una fecha
-        // de retorno aunque el pedido solo estuviera "Pausado hoy" (el
-        // botón rápido de la columna Estado), lo cual no tiene sentido —
-        // esa pausa es solo para el día de hoy, no un regreso programado.
         if (field === 'returnDate' && c.status !== 'Programado') return false;
         if (canEditPage('dispatch')) return true;
         if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && effectiveRouteId(c) === activeUser.routeId;
@@ -284,14 +237,6 @@
           {id:'p_light', name:'Light', type:'General', items:{shots:0,proteins:1,juices:1,breakfast:1,snack1:0,lunch:1,snack2:0,dinner:1}}
         ], drivers: [], clients: [], notes: [], inventory:{items:[],links:[],movements:[]}, settings:{theme:'light', hiddenColumns:[], dispatchColumnOrder:[], columnWidths:{}, companyName:'', logoUrl:'', itemIcons:{}, whatsappNumber:'', premiumWhatsapp:'', instagramUrl:'', instagramHandle:'', adImageUrl:'', renewalWarningDays:3, menuItems: DEFAULT_MENU_ITEMS.map(([key,label])=>({key,label})), customRoles: [], plan: 'basico', premiumUntil: ''}
       });
-      // Fecha "de confianza" para el vencimiento de Premium: se pide al
-      // servidor de Supabase (no al reloj del dispositivo), así cambiar la
-      // fecha de la PC o el celular no adelanta ni atrasa el vencimiento.
-      // Requiere una función SQL en Supabase (ver nota junto al botón de
-      // activar Premium). Si no hay conexión o la función no existe todavía,
-      // usa la última fecha de servidor que se haya podido obtener en esta
-      // sesión — y si nunca se pudo obtener ninguna, cae a la fecha local
-      // solo como último recurso (arranque en frío, sin internet).
       let cachedServerDate = today();
       async function serverToday(){
         try{
@@ -303,11 +248,6 @@
       function normalize(refDate) {
         state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.notes ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
         state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.premiumWhatsapp ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3; state.settings.plan = (state.settings.plan==='premium')?'premium':'basico'; state.settings.premiumUntil ??= '';
-        // Premium por tiempo limitado: si el Super Admin activó Premium con
-        // una fecha límite (premiumUntil) y esa fecha ya pasó, la cuenta
-        // vuelve sola a Básico. Se revisa acá (en cada carga de datos) para
-        // que el downgrade ocurra sin depender de que alguien entre como
-        // Super Admin a apagarlo manualmente.
         if (state.settings.plan === 'premium' && state.settings.premiumUntil && state.settings.premiumUntil < (refDate || cachedServerDate)) {
           state.settings.plan = 'basico'; state.settings.premiumUntil = '';
         }
@@ -316,13 +256,6 @@
         if (!state.routes.some(r => r.open)) state.routes.unshift({id:'r_open',name:'Ruta abierta',description:'Drivers disponibles sin ruta de trabajo',open:true,order:0});
         state.clients.forEach(c => {
           c.items ||= {}; c.order ??= ''; c.status ||= 'Activo'; c.returnDate ??= c.estimatedReturn || ''; c.paidDays ??= 0; c.consumedDays ??= 0;
-          // La fecha de retorno solo tiene sentido cuando el estado es
-          // "Programado". El <input type="date"> en iOS no deja vaciarlo con
-          // el teclado (siempre exige un valor), así que una fecha vieja
-          // podía quedar "pegada" aunque el estado ya fuera otro (Activo,
-          // Pausado, Retorno pendiente) — eso generaba estados inconsistentes.
-          // Se limpia acá solo, cada vez que se cargan los datos, sin que
-          // nadie tenga que editar al cliente a mano.
           if (c.status !== 'Programado' && c.returnDate) c.returnDate = '';
         });
         state.notes.forEach(nt => {
@@ -488,9 +421,6 @@
         } catch (_) { setDatabaseStatus('error'); return false; }
       }
       function day(date=state.currentDate){ return state.days[date] ||= {laborable:true, processed:false, rates:{}, processedClientIds:[]}; }
-      // Última fecha con el día ya procesado (o null si todavía no se procesó
-      // ninguno). Se usa para exigir que "Programado" siempre apunte a una
-      // fecha futura real, nunca a un día que ya se cerró/entregó.
       function lastProcessedDate(){
         const dates=Object.keys(state.days).filter(d=>state.days[d]?.processed);
         return dates.length?dates.sort().at(-1):null;
@@ -518,11 +448,6 @@
         return (c.schedule||[]).find(e=>(e.days||[]).includes(wd)) || null;
       }
       function effectiveRouteId(c,date=state.currentDate){ return scheduleEntryFor(c,date)?.routeId || c.routeId; }
-      // El driver de una franja horaria ya NO se elige aparte: se deduce de
-      // quién tiene asignada esa ruta (misma lógica que el driver base del
-      // cliente). Así, al asignar la ruta de la franja, ese driver queda
-      // contabilizado automáticamente en sus sueldos y pedidos de ese día
-      // — sin poder quedar desincronizado de a quién le corresponde la ruta.
       function effectiveDriverId(c,date=state.currentDate){
         const entry=scheduleEntryFor(c,date);
         if(entry?.routeId) return driverForRoute(entry.routeId)?.id || '';
@@ -575,9 +500,6 @@
       function readScheduleRows(f){ return f._getSchedule ? f._getSchedule() : []; }
       function status(c,date=state.currentDate){
         if (!day(date).laborable) return 'No laborable';
-        // El regreso automático a "Activo" por fecha de retorno es una función
-        // Premium. En plan Básico la fecha de retorno queda solo como dato
-        // informativo: el pase a Activo requiere un clic manual en "Activar".
         if (c.returnDate && date>=c.returnDate && hasPremiumAccess()) return 'Activo';
         if (c.pauseStart && date >= c.pauseStart && (!c.returnDate || date < c.returnDate)) return 'Pausado';
         if (c.pauseDates?.includes(date)) return 'Pausado';
@@ -603,26 +525,8 @@
       function formItems(f){ return Object.fromEntries(menuItems().map(([key])=>[key,n(f.elements[key]?.value)])); }
       function sort(list, key, group){ const s=ui.sort[group]; if(!s?.key) return list; const sortKey=s.key; return [...list].sort((a,b)=>String(value(a,sortKey)).localeCompare(String(value(b,sortKey)),undefined,{numeric:true})*s.dir); }
       function value(x,key){ if(key==='route') return routeName(x.routeId); if(key==='driver') return driverName(x.driverId); if(key==='plan') return planName(x.planId); return x[key] ?? ''; }
-      // El tirador de reordenar (⋮⋮) es un elemento propio, separado del de
-      // resize (el borde derecho). Antes, en Día de trabajo, era el <th>
-      // ENTERO el que tenía draggable="true" con el tirador de resize
-      // viviendo adentro; al empezar a arrastrar el borde para cambiar el
-      // ancho (sobre todo con el dedo, en el celular) el navegador podía
-      // interpretar el gesto como "arrastrar la columna" en vez de
-      // "resizear", y el ancho no cambiaba. Con el grip aparte, cada gesto
-      // tiene su propia zona y ya no compiten entre sí.
-      // Grupos cuya función de render efectivamente consulta el orden
-      // guardado (userColPrefs().columnOrder[group]) para armar sus
-      // columnas — el tirador ⋮⋮ solo se muestra para estos. Payroll queda
-      // afuera a propósito: sus columnas son los días del mes en secuencia
-      // y no tendría sentido reordenarlas.
       const REORDERABLE_GROUPS=new Set(['dispatch','clients','drivers','routes','plans','delivery','menu-items','roles','inventory','inventory-links','inventory-movements','users','audit']);
       function th(label,key,group){ const s=ui.sort[group]; const dragHandle=REORDERABLE_GROUPS.has(group)?'<span class="col-drag-handle" aria-hidden="true" title="Arrastra para reordenar la columna">⋮⋮</span>':''; return `<th data-sort="${key}" data-group="${group}">${dragHandle}${label}${s?.key===key?` <span class="sort-ind">${s.dir===1?'▲':'▼'}</span>`:''}<span class="resize-handle" aria-hidden="true"></span></th>`; }
-      // Un ancho por defecto calculado solo a partir del largo del label
-      // (ver más abajo) le queda muy angosto a algunas columnas que traen
-      // más que texto plano (badges, botones). Va por "grupo:key" para no
-      // pisar columnas con el mismo nombre en otras tablas (ej. "name" en
-      // Clientes vs. en Despacho).
       const COL_WIDTH_OVERRIDES = {
         'dispatch:status': 150,
         'delivery:order': 60, 'delivery:name': 210, 'delivery:status': 220, 'delivery:id': 260
@@ -637,11 +541,6 @@
         return `<colgroup>${cols.map(([label,key])=>`<col data-col-key="${esc(key)}" style="width:${n(saved[key])||defaultColWidth(label,key,group)}px">`).join('')}</colgroup>`;
       }
       function table(list, headers, rows, group){ return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${colgroupHtml(headers,group)}<thead><tr>${headers.map(h=>th(h[0],h[1],group)).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${headers.length}" class="empty">No hay registros para mostrar.</td></tr>`}</tbody></table></div>`; }
-      // Arma una tabla con columnas reordenables por arrastre (mismo tirador
-      // ⋮⋮ en todas las tablas): "definitions" es [{key,label,cell(item)}],
-      // el orden guardado por el usuario para este "group" (ver
-      // saveColumnOrder/enableTableTools) decide en qué posición va cada
-      // una. Evita repetir esta lógica en cada página.
       function orderedTable(list, definitions, group, idFn){
         const allKeys=definitions.map(d=>d.key), wanted=userColPrefs().columnOrder[group]||[];
         const columns=[...definitions].sort((a,b)=>{const ai=wanted.indexOf(a.key),bi=wanted.indexOf(b.key);return (ai<0?allKeys.indexOf(a.key):ai)-(bi<0?allKeys.indexOf(b.key):bi);});
@@ -665,8 +564,6 @@
           $$('.resize-handle',tbl).forEach((handle,index)=>{
             const headCell=handle.parentElement, col=cols[index];
             if(!col) return;
-            // Pointer Events cubre mouse, dedo y lápiz con un solo listener
-            // (antes había un onmousedown Y un ontouchstart por separado).
             handle.onpointerdown=e=>{
               e.preventDefault(); e.stopPropagation();
               handle.setPointerCapture(e.pointerId);
@@ -685,10 +582,6 @@
               handle.addEventListener('pointerup',up);
               handle.addEventListener('pointercancel',up);
             };
-            // Doble clic / doble tap sobre el tirador: restablece esta
-            // columna a su ancho por defecto y borra el valor guardado.
-            // Sirve, entre otras cosas, para corregir de un toque una
-            // columna que quedó mal guardada (por ejemplo, muy angosta).
             handle.ondblclick=e=>{
               e.preventDefault(); e.stopPropagation();
               const group=headCell.dataset.group, key=headCell.dataset.sort;
@@ -700,16 +593,6 @@
             };
           });
         });
-        // Reordenar columnas: el tirador ⋮⋮ (separado del de resize) usa
-        // Pointer Events en vez del drag-and-drop nativo de HTML5, que no
-        // responde al dedo en la mayoría de navegadores móviles — por eso
-        // antes solo se podía reordenar con mouse en escritorio. Disponible
-        // en todas las tablas listadas en REORDERABLE_GROUPS. La tabla se
-        // ubica buscando un <th data-group="..."> y subiendo al <table> que
-        // lo contiene, en vez de un selector de contenedor por página —
-        // así sirve para cualquier tabla nueva sin tener que listar su
-        // selector acá (Inventario, por ejemplo, tiene tres tablas en la
-        // misma página).
         [
           { group:'dispatch', allKeys:['order','name','route','driver','plan',...menuItems().map(([key])=>key),'address1','maps','phone1','phone2','notes','specialDiet','career','bags','status','remaining','returnDate','id'] },
           { group:'clients', allKeys:['order','name','route','address1','maps','phone1','plan','driver','status','paidDays','consumedDays','specialDiet','id'] },
@@ -755,10 +638,6 @@
                 allKeys.forEach(key=>{if(!order.includes(key))order.push(key);});
                 const from=order.indexOf(sourceKey), to=order.indexOf(targetKey);
                 order.splice(to,0,order.splice(from,1)[0]);
-                // renderPage (no solo renderDispatch/renderClients) para que
-                // enableTableTools() vuelva a atar los eventos de los
-                // tiradores nuevos — si no, tras reordenar una vez quedaban
-                // sin funcionar hasta cambiar de página y volver.
                 saveColumnOrder(group,order); renderPage(ui.page);
               };
               document.addEventListener('pointermove',move);
@@ -769,37 +648,12 @@
         });
       }
 
-      // Guarda en memoria las fotos ya descargadas de Supabase en esta
-      // sesión (fecha → snapshot o null) para no volver a pedirlas cada
-      // vez que se re-renderiza la misma fecha.
       let dispatchHistorialCache = {};
-      // ------------------------------------------------------------------
-      // DESPACHO: estado de entrega por (fecha, cliente). Se guarda en la
-      // tabla db_delivery_status (una fila por cliente y día, ver
-      // supabase-client.js) para que varios drivers puedan marcar entregas
-      // al mismo tiempo sin pisarse. deliveryCache guarda lo ya traído de
-      // Supabase para esta sesión, por fecha, para no volver a pedirlo
-      // cada vez que se re-renderiza la misma fecha.
-      // ------------------------------------------------------------------
       let deliveryCache = {};
       async function ensureDeliveryLoaded(date, force){
         if (!force && date in deliveryCache) return;
         deliveryCache[date] = (await window.SupabaseDB?.dbGetDeliveryRows(date)) || [];
       }
-      // ------------------------------------------------------------------
-      // Antes deliveryCache se pedía a Supabase UNA sola vez por fecha (la
-      // primera vez que se abría Despacho) y de ahí en más quedaba fijo en
-      // memoria — si un driver marcaba una entrega desde su celular, un
-      // admin que ya tenía Despacho abierto en esa misma fecha no se
-      // enteraba hasta recargar la página entera (ese era el "retraso").
-      // Ahora, mientras la pantalla de Despacho está abierta, se vuelve a
-      // pedir el estado de entregas al servidor cada 12s y se re-renderiza
-      // sola — así lo que marca un driver se ve reflejado en los demás
-      // dispositivos casi al instante, sin que nadie tenga que recargar.
-      // Se pausa sola si hay un modal abierto (para no interrumpir a quien
-      // está justo marcando/editando una entrega) y se detiene al salir de
-      // la página de Despacho o al cambiar de fecha.
-      // ------------------------------------------------------------------
       let deliveryPollTimer = null;
       function stopDeliveryPoll(){ if (deliveryPollTimer) { clearInterval(deliveryPollTimer); deliveryPollTimer = null; } }
       function startDeliveryPoll(date){
@@ -825,9 +679,6 @@
       }
       function deliveryMarkForm(kind, existing){
         const isFail = kind === 'no_entregado';
-        // Antes acá solo se avisaba con texto "ya tiene una foto guardada"
-        // sin mostrarla — ahora se ve la miniatura real, tanto para el
-        // driver que la subió como para un admin/editor que entra a editar.
         const hasPhoto = existing?.image ? `<div class="wide"><p class="muted" style="margin:0 0 6px">Foto guardada actualmente (sube otra solo si quieres reemplazarla):</p><img class="delivery-detail-photo" style="max-width:220px" src="${existing.image}" alt="Foto de respaldo guardada"></div>` : '';
         return `<div class="form-grid">
           ${isFail
@@ -837,10 +688,6 @@
           ${hasPhoto}
         </div>`;
       }
-      // Vista de solo lectura del detalle de una entrega: observación/motivo
-      // y foto que dejó el driver. Se abre al tocar el nombre de un cliente
-      // en las tarjetas de ruta (vista admin/editor) — antes esas tarjetas
-      // solo mostraban el nombre coloreado, sin forma de ver el detalle.
       function openDeliveryDetail(clientId){
         const c = state.clients.find(x => x.id === clientId); if (!c) return;
         const date = workDate();
@@ -898,8 +745,6 @@
         $('#modal')?.open && $('#modal').close(); // por si se quitó desde el detalle (openDeliveryDetail)
         notice(ok ? 'Marca de entrega eliminada.' : 'Se quitó localmente, pero no se guardó en la base de datos.', !ok);
       }
-      // Clientes activos de una ruta en una fecha, ya ordenados como los ve
-      // el driver (mismo criterio que Día de trabajo: campo "Orden").
       function deliveryListFor(routeId, date){
         const list = state.clients.filter(c => effectiveRouteId(c, date) === routeId && status(c, date) === 'Activo');
         return list.sort((a, b) => (n(a.order) || 9999) - (n(b.order) || 9999) || String(a.name).localeCompare(String(b.name)));
@@ -917,10 +762,6 @@
       function renderDeliveryDriver(date){
         const list = deliveryListFor(activeUser.routeId, date);
         const delivered = list.filter(c => deliveryRecord(date, c.id)?.status === 'entregado').length;
-        // Misma tabla con columnas reordenables/redimensionables que el
-        // resto de la app (orderedTable) — antes esta se armaba a mano con
-        // un colgroup propio (DELIVERY_COLS), separado del resto: se podía
-        // ensanchar pero no reordenar, e inconsistente con las demás.
         const definitions = [
           {key:'order',label:'Orden',cell:c=>n(c.order)||''},
           {key:'name',label:'Cliente',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">${esc(c.address1||'')}</small>`},
@@ -951,10 +792,6 @@
           const drv = driverForRoute(g.route.id);
           const delivered = g.clients.filter(c => deliveryRecord(date, c.id)?.status === 'entregado').length;
           let nextAssigned = false;
-          // Cada cliente es un botón (antes era texto suelto): al tocarlo
-          // abre el detalle con la observación/motivo y la foto que dejó
-          // el driver (openDeliveryDetail) — antes no había forma de ver
-          // eso desde acá, solo el color.
           const items = g.clients.map(c => {
             const st = deliveryRecord(date, c.id)?.status;
             let cls = 'delivery-purple';
@@ -977,14 +814,6 @@
       async function renderDispatch(){
         syncReturnDates(state.currentDate);
         const date=workDate(), d=day(date);
-        // Un día que YA fue procesado (y no es el de hoy) se muestra con la
-        // "foto" congelada que se guardó en Supabase al tocar "Procesar
-        // día" — así, si después editás la dirección/ruta/plan de un
-        // cliente, el historial de ese día no cambia, queda tal cual
-        // estaba. El día de hoy siempre se ve en vivo (todavía se puede
-        // seguir editando). Si esa fecha no tiene foto guardada (se
-        // procesó antes de tener esta función, o no hay conexión), se cae
-        // a los datos en vivo de siempre, como pasaba hasta ahora.
         if(d.processed && date!==today() && !ui.forceLiveDispatch){
           if(!(date in dispatchHistorialCache)){
             $('#dispatch-page').innerHTML=pageHead('Día de trabajo','Cargando historial de este día…');
@@ -1003,9 +832,6 @@
         list=sort(list,'order','dispatch');
         const editableField=(c,field,val,type='text')=>{
           const input=`<input class="day-edit" data-id="${c.id}" data-field="${field}" type="${type}" value="${esc(val)}" ${canEditDispatchField(c,field)?'':'disabled'}>`;
-          // Mismo bug de iOS que "Día de trabajo" y el mes de Sueldos: un
-          // input[type="date"] editable dentro de una celda también se
-          // desborda del ancho de la columna si no se envuelve igual.
           return type==='date'?`<div class="date-input-wrap">${input}</div>`:input;
         };
         const itemValue=(c,key)=>{
@@ -1015,7 +841,7 @@
         const statusCell=c=>{
           const current=status(c,date), pausedToday=c.pauseDates?.includes(date);
           const canToggle=current==='Activo' || pausedToday;
-          return `${badge(current)}${canEditPage('dispatch')&&canToggle?`<button class="outline pause-day-btn" data-action="toggle-day-pause" data-id="${c.id}">${pausedToday?'Reanudar hoy':'Pausar hoy'}</button>`:''}`;
+          return `${badge(current)}${canEditPage('clients')?`<button class="icon-btn" data-action="quick-status" data-id="${c.id}" title="Cambiar estado">✎</button>`:''}${canEditPage('dispatch')&&canToggle?`<button class="outline pause-day-btn" data-action="toggle-day-pause" data-id="${c.id}">${pausedToday?'Reanudar hoy':'Pausar hoy'}</button>`:''}`;
         };
         const definitions=[
           {key:'order',label:'Orden',cell:c=>editableField(c,'order',c.order,'number')},
@@ -1072,13 +898,6 @@
           const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return;
           if(!canEditDispatchField(c,i.dataset.field))return;
           c[i.dataset.field]=i.value;
-          // Coherencia Estado ↔ Fecha de retorno, misma regla que en
-          // Editar cliente y en Pausar cliente: la fecha de retorno solo
-          // existe junto al estado "Programado". Si se carga una fecha
-          // acá, el pedido pasa a Programado (y se marca pauseStart si no
-          // lo tenía, para que se vea "Pausado" día a día hasta esa
-          // fecha); si se borra la fecha, vuelve a "Pausado" (pausa
-          // abierta) en vez de quedar "Programado" sin fecha.
           if(i.dataset.field==='returnDate'){
             if(i.value){ c.status='Programado'; c.pauseStart ||= state.currentDate; }
             else if(c.status==='Programado'){ c.status='Pausado'; }
@@ -1088,9 +907,6 @@
         });
         enableTableTools();
       }
-      // Tabla de solo lectura para un día ya procesado: usa el "payload"
-      // guardado en db_dispatch_snapshots (nombre, ruta, dirección, plan...
-      // ya resueltos como texto plano), no los datos actuales del cliente.
       function renderDispatchHistorial(date,snap){
         const rows=snap.payload?.clientes||[];
         const itemLabels=[...new Set(rows.flatMap(c=>Object.keys(c.items||{})))];
@@ -1129,11 +945,6 @@
         if(!canAccessPage('clients')) return;
         const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c)===activeUser.routeId):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
         const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(c.maps)}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(c.maps2)}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
-        // wa.me necesita el número completo con código de país y sin
-        // espacios/guiones/+. Los números guardados suelen ser locales (8
-        // dígitos en Bolivia), así que si no trae ya un código de país se
-        // le antepone 591; si el cliente ya guardó el número completo
-        // (más de 8 dígitos), se respeta tal cual.
         const waLink=phone=>{
           const digits=(phone||'').replace(/\D/g,'');
           if(!digits) return '—';
@@ -1149,7 +960,7 @@
           {key:'phone1',label:'Teléfono',cell:c=>waLink(c.phone1)},
           {key:'plan',label:'Plan',cell:c=>{const p=plan(c.planId);return `${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:20px;height:20px;object-fit:cover;border-radius:5px;vertical-align:-5px;margin-right:4px">`:''}${esc(planName(c.planId))}`;}},
           {key:'driver',label:'Driver',cell:c=>esc(driverName(c.driverId))},
-          {key:'status',label:'Estado',cell:c=>badge(status(c))},
+          {key:'status',label:'Estado',cell:c=>`${badge(status(c))}${canEditPage('clients')?`<button class="icon-btn" data-action="quick-status" data-id="${c.id}" title="Cambiar estado">✎</button>`:''}`},
           {key:'paidDays',label:'Días pagados',cell:c=>n(c.paidDays)},
           {key:'consumedDays',label:'Consumidos',cell:c=>n(c.consumedDays)},
           {key:'specialDiet',label:'Dieta especial',cell:c=>esc(c.specialDiet||'—')},
@@ -1173,10 +984,6 @@
         showModal(c?'Editar cliente':'Añadir cliente',clientForm(c||{}),async f=>{
           const data=syncClientRouteAndDriver(Object.fromEntries(new FormData(f))); data.items=formItems(f);
           data.schedule=readScheduleRows(f);
-          // Coherencia Estado ↔ Fecha de retorno (no depende de que el JS del
-          // formulario haya corrido bien en el navegador de cada quien —
-          // ej. un campo "disabled" no viaja en el FormData, así que se
-          // resuelve acá de nuevo antes de guardar):
           if(hasPremiumAccess() && data.returnDate) data.status='Programado';
           if(data.status!=='Programado'){ data.returnDate=''; }
           else if(hasPremiumAccess()){
@@ -1187,7 +994,7 @@
           if(c)Object.assign(c,data);else{c={id:uid('c'),...data};state.clients.push(c);}
           const saved=await save();
           if(!saved)return false;
-          renderClients();notice('Cliente guardado en la base de datos.');
+          renderPage(ui.page);notice('Cliente guardado en la base de datos.');
           scrollToRow(c.id);
           logAudit(isNew?'Cliente creado':'Cliente editado','client',c.name,c.id,{});
         });
@@ -1198,9 +1005,6 @@
           const p=plan(planField.value);
           menuItems().forEach(([key])=>{ const input=form.elements[key]; if(input) input.value=n(p?.items?.[key]); });
         };
-        // Enlace Estado ↔ Fecha de retorno: la fecha SOLO existe cuando el
-        // estado es "Programado" — así no puede volver a pasar lo del
-        // calendario de iOS (que no deja vaciar la fecha con el teclado).
         const statusField=$('#client-status'), returnDateField=$('#client-returndate');
         if(statusField && returnDateField){
           statusField.addEventListener('change',()=>{
@@ -1213,6 +1017,39 @@
         }
         initScheduleEditor(form, c?.schedule||[]);
       }
+      function openQuickStatus(id){
+        const c=state.clients.find(x=>x.id===id);if(!c)return;
+        const current=c.status||'Activo';
+        const statusOptions=['Activo','Pausado','Retorno pendiente','Programado'];
+        const html=`<div class="form-grid"><label class="wide">Estado<select name="status" id="quick-status">${statusOptions.map(s=>`<option value="${s}" ${current===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="wide">Fecha de retorno${hasPremiumAccess()?`<input name="returnDate" id="quick-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${current==='Programado'?esc(c.returnDate):''}" ${current==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label></div>`;
+        showModal(`Cambiar estado · ${c.name}`,html,async f=>{
+          const data=Object.fromEntries(new FormData(f));
+          if(hasPremiumAccess() && data.returnDate) data.status='Programado';
+          if(data.status!=='Programado'){ data.returnDate=''; }
+          else if(hasPremiumAccess()){
+            if(!data.returnDate){ notice('El estado "Programado" requiere una fecha de retorno.',true); return false; }
+            const minDate=nextDay(lastProcessedDate()||state.currentDate);
+            if(data.returnDate<minDate){ notice(`La fecha de retorno debe ser posterior al último día procesado (mínimo ${minDate.split('-').reverse().join('/')}).`,true); return false; }
+          }
+          if(data.status==='Pausado') c.pauseStart=state.currentDate;
+          if(data.status==='Activo'){ c.pauseStart=''; c.pauseDates=[]; }
+          c.status=data.status;c.returnDate=data.returnDate;
+          const saved=await save();
+          if(!saved)return false;
+          renderPage(ui.page);notice('Estado actualizado.');scrollToRow(c.id);
+          logAudit('Estado del cliente cambiado','client',c.name,c.id,{estado:data.status});
+        });
+        const statusField=$('#quick-status'), returnDateField=$('#quick-returndate');
+        if(statusField && returnDateField){
+          statusField.addEventListener('change',()=>{
+            if(statusField.value==='Programado'){ returnDateField.disabled=false; }
+            else { returnDateField.value=''; returnDateField.disabled=true; }
+          });
+          returnDateField.addEventListener('change',()=>{
+            if(returnDateField.value) statusField.value='Programado';
+          });
+        }
+      }
       function openClientPause(id){
         const c=state.clients.find(x=>x.id===id);if(!c)return;
         const html=`<div class="form-grid"><div class="wide pause-panel"><label class="pause-option"><input type="checkbox" name="pauseService" checked><span>Pausar servicio desde el día de trabajo actual</span></label><p>La pausa puede quedar abierta.${hasPremiumAccess()?' Si deseas programar el regreso, activa la fecha de retorno.':''}</p>${hasPremiumAccess()?`<label class="pause-option"><input type="checkbox" id="pause-with-return"><span>Agregar fecha de retorno (opcional)</span></label><label id="pause-return-wrap" hidden>Fecha de retorno<input type="date" name="returnDate" min="${state.currentDate}" value=""></label>`:`<p class="muted">🔒 Programar fecha de retorno automática es una función Premium. En el plan Básico, reactiva manualmente con el botón "Activar" cuando corresponda.</p><input type="hidden" name="returnDate" value="">`}</div></div>`;
@@ -1220,14 +1057,9 @@
           if(!f.elements.pauseService.checked)return false;
           const returnDate=f.elements.returnDate.value;
           if(returnDate&&returnDate<=state.currentDate){notice('La fecha de retorno debe ser posterior al inicio de la pausa.',true);return false;}
-          // Coherencia Estado ↔ Fecha de retorno (misma regla que en Editar
-          // cliente): con fecha de retorno el estado es "Programado"; sin
-          // fecha, queda "Pausado" (pausa abierta). pauseStart se sigue
-          // guardando en los dos casos: es lo que hace que status(c,date)
-          // muestre "Pausado" día a día mientras se espera esa fecha.
           c.status=returnDate?'Programado':'Pausado';c.pauseStart=state.currentDate;c.returnDate=returnDate;c.pauseDates=[];
           const saved=await save();if(!saved)return false;
-          renderClients();notice(returnDate?'Pausa guardada con fecha de retorno.':'Pausa abierta guardada sin fecha de retorno.');
+          renderPage(ui.page);notice(returnDate?'Pausa guardada con fecha de retorno.':'Pausa abierta guardada sin fecha de retorno.');
           scrollToRow(c.id);
           logAudit('Cliente pausado','client',c.name,c.id,{desde:state.currentDate,retorno:returnDate||'sin definir'});
         });
@@ -1239,15 +1071,9 @@
         c.status='Activo';c.pauseStart='';c.returnDate='';c.pauseDates=[];
         const saved=await save();
         if(!saved){notice('No se pudo guardar la reactivación en la base de datos. Intenta nuevamente.',true);return;}
-        renderClients();notice(`Servicio de ${c.name} activado.`);scrollToRow(c.id);
+        renderPage(ui.page);notice(`Servicio de ${c.name} activado.`);scrollToRow(c.id);
         logAudit('Cliente reactivado','client',c.name,c.id,{});
       }
-      // ================= NOTAS =================
-      // Recordatorios internos (staff) + mensajes que dejan los clientes
-      // desde su portal (fuente 'cliente', ver cliente.js / RPC
-      // crear_nota_cliente). Una nota "vive" hasta que se marca Cumplida;
-      // mientras tanto, si su fecha ya llegó o pasó, cuenta para el badge
-      // rojo del menú (como los no leídos de una bandeja de mensajes).
       function notesDueToday(){ return state.notes.filter(nt=>nt.status==='pendiente' && nt.dueDate<=state.currentDate); }
       function updateNotesBadge(){
         const el=$('#notes-badge'); if(!el) return;
@@ -1305,9 +1131,6 @@
       function renderNotes(){
         if(!canAccessPage('notes')) return;
         if(!hasPremiumAccess()){ $('#notes-page').innerHTML=pageHead('Notas','Recordatorios internos y mensajes que dejan los clientes desde su portal.')+premiumLockHtml('Notas'); return; }
-        // Las notas que llegan de un cliente entran marcadas "sin leer";
-        // en cuanto alguien del staff abre la página de Notas, se dan por
-        // vistas (el badge rojo baja) aunque todavía sigan pendientes.
         let touched=false;
         state.notes.forEach(nt=>{ if(nt.source==='cliente' && !nt.read){ nt.read=true; touched=true; } });
         if(touched) save();
@@ -1401,10 +1224,6 @@
           ...cols.map(([key,label])=>({key,label,cell:p=>n(p.items?.[key])})),
           {key:'id',label:'Acciones',cell:p=>canEditPage('plans')?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}
         ];
-        // Antes esta tabla se armaba a mano (sin colgroup ni tirador de
-        // resize) — quedaba inconsistente con el resto: acá no se podía
-        // ni ensanchar ni reordenar columnas. Con orderedTable() queda
-        // exactamente con las mismas funciones que Clientes, Drivers, etc.
         const menuDefs=[
           {key:'label',label:'Artículo',cell:m=>esc(m.label)},
           {key:'id',label:'Acciones',cell:m=>canEditPage('plans')?`<button class="icon-btn" data-action="edit-menu-item" data-id="${m.key}">Editar</button><button class="icon-btn delete" data-action="delete-menu-item" data-id="${m.key}">×</button>`:'—'}
@@ -1557,13 +1376,6 @@
         const dayTotals=dates.map((date,i)=>list.reduce((sum,d)=>sum+n(dayValues(d)[i]),0));
         const grandTotal=dayTotals.reduce((a,v)=>a+v,0);
         const totalsRow=`<tfoot><tr class="table-totals"><td>Total (carreras/día)</td>${dayTotals.map(v=>`<td>${v||'—'}</td>`).join('')}<td>${grandTotal}</td><td>—</td><td>—</td></tr></tfoot>`;
-        // Antes esta tabla tenía encabezados <th> escritos a mano, sin
-        // colgroup ni el tirador de resize (.resize-handle) que usan el
-        // resto de las tablas — por eso las columnas se amontonaban y no se
-        // podían ajustar. Ahora usa el mismo th()/colgroupHtml() que
-        // Clientes, Drivers, etc., con sus propios anchos guardados bajo el
-        // grupo 'payroll' (una clave fija por día del mes: 'd1'…'d31', para
-        // que el ancho no se resetee al cambiar de mes).
         const headers=[['Driver / Ruta','driver'],...dates.map((d,i)=>[String(Number(d.slice(-2))),`d${i+1}`]),['Total','total'],['Día tarifa','rate'],['Monto Bs','amount']];
         $('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<div class="date-input-wrap"><input id="payroll-month" type="month" value="${ui.month}"></div></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet table-responsive"><table class="table table-hover align-middle mb-0 payroll">${colgroupHtml(headers,'payroll')}<thead><tr>${headers.map(h=>th(h[0],h[1],'payroll')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody>${list.length?totalsRow:''}</table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
 
@@ -1577,8 +1389,6 @@
           {key:'id',label:'Acciones',cell:u=>`<button class="icon-btn" data-action="edit-user" data-id="${u.id}">Editar</button>${u.id!==activeUser.id?`<button class="icon-btn delete" data-action="delete-user" data-id="${u.id}">×</button>`:''}`}
         ];
         const roleSummary=r=>ROLE_PAGE_OPTIONS.filter(([key])=>r.pages?.[key]?.view).map(([key,label,editable])=>editable&&r.pages[key].edit?`${label} (editar)`:label).join(', ')||'Sin páginas asignadas';
-        // Misma razón que en "Artículos del menú": antes esta tabla se
-        // armaba a mano, sin colgroup ni tirador de resize.
         const roleDefs=[
           {key:'label',label:'Rol',cell:r=>{const inUse=staffUsers.filter(u=>u.role===r.id).length;return `<b>${esc(r.label)}</b>${inUse?` <small class="muted">(${inUse} usuario${inUse===1?'':'s'})</small>`:''}`;}},
           {key:'perms',label:'Permisos',cell:r=>esc(roleSummary(r))},
@@ -1612,12 +1422,6 @@
         ];
         $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+`<div class="toolbar"><input id="audit-search" class="search" placeholder="Buscar por persona, acción o registro…" value="${esc(ui.search.audit||'')}"><span class="spacer"></span><span class="muted">${list.length} eventos</span></div>`+orderedTable(list,definitions,'audit');
         bindSearch('audit-search','audit',renderAudit);
-        // renderAudit es async (espera la carga del historial), pero
-        // renderPage() ata resize/reorder justo después de llamarla SIN
-        // esperar esa carga — cuando esta línea finalmente pinta la tabla
-        // real, esos eventos ya se habían enganchado (o no) sobre el
-        // "Cargando historial…" que había antes, así que la tabla nueva
-        // quedaba sin ellos. Se vuelve a enganchar acá mismo.
         enableTableTools();
       }
       function userForm(u={}){const d=u.driverId?driver(u.driverId):{};const showDriver=u.role==='driver';return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'} autocomplete="new-password"></label><label>${u.id?'Confirmar nueva contraseña':'Confirmar contraseña *'}<input type="password" name="passwordConfirm" ${u.id?'':'required'} autocomplete="new-password"></label><label>Rol<select name="role" id="user-role-select">${isSuperAdmin()?`<option value="superadmin" ${u.role==='superadmin'?'selected':''}>Super Administrador</option>`:''}<option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="kitchen" ${u.role==='kitchen'?'selected':''}>Cocina</option><option value="driver" ${(!u.role||u.role==='driver')?'selected':''}>Driver</option>${(state.settings.customRoles||[]).map(r=>`<option value="${r.id}" ${u.role===r.id?'selected':''}>${esc(r.label)}</option>`).join('')}</select>${isSuperAdmin()?'<p class="muted" style="margin-top:4px">Solo puede haber un Super Administrador.</p>':''}</label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Carnet${showDriver?' *':''}<input name="carnet" value="${esc(d.carnet)}" ${showDriver?'required':''}></label><label class="driver-field" ${showDriver?'':'hidden'}>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="driver-field wide" ${showDriver?'':'hidden'}>Dirección de domicilio<input name="address" value="${esc(d.address)}"></label><p class="muted wide driver-field-hint" ${showDriver?'hidden':''}>Solo el rol Driver necesita ficha de driver y ruta asignada.</p></div>`;}
@@ -1803,18 +1607,10 @@
         $('#premium-whatsapp')?.addEventListener('change',async e=>{if(!isSuperAdmin())return;state.settings.premiumWhatsapp=e.target.value.trim().replace(/[^\d]/g,'');e.target.value=state.settings.premiumWhatsapp;const saved=await save();notice(saved?'Tu WhatsApp de upgrade actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);});
       }
       function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');
-        // Reseteo de estado por si el modal anterior lo dejó distinto (ver
-        // openItemIcons: oculta "Guardar" y cambia "Cancelar" por "Cerrar"
-        // porque ahí cada imagen se guarda sola, sin un paso aparte).
         saveButton.hidden=false;$('#modal-cancel').textContent='Cancelar';
         form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
       async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);if(u?.role==='superadmin'&&!isSuperAdmin()){notice('No puedes eliminar al Super Administrador.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
 
-      // Arma la "foto" del día para el historial de Supabase (db_dispatch_snapshots):
-      // todo ya resuelto en texto plano (nombre, teléfono, dirección, ruta,
-      // driver, plan, dieta especial...), no IDs — así si más adelante el
-      // cliente cambia de dirección o de ruta, el historial de este día no
-      // se ve afectado, queda tal cual estaba al procesar.
       function buildDaySnapshotPayload(date,clientIds){
         const activeClients=clientIds?state.clients.filter(c=>clientIds.includes(c.id)):state.clients.filter(c=>status(c,date)==='Activo');
         const menuCols=menuItems();
@@ -1939,20 +1735,12 @@
         if(!d.laborable){notice('Un día no laborable no procesa pedidos ni descuenta inventario.',true);return;}
         if(d.processed){notice('Este día ya fue procesado.',true);return;}
         if(!confirm(`¿Procesar el día ${state.currentDate.split('-').reverse().join('/')}?`))return;
-        // Se captura la lista de clientes activos ANTES de sumarles el día
-        // consumido: si algún cliente llega justo a su último día pagado, su
-        // estado cambia a "Retorno pendiente" en el mismo instante, y si más
-        // adelante volviéramos a calcular quién estaba "Activo" (en la
-        // constancia o al desprocesar) ese cliente ya no aparecería, pese a
-        // haber sido atendido este día.
         const activeClients=state.clients.filter(c=>status(c)==='Activo');
         const processedIds=activeClients.map(c=>c.id);
         activeClients.forEach(c=>c.consumedDays=n(c.consumedDays)+1);
         applyInventoryForProcessedDay(state.currentDate);
         d.processed=true;d.processedClientIds=processedIds;delete dispatchHistorialCache[state.currentDate];save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel)…');
         logAudit('Día procesado','day',state.currentDate,state.currentDate,{clientesAtendidos:processedIds.length});
-        // Se sube en paralelo (sin await): no hace falta esperarla para
-        // seguir usando la app ni para que se descargue el Excel.
         window.SupabaseDB?.dbUpsertSnapshot(state.currentDate,buildDaySnapshotPayload(state.currentDate,processedIds));
         exportProcessedDaySnapshot(state.currentDate,processedIds);
       }
@@ -2045,10 +1833,6 @@
       }
       async function exportRouteOrder(){
         const date=state.currentDate;
-        // Para un driver, su ruta siempre es la propia (activeUser.routeId).
-        // Para admin/editor no hay una "ruta propia" — se usa la ruta
-        // elegida en el filtro "Ruta" de Día de trabajo, para poder generar
-        // el orden de cualquier ruta puntual.
         const routeId=isDriverRole()?activeUser.routeId:ui.route;
         if(!routeId){ notice('Selecciona una ruta en el filtro "Ruta" antes de imprimir el orden de ruta.',true); return; }
         const r=route(routeId);
@@ -2110,10 +1894,10 @@
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
-        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
 
         const ACTION_PERMS={
-          "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),
+          "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),"quick-status":()=>canEditPage('clients'),
           "add-note":()=>canEditPage('notes'),"edit-note":()=>canEditPage('notes'),"note-done":()=>canEditPage('notes'),"note-reschedule":()=>canEditPage('notes'),"delete-note":()=>canEditPage('notes'),
           "add-driver":()=>canEditPage('drivers'),"edit-driver":()=>canEditPage('drivers'),"delete-driver":()=>canEditPage('drivers'),
           "add-route":()=>canEditPage('routes'),"edit-route":()=>canEditPage('routes'),"delete-route":()=>canEditPage('routes'),
@@ -2132,23 +1916,12 @@
         map[action]?.();});
       document.addEventListener('click',e=>{if(e.target.closest('.resize-handle')||e.target.closest('.col-drag-handle'))return;const h=e.target.closest('th[data-sort]');if(!h)return;const g=h.dataset.group,k=h.dataset.sort,s=ui.sort[g]||{};ui.sort[g]={key:k,dir:s.key===k?-s.dir:1};renderPage(ui.page);});
       $('#nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b)activate(b.dataset.page);};$('#menu-toggle').onclick=()=>$('#nav').classList.toggle('open');
-      // Menú lateral retráctil (solo escritorio): guarda la preferencia por
-      // navegador, igual que el tema, así queda como la dejó la última vez.
       (function initSidebarCollapse(){
         const btn=$('#sidebar-collapse-btn'); if(!btn) return;
         const apply=collapsed=>{ document.getElementById('app').classList.toggle('sidebar-collapsed',collapsed); btn.textContent=collapsed?'»':'«'; btn.title=collapsed?'Expandir menú':'Contraer menú'; };
         apply(localStorage.getItem(SIDEBAR_COLLAPSED_KEY)==='1');
         btn.onclick=()=>{ const collapsed=!document.getElementById('app').classList.contains('sidebar-collapsed'); apply(collapsed); localStorage.setItem(SIDEBAR_COLLAPSED_KEY,collapsed?'1':'0'); };
       })();$('#modal-close').onclick=()=>$('#modal').close();$('#modal-cancel').onclick=()=>$('#modal').close();$('#logout-btn').onclick=async()=>{
-        // save() sube los cambios a Supabase de forma asíncrona (no bloquea
-        // la interfaz). Antes, "Salir" navegaba a login.html al toque, sin
-        // esperar ese guardado — si alguien cambiaba el ancho de una columna
-        // (o cualquier otra cosa) y le daba a Salir enseguida, la navegación
-        // podía cortar el guardado a mitad de camino: quedaba bien en este
-        // navegador (localStorage) pero nunca llegaba a subirse a Supabase.
-        // Al volver a entrar, se bajaba la versión vieja del servidor y
-        // pisaba el cambio, dando la sensación de que "no se guardó nada".
-        // Ahora espera a que cualquier guardado en curso termine antes de salir.
         try{ await operationsSaveQueue; }catch(_){}
         sessionStorage.removeItem(STAFF_SESSION_KEY);
         location.href='./login.html';
@@ -2180,24 +1953,9 @@
       document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
       if(!activeUser){ window.location.replace('./login.html'); return; }
-      // index.js sirve tanto a index.html (staff: admin/editor/kitchen) como a
-      // driver.html (rol driver) — ambas páginas cargan este mismo archivo sin
-      // modificarlo, así el driver tiene exactamente las mismas funciones que
-      // antes tenía dentro de index.html. Lo único que decide a qué pantalla
-      // corresponde cada quien es su rol, chequeado acá una sola vez al entrar:
-      // un driver que llega a index.html (por ej. un enlace viejo guardado) se
-      // manda a driver.html, y quien no es driver pero abre driver.html se
-      // manda de vuelta a index.html. Así ya no hace falta mantener dos copias
-      // del motor de la app.
       const onDriverApp = /driver\.html$/.test(location.pathname);
       if (activeUser.role === 'driver' && !onDriverApp) { window.location.replace('./driver.html'); return; }
       if (activeUser.role !== 'driver' && onDriverApp) { window.location.replace('./index.html'); return; }
       load(); applyBranding(); loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate(isDriverRole()?'delivery':'dispatch');
-      // Si se cierra la pestaña o se recarga mientras hay un guardado en
-      // curso (p. ej. justo después de resizar una columna), el navegador
-      // puede cortar esa subida a Supabase a mitad de camino — el cambio
-      // queda bien guardado en este navegador pero nunca llega al servidor,
-      // y se pierde en el próximo inicio de sesión. Este aviso nativo del
-      // navegador le da a la persona la chance de esperar unos segundos.
       window.addEventListener('beforeunload', e => { if (saveInFlight) { e.preventDefault(); e.returnValue = ''; } });
     })();

@@ -1,4 +1,3 @@
-/* ===== RESET & VARIABLES ===== */
     :root {
       --bg: #f5f7fb;
       --surface: #ffffff;
@@ -9,36 +8,15 @@
       --primary: #3867f4;
       --primary-ink: #fff;
       --accent: #15a77f;
-      /* Antes #e24c4b (más rosado/apagado). Se cambia al rojo del botón
-         "Salir" del portal de cliente (#e4002b, más vivo/saturado), que era
-         el que se prefería — ahora es el único --danger de toda la app, así
-         que #logout-btn (acá) y .client-logout-btn (cliente.css) quedan
-         idénticos en vez de al revés. */
       --danger: #e4002b;
       --warning: #f4a940;
       --shadow: 0 14px 36px rgba(21,35,62,.10);
       --radius: 12px;
-      /* Antes había redondeos sueltos por todos lados (4px, 7px, 8px, 10px,
-         14px, 16px) sin ningún criterio, así que unas cajas se veían
-         cuadradas y otras redondeadas sin razón aparente. Ahora hay 3
-         escalones nada más: chico para controles compactos (inputs, celdas
-         editables, chips), el --radius de siempre para tarjetas/paneles, y
-         grande para pantallas destacadas tipo el bloqueo de plan Premium. */
       --radius-sm: 8px;
       --radius-lg: 16px;
       --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-      /* Figtree para lo que se "anuncia" (marca, títulos, botones, menú):
-         tiene terminaciones redondeadas, va con el resto de la interfaz
-         (píldoras, esquinas redondeadas). Inter se queda para texto de
-         lectura y datos (tablas, montos, formularios), donde importa más
-         la legibilidad en tamaños chicos que el carácter de la letra. */
       --font-display: Figtree, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       color-scheme: light;
-      /* Bootstrap usa estas variables internamente (tablas, bordes, texto).
-         Las igualamos a nuestras variables de tema para que TODO lo que
-         viene de Bootstrap cambie de color junto con el tema, incluido el
-         modo nocturno; si no, Bootstrap sigue usando su texto oscuro fijo
-         y las letras quedan invisibles sobre fondo oscuro. */
       --bs-body-color: var(--text);
       --bs-body-bg: var(--bg);
       --bs-border-color: var(--line);
@@ -78,11 +56,6 @@
       --warning: #bd7b1d;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    /* Red de seguridad: si algún elemento (con texto largo, un grid, etc.)
-       termina midiendo más que el ancho de la pantalla, que el navegador
-       recorte en vez de dejar que la página entera se corra hacia la
-       derecha y se "salga" de la pantalla — que es justo lo que se veía en
-       iOS con el campo "Día de trabajo". */
     html, body { overflow-x: hidden; max-width: 100%; }
     body {
       margin: 0;
@@ -149,7 +122,6 @@
     }
     textarea { resize: vertical; min-height: 70px; }
 
-    /* ===== LOGIN ===== */
     #login {
       min-height: 100vh;
       display: grid;
@@ -187,14 +159,8 @@
     h1, h2, h3 { font-family: var(--font-display); font-weight: 700; }
     .muted { color: var(--muted); }
     .stack { display: grid; gap: 12px; }
-    /* min-width:0 evita el bug clásico de Grid/Flex donde, si el contenido
-       (texto largo, una fecha, etc.) no tiene dónde cortarse, el navegador
-       lo deja crecer más allá del ancho del contenedor en vez de recortarlo
-       — Safari/iOS es más estricto con esto que Chrome, por eso se notaba
-       ahí y no en escritorio. */
     label { display: grid; gap: 5px; font-weight: 650; font-size: 12px; min-width: 0; }
 
-    /* ===== APP LAYOUT ===== */
     #app {
       min-height: 100vh;
       display: grid;
@@ -225,7 +191,6 @@
       display: block;
       margin: 4px 0 0 54px;
     }
-    /* Botón hamburguesa (visible en móvil) */
     .menu-toggle {
       display: none;
       background: transparent;
@@ -234,8 +199,6 @@
       min-height: auto;
       color: var(--text);
     }
-    /* Botón para contraer/expandir el menú lateral (solo escritorio; en
-       móvil el menú ya se pliega con el botón hamburguesa de arriba). */
     .collapse-toggle {
       display: block;
       background: transparent;
@@ -311,12 +274,6 @@
     .sync-dot.ok { background: var(--accent); }
     .sync-dot.error { background: var(--danger); }
     .sync-dot.local { background: var(--warning); }
-    /* En escritorio, "Salir" y "Sincronizar" quedan uno junto al otro y del
-       mismo tamaño (antes "Salir" ocupaba todo el ancho y "Sincronizar" solo
-       lo que ocupaba su contenido). El estado de sync va en su propia fila
-       arriba. .mobile-sync-group se "abre" (display:contents) para que el
-       pill de estado y el botón entren directo a este grid. En móvil, este
-       wrapper pasa a ser una fila compacta distinta (ver @media). */
     .aside-bottom-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -361,14 +318,6 @@
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
-      /* Los botones de cabecera SIEMPRE van en su propia fila, debajo del
-         título — antes (con justify-content:space-between) dependía de si
-         alcanzaba el ancho de pantalla: en páginas con pocos botones o
-         título corto quedaban arriba, a la derecha del título, y en otras
-         (como Planes, con 3 botones) se iban abajo por falta de espacio.
-         flex-basis:100% fuerza el salto de línea siempre, sin importar
-         cuántos botones tenga esa página ni el ancho de pantalla — mismo
-         resultado que Planes en todas las páginas. */
       flex-basis: 100%;
     }
     .head-actions:empty { display: none; }
@@ -386,17 +335,6 @@
     .toolbar .search { width: 230px; }
     .toolbar .field { width: 175px; }
     .toolbar .spacer { flex: 1; }
-    /* iOS Safari a veces calcula un ancho interno "de contenido" para
-       input[type="date"] mayor al que indica el CSS (ignora width/min-width
-       en porcentaje) — mismo bug ya documentado abajo para el campo
-       bloqueado del Driver. Ahí se resolvió reemplazando el input por un
-       div de solo texto; acá el campo sigue editable (Admin/Editor), así
-       que en vez de eso se envuelve en un contenedor flex y se le da al
-       input flex-basis:0 + flex-grow:1: así el ancho lo define el algoritmo
-       de flex (que Safari sí respeta) y no el tamaño de contenido nativo
-       del control. Un simple overflow:hidden solo recorta la vista y deja
-       el texto interno descentrado, como si el input siguiera siendo más
-       ancho por dentro. */
     .date-input-wrap {
       width: 100%;
       display: flex;
@@ -474,9 +412,6 @@
     th[data-sort]:hover { color: var(--primary); }
     th:last-child, td:last-child { border-right: 0; }
     tr:last-child td { border-bottom: 0; }
-    /* Filas alternadas (zebra) para que sea más fácil seguir cada fila con
-       la vista, como en una hoja de cálculo. Las filas de totales (tfoot)
-       quedan fuera porque ya tienen su propio estilo (.table-totals). */
     .sheet table.table tbody tr:nth-child(even) td,
     #dispatch-table tbody tr:nth-child(even) td {
       background: var(--surface-2);
@@ -497,18 +432,11 @@
       touch-action: none;
     }
     th { position: sticky; }
-    /* Mientras se arrastra un tirador (resize o reordenar columnas), el
-       gesto pasa por encima del texto de los encabezados/celdas y el
-       navegador arranca una selección de texto en el medio del drag. Se
-       bloquea la selección en toda la página mientras dura el arrastre
-       (la clase la agrega/saca JS en pointerdown/pointerup). */
     body.col-dragging, body.col-dragging * {
       user-select: none !important;
       -webkit-user-select: none !important;
     }
     th .resize-handle:hover { background: var(--primary); }
-    /* Tirador para reordenar columnas en Día de trabajo (separado del de
-       resize, ver nota en index.js) */
     .col-drag-handle {
       display: inline-block;
       margin-right: 4px;
@@ -593,26 +521,14 @@
     [data-theme="night"] .badge.warn { color: #ffd58e; background: #5e4318; }
     [data-theme="night"] .badge.danger { color: #ffb3c2; background: #5c1626; }
 
-    /* ===== Despacho: tarjetas de progreso por ruta (vista admin/editor) =====
-       Pensado para aguantar muchas rutas grandes (ej. 15 rutas de 50
-       clientes) sin desencuadrarse: el grid es responsivo (auto-fill), cada
-       tarjeta tiene min-width:0 para que un nombre largo nunca la empuje a
-       desbordar la fila, y la lista de clientes scrollea adentro de su
-       propia tarjeta (max-height) en vez de estirarla. */
     .delivery-routes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; align-items: start; }
     .delivery-route-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-    /* Nombre de la ruta en su propia fila (con el contador al lado) y el
-       nombre del driver en la fila de abajo — antes las tres cosas iban en
-       una sola fila flex y, con nombres largos, se apretaban o el orden
-       visual no quedaba claro. */
     .delivery-route-head { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
     .delivery-route-title { display: flex; align-items: center; gap: 8px 10px; min-width: 0; }
     .delivery-route-title h3 { margin: 0; font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
     .delivery-route-driver { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
     .delivery-counter { margin-left: auto; flex: 0 0 auto; font-weight: 700; font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); white-space: nowrap; }
     .delivery-client-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; }
-    /* Cada cliente es ahora un <button>, no solo texto: al tocarlo se abre
-       el detalle (observación/foto que dejó el driver). */
     .delivery-client { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px; font: inherit; font-size: 13.5px; font-weight: 600; border: 1px solid transparent; cursor: pointer; transition: filter .15s ease, transform .1s ease; }
     .delivery-client:hover { filter: brightness(.97); }
     .delivery-client:active { transform: scale(.99); }
@@ -626,15 +542,8 @@
     [data-theme="night"] .delivery-client.delivery-purple { background: #423061; color: #d5b9ff; border-color: #5b4382; }
     [data-theme="night"] .delivery-client.delivery-red { background: #5c1626; color: #ffb3c2; border-color: #7c1e33; }
     [data-theme="forest"] .delivery-counter { background: #cde6cd; border-color: #a9d2ab; }
-    /* Detalle de una entrega dentro del modal (openDeliveryDetail): foto de
-       respaldo a tamaño legible pero sin desbordar el modal. */
     .delivery-detail-photo { display: block; max-width: 100%; margin-top: 6px; border-radius: 10px; border: 1px solid var(--line); }
     .delivery-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    /* Acciones de la tabla de Despacho del driver: que el botón "No
-       entregado" nunca quede recortado. Con la columna ya resizeable
-       (mismo sistema que el resto de tablas, ver enableTableTools) esto es
-       una defensa extra para cuando la columna queda angosta en un celular
-       antes de que el driver la ensanche. */
     #delivery-page td:last-child { white-space: normal; }
     #delivery-page td:last-child .icon-btn, #delivery-page td:last-child .primary, #delivery-page td:last-child .outline { white-space: nowrap; margin: 2px 4px 2px 0; }
 
@@ -797,12 +706,6 @@
       font-weight: 500;
     }
     .toggle-list input { width: auto; min-height: auto; }
-    /* Los inputs de tipo archivo no respetan el ancho de su contenedor por
-       defecto: el botón nativo del navegador se dimensiona según su propio
-       texto ("Elegir archivo" + nombre del archivo elegido), lo que en
-       pantallas angostas (celular) provoca que se desborde y desalinee el
-       resto de la tarjeta, especialmente en Configuración. Forzamos a que
-       ocupe como máximo el ancho disponible. */
     input[type="file"] {
       width: 100%;
       max-width: 100%;
@@ -853,12 +756,6 @@
     .pause-option input { width: auto; min-height: auto; margin-top: 3px; }
     .rate-row input { padding: 5px 6px; }
 
-    /* ===== MENÚ LATERAL RETRÁCTIL (solo escritorio) =====
-       Se exige, además del ancho, que el dispositivo tenga mouse real
-       (hover:hover, pointer:fine). Así, si un celular alguna vez reporta
-       un ancho "de escritorio" (ej. con "Solicitar sitio de escritorio"
-       activado en Chrome), el menú angosto de solo-íconos NO se activa —
-       evita que se corte por falta de alto de pantalla en un teléfono. */
     @media (min-width: 851px) and (hover: hover) and (pointer: fine) {
       #app.sidebar-collapsed {
         grid-template-columns: 72px 1fr;
@@ -905,14 +802,8 @@
       }
     }
 
-    /* ===== RESPONSIVE ===== */
     @media (max-width: 850px) {
       .collapse-toggle { display: none; }
-      /* Las notas se muestran como tarjetas (no como filas de tabla como
-         el resto de las páginas), así que por diseño ocupan más alto por
-         elemento. En celular se compactan bastante más que en escritorio
-         para que no se sienta "larga" la página con solo 2-3 notas
-         visibles en pantalla. */
       .notes-grid { grid-template-columns: 1fr; gap: 8px; }
       .note-card { padding: 10px 12px; gap: 4px; border-left-width: 3px; }
       .note-card-top { gap: 6px; }
@@ -934,15 +825,6 @@
         background: var(--surface);
         box-shadow: 0 2px 10px rgba(0,0,0,0.05);
         flex-direction: row;
-        /* Reinicia el justify-content:space-between heredado de escritorio
-           (ahí ordenaba menú arriba / perfil abajo en columna); en móvil el
-           eje principal pasa a ser horizontal y cada fila envuelta
-           (aside-title, aside-bottom) ya se alinea por su cuenta, así que
-           dejarlo en space-between causaba que el ancho ocupado por la fila
-           de abajo variara según cuánto texto tuviera (nombre/rol cortos vs
-           largos), quedando a veces pegada a los bordes y a veces flotando
-           centrada con aire de sobra a los costados — un mismo usuario veía
-           un salto de tamaño distinto entre páginas sin motivo. */
         justify-content: flex-start;
         align-items: center;
         flex-wrap: wrap;
@@ -987,28 +869,14 @@
         border-top: 0;
         display: flex;
         align-items: center;
-        /* space-between (no center): así el avatar/nombre queda siempre
-           pegado a la izquierda y Salir/sincronizado/Actualizar siempre
-           pegados a la derecha, sin importar cuánto texto tenga el nombre
-           o el rol de la persona. */
         justify-content: space-between;
         gap: 8px;
-        /* flex-basis:100% (no "auto"): obliga a esta fila a ocupar SIEMPRE
-           el ancho completo y a pasar a su propia línea debajo del logo,
-           en vez de "crecer" para llenar el espacio sobrante solo cuando
-           queda sola en su línea — eso es lo que hacía que el mismo header
-           se viera de un ancho distinto según la página. */
         flex: 1 1 100%;
         flex-wrap: nowrap;
       }
       .profile {
         font-size: 12px;
         min-width: 0;
-        /* Antes 96px cortaba con "…" nombres o roles un poco largos (ej.
-           "Administrador"); ahora se calcula a partir del ancho real
-           disponible en la fila (pantalla − avatar − botones de la derecha
-           − espacios) para mostrar el nombre/rol completos sin invadir los
-           botones de Salir/Actualizar. */
         max-width: calc(100vw - 190px);
         flex: 0 1 auto;
         overflow: hidden;
@@ -1020,9 +888,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      /* En móvil el wrapper deja de ser "invisible" y pasa a ser una fila
-         compacta a la derecha del avatar/nombre, así todo cabe en una sola
-         línea en vez de apilarse (Salir, sincronización, etc). */
       .aside-bottom-actions {
         display: flex;
         align-items: center;
@@ -1036,9 +901,6 @@
         gap: 6px;
         flex-wrap: nowrap;
       }
-      /* Con tan poco espacio, el texto de los botones y del estado de
-         sincronización se oculta y solo quedan los íconos + el punto de
-         color; el título (tooltip) conserva el texto para quien lo necesite. */
       .btn-text, .sync-text-label { display: none; }
       .aside-bottom button { padding: 6px 8px; font-size: 14px; min-height: 30px; }
       .sync-pill { padding: 4px; }
@@ -1057,19 +919,7 @@
         align-items: stretch;
       }
       .toolbar .search, .toolbar .field { width: 100%; min-width: 0; }
-      /* Algunos navegadores móviles (sobre todo Safari/iOS) achican el
-         ancho real del widget nativo de input[type=date] cuando está
-         disabled (como pasa con "Día de trabajo" para el rol Driver),
-         aunque el elemento mida 100% por fuera — queda descuadrado frente
-         a los demás filtros de la misma fila. Se fuerza que ocupe todo el
-         ancho de su contenedor en cualquier estado. */
       .toolbar input[type="date"] { width: 100%; min-width: 0; }
-      /* Reemplaza el "disabled" nativo del campo Día de trabajo (solo
-         lectura para Driver): en iOS Safari, input[type=date][disabled]
-         ignora el width por CSS y queda más ancho que su contenedor,
-         desbordando la tarjeta (por eso se veía descuadrado). Sin el
-         atributo disabled, el navegador lo mide como a cualquier otro
-         input; pointer-events:none bloquea la edición igual. */
       .field-locked {
         width: 100%;
         min-width: 0;
@@ -1083,21 +933,11 @@
         display: flex;
         align-items: center;
         overflow: hidden;
-        /* Al vivir dentro de un <label>, iOS Safari puede dibujar su
-           highlight de "toque" (el recuadro gris translúcido, normalmente
-           redondeado) sobre el área del label al tocarlo — y esa área a
-           veces se calcula más grande que la caja visible, asomando por
-           fuera del borde. Como este div ya no es un control real (el
-           campo quedó de solo lectura), no necesita ningún feedback de
-           toque: se apaga explícitamente en vez de dejarlo al navegador. */
         -webkit-tap-highlight-color: transparent;
         -webkit-user-select: none;
         user-select: none;
       }
       label:has(.field-locked) { -webkit-tap-highlight-color: transparent; }
-      /* Tiradores más grandes en pantallas táctiles: 7px es casi imposible
-         de agarrar con el dedo, sobre todo pegado al borde de una tabla
-         con scroll horizontal. */
       .resize-handle { width: 18px; right: -9px; }
       .col-drag-handle { font-size: 18px; padding: 4px 2px; }
       .two-col { grid-template-columns: 1fr; }
@@ -1110,36 +950,22 @@
       .sheet { max-height: calc(100vh - 280px); }
       .form-grid { grid-template-columns: 1fr; }
       .items-grid { grid-template-columns: repeat(2, 1fr); border-radius: var(--radius); }
-      /* Antes la columna de Acciones quedaba fija (position:sticky) al
-         borde derecho en celular para no tener que hacer scroll horizontal
-         para llegar a los botones. Se sacó: en pantallas angostas esa
-         columna fija terminaba ocupando demasiado espacio permanente (y
-         complicaba el resize/drag de esa columna, ver notas en index.js) —
-         ahora se recorre con scroll horizontal como cualquier otra. */
     }
     @media (max-width: 480px) {
       .summary-grid { grid-template-columns: 1fr 1fr; }
       .toolbar .field { width: 100%; }
       .login-card { padding: 20px; }
       input[type="file"] { font-size: 11px; }
-      /* La tarjeta "Íconos de artículos" de Configuración usa columnas de
-         mínimo 150px; en teléfonos angostos eso ya no alcanza para el
-         thumbnail + texto + input de archivo, así que pasa a una sola
-         columna para que nada se corte ni se superponga. */
       #settings-page .toggle-list[style*="minmax"] {
         grid-template-columns: 1fr !important;
       }
     }
-    /* Fila recién creada/editada: se resalta y hace scroll automático hacia
-       ella para que sea visible de inmediato, incluso si queda "debajo" del
-       resto de la tabla. */
     tr[data-id] { scroll-margin-top: 90px; }
     @keyframes rowFlash {
       0% { background: color-mix(in srgb, var(--accent) 38%, transparent); }
       100% { background: transparent; }
     }
     tr.row-flash td { animation: rowFlash 2.1s ease-out; }
-/* ===== Recuadro "función Premium" (bloqueo por plan Básico) ===== */
 .premium-lock {
   max-width: 460px;
   margin: 40px auto;

@@ -1,25 +1,6 @@
-/* La configuración de la empresa vive en config.js (un solo archivo
-   para toda la app: marca + credenciales de Supabase).
-   Este archivo se carga con <script src="./login.js" defer>, así que el
-   navegador garantiza que corre DESPUÉS de que config.js, el SDK de
-   Supabase y supabase-client.js (también defer) ya se hayan cargado y
-   ejecutado — sin necesidad de envolver nada en DOMContentLoaded. */
 const APP_CONFIG = window.APP_CONFIG;
 document.getElementById('brand-title').textContent = APP_CONFIG.companyName;
 document.title = `${APP_CONFIG.companyName} · Iniciar sesión`;
-// Antes acá se pintaba de una el logo de config.js (el "por defecto" del
-// proyecto) y, más abajo, una vez llegaba la respuesta de Supabase, se
-// reemplazaba por el logo real guardado en Configuración — si eran
-// distintos, se veía un parpadeo del logo viejo antes del correcto. Ahora
-// no se pinta ningún logo "de config.js" hasta tener el definitivo.
-//
-// Mientras se espera la respuesta de Supabase, en vez de mostrar siempre el
-// ícono neutro 🍽, se usa el último nombre/logo/WhatsApp que Supabase haya
-// devuelto en este navegador (guardado en localStorage la última vez que
-// cargó bien) — así alguien que ya usó la app antes ve su marca de una,
-// sin parpadeo. Solo si este navegador nunca cargó nada (celular nuevo,
-// primera visita) se ve el ícono neutro mientras llega la respuesta: no hay
-// forma de adivinar el logo de una empresa que nunca se cargó acá.
 const BRANDING_CACHE_KEY = `${APP_CONFIG.storagePrefix}-branding-cache-v1`;
 function applyBranding(name, logo) {
   const finalName = name || APP_CONFIG.companyName;
@@ -50,25 +31,13 @@ updateWhatsappButton(cachedBranding?.whatsappNumber || APP_CONFIG.whatsappNumber
 (async () => {
   let settings = null;
   try {
-    // Antes esto pedía dbGet('personal') completo, que además del nombre y
-    // el logo de la empresa trae staffUsers (con el hash de la contraseña
-    // de cada usuario del equipo), drivers y routes — y como esta página se
-    // ve ANTES de iniciar sesión, cualquiera que la abriera descargaba todo
-    // eso. get_branding() (ver supabase-public-branding-migration.sql)
-    // devuelve solo el bloque "settings" (público), nunca staffUsers.
     settings = await window.SupabaseDB?.rpc('get_branding', {});
   } catch (_) {}
   const name = settings?.companyName?.trim();
-  // Se usa el logo guardado en Configuración; si Supabase no devolvió nada
-  // (sin conexión, empresa recién creada, etc.) recién ahí se cae al logo
-  // por defecto de config.js — nunca se muestran los dos, uno tras otro.
   const logo = settings?.logoUrl || APP_CONFIG.logoUrl;
   applyBranding(name, logo);
   const whatsapp = settings?.whatsappNumber || '';
   if (whatsapp) updateWhatsappButton(whatsapp);
-  // Si la llamada a Supabase funcionó (settings no es null), guarda estos
-  // datos para la próxima carga en este navegador. Si falló (sin conexión,
-  // etc.) no se toca el caché: se deja el último dato bueno que había.
   if (settings) {
     try {
       localStorage.setItem(BRANDING_CACHE_KEY, JSON.stringify({
@@ -79,23 +48,13 @@ updateWhatsappButton(cachedBranding?.whatsappNumber || APP_CONFIG.whatsappNumber
     } catch (_) {}
   }
 })();
-/* ========================================================================== */
 
 const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
 const STAFF_APP_URL = './index.html';
-// Los usuarios con rol "driver" ya no entran a index.html: tienen su propia
-// página, más liviana y con solo lo que un driver usa (Día de trabajo,
-// Clientes, Sueldos, Configuración). driver.html carga el mismo index.js sin
-// tocarlo, así que un driver ve exactamente las mismas funciones que tenía
-// antes dentro de index.html.
 const DRIVER_APP_URL = './driver.html';
 function staffDestination(role) { return role === 'driver' ? DRIVER_APP_URL : STAFF_APP_URL; }
 const CLIENT_PORTAL_URL = './cliente.html';
 const CLIENT_SESSION_KEY = `${APP_CONFIG.storagePrefix}-client-session-v1`;
-// Tema de la pantalla de login (por navegador, todavía no hay nadie
-// logueado). Al entrar, index.html y cliente.html usan este valor solo como
-// punto de partida la primera vez que cada usuario/cliente inicia sesión;
-// de ahí en adelante cada uno tiene su propio tema, independiente del resto.
 const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
 const themeSelect = document.getElementById('theme-select');
 const savedTheme = localStorage.getItem(UI_THEME_KEY) || 'light';
@@ -117,10 +76,6 @@ function showError(msg){errorEl.textContent=msg;errorEl.classList.remove('d-none
 function clearError(){errorEl.classList.add('d-none');}
 function switchAccess(type){const client=type==='client';tabClient.classList.toggle('active',client);tabStaff.classList.toggle('active',!client);formClient.classList.toggle('active',client);formStaff.classList.toggle('active',!client);clearError();}
 tabClient.addEventListener('click',()=>switchAccess('client')); tabStaff.addEventListener('click',()=>switchAccess('staff'));
-/* El carnet/teléfono y el correo/contraseña ya NO se verifican descargando toda
-   la tabla de clientes o de staff al navegador: se validan en el servidor con
-   las funciones login_cliente/login_staff (ver supabase-security-update.sql).
-   El navegador solo recibe el id/nombre/rol de la persona que coincidió. */
 formClient.addEventListener('submit',async e=>{
   e.preventDefault();clearError();
   const carnet=document.getElementById('client-carnet').value.trim(),phone=document.getElementById('client-phone').value.replace(/\D/g,'');
