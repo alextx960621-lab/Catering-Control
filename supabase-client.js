@@ -221,5 +221,63 @@
     }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, dbGetDeliveryRows, dbUpsertDeliveryRows, client };
+  async function dbGetAllAuditLog() {
+    try {
+      const { data, error } = await client.from('db_audit_log').select('*').order('at', { ascending: false });
+      if (error) { console.error('[supabase] Error leyendo historial completo:', error.message); return null; }
+      return data || [];
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo historial completo:', err);
+      return null;
+    }
+  }
+
+  async function dbInsertAuditBulk(entries) {
+    if (!entries || !entries.length) return true;
+    try {
+      const { error } = await client.from('db_audit_log').insert(entries);
+      if (error) { console.error('[supabase] Error restaurando historial:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red restaurando historial:', err);
+      return false;
+    }
+  }
+
+  async function dbGetAllDeliveryStatus() {
+    try {
+      const { data, error } = await client.from('db_delivery_status').select('date,client_id,payload');
+      if (error) { console.error('[supabase] Error leyendo todo db_delivery_status:', error.message); return null; }
+      return (data || []).map(r => ({ date: r.date, clientId: r.client_id, payload: r.payload }));
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo todo db_delivery_status:', err);
+      return null;
+    }
+  }
+
+  async function dbGetAllSnapshots() {
+    try {
+      const { data, error } = await client.from('db_dispatch_snapshots').select('date,payload');
+      if (error) { console.error('[supabase] Error leyendo todos los snapshots:', error.message); return null; }
+      return data || [];
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo todos los snapshots:', err);
+      return null;
+    }
+  }
+
+  async function dbUpsertSnapshotsBulk(snapshotsArray) {
+    if (!snapshotsArray || !snapshotsArray.length) return true;
+    try {
+      const rows = snapshotsArray.map(s => ({ date: s.date, payload: s.payload, created_at: new Date().toISOString() }));
+      const { error } = await client.from('db_dispatch_snapshots').upsert(rows, { onConflict: 'date' });
+      if (error) { console.error('[supabase] Error restaurando snapshots:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red restaurando snapshots:', err);
+      return false;
+    }
+  }
+
+  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetAllAuditLog, dbInsertAuditBulk, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, dbGetAllSnapshots, dbUpsertSnapshotsBulk, dbGetDeliveryRows, dbUpsertDeliveryRows, dbGetAllDeliveryStatus, client };
 })();

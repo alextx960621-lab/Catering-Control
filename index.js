@@ -1894,7 +1894,25 @@
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
-        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
+          const scope=$('#export-scope')?.value||'all';
+          if(scope!=='all'){
+            const scopes={clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};
+            const chosen=scopes[scope];
+            const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();
+            return;
+          }
+          notice('Preparando respaldo completo (incluye auditoría, despachos y snapshots)…');
+          const db=window.SupabaseDB;
+          const [auditLog,deliveryStatus,snapshots]=await Promise.all([
+            db?.dbGetAllAuditLog(),
+            db?.dbGetAllDeliveryStatus(),
+            db?.dbGetAllSnapshots()
+          ]);
+          const data={...state,staffUsers,auditLog:auditLog||[],deliveryStatus:deliveryStatus||[],snapshots:snapshots||[]};
+          const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download=`catering-respaldo-completo-${today()}.json`;a.click();
+          notice('Respaldo completo descargado.');
+        },"import-json":()=>$('#import-file').click()};
 
         const ACTION_PERMS={
           "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),"quick-status":()=>canEditPage('clients'),
@@ -1934,18 +1952,29 @@
           catch{ notice('El archivo no es un JSON válido.',true); e.target.value=''; return; }
           if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)){ notice('El archivo no tiene el formato esperado.',true); e.target.value=''; return; }
 
-          const knownStateKeys=['clients','plans','days','currentDate','drivers','routes','settings','inventory'];
+          const knownStateKeys=['clients','plans','days','currentDate','drivers','routes','settings','inventory','notes'];
           const foundStateKeys=knownStateKeys.filter(k=>k in parsed);
           const hasStaffUsers=Array.isArray(parsed.staffUsers)&&parsed.staffUsers.length>0;
-          if(!foundStateKeys.length&&!hasStaffUsers){ notice('El archivo no contiene datos reconocibles de Catering Control.',true); e.target.value=''; return; }
-          const resumen=[...foundStateKeys,...(hasStaffUsers?['staffUsers']:[])].join(', ');
+          const hasAuditLog=Array.isArray(parsed.auditLog)&&parsed.auditLog.length>0;
+          const hasDeliveryStatus=Array.isArray(parsed.deliveryStatus)&&parsed.deliveryStatus.length>0;
+          const hasSnapshots=Array.isArray(parsed.snapshots)&&parsed.snapshots.length>0;
+          if(!foundStateKeys.length&&!hasStaffUsers&&!hasAuditLog&&!hasDeliveryStatus&&!hasSnapshots){ notice('El archivo no contiene datos reconocibles de Catering Control.',true); e.target.value=''; return; }
+          const resumen=[...foundStateKeys,...(hasStaffUsers?['staffUsers']:[]),...(hasAuditLog?['auditoría']:[]),...(hasDeliveryStatus?['despachos']:[]),...(hasSnapshots?['snapshots']:[])].join(', ');
           if(!confirm(`Vas a restaurar: ${resumen}.\n\nEsto reemplaza esos datos en este dispositivo y, al guardar, también en Supabase (para los demás dispositivos). ¿Continuar?`)){ e.target.value=''; return; }
           foundStateKeys.forEach(k=>{ state[k]=parsed[k]; });
           if(hasStaffUsers) staffUsers=parsed.staffUsers;
           normalize();
           const saved=await save();
+          const db=window.SupabaseDB;
+          const [okAudit,okDelivery,okSnapshots]=await Promise.all([
+            hasAuditLog?db?.dbInsertAuditBulk(parsed.auditLog):Promise.resolve(true),
+            hasDeliveryStatus?db?.dbUpsertDeliveryRows(parsed.deliveryStatus):Promise.resolve(true),
+            hasSnapshots?db?.dbUpsertSnapshotsBulk(parsed.snapshots):Promise.resolve(true)
+          ]);
+          deliveryCache={};
           render();
-          notice(saved?'Respaldo restaurado y guardado en Supabase.':'Se restauró localmente, pero no se pudo guardar en Supabase. Intenta sincronizar de nuevo.',!saved);
+          const allOk=saved&&okAudit&&okDelivery&&okSnapshots;
+          notice(allOk?'Respaldo restaurado y guardado en Supabase.':'Se restauró localmente, pero algo no se guardó del todo en Supabase (revisa la consola e intenta sincronizar de nuevo).',!allOk);
           e.target.value='';
         };
         r.readAsText(file);

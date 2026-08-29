@@ -171,7 +171,7 @@
       top: 0;
       height: 100vh;
       overflow: auto;
-      padding: 18px 12px;
+      padding: 18px 12px 130px;
       background: var(--surface);
       border-right: 1px solid var(--line);
       display: flex;
@@ -275,11 +275,21 @@
     .sync-dot.error { background: var(--danger); }
     .sync-dot.local { background: var(--warning); }
     .aside-bottom-actions {
+      position: fixed;
+      left: 18px;
+      bottom: 18px;
+      z-index: 40;
+      width: 204px;
       display: grid;
       grid-template-columns: 1fr 1fr;
       grid-template-areas: "status status" "logout sync";
       gap: 8px;
       align-items: center;
+      background: var(--surface);
+      padding: 10px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      border: 1px solid var(--line);
     }
     .mobile-sync-group { display: contents; }
     #sync-pill { grid-area: status; }
@@ -792,6 +802,12 @@
       #app.sidebar-collapsed .aside-bottom-actions {
         grid-template-columns: 1fr;
         grid-template-areas: "status" "logout" "sync";
+        width: 56px;
+        left: 8px;
+        padding: 8px 6px;
+      }
+      #app.sidebar-collapsed aside {
+        padding-bottom: 150px;
       }
       #app.sidebar-collapsed .btn-text,
       #app.sidebar-collapsed .sync-text-label {
@@ -803,6 +819,11 @@
     }
 
     @media (max-width: 850px) {
+      /* Evita que el grid #app estire la fila del header cuando el
+         contenido de la página es corto (Notas, Sueldos, Auditoría,
+         Inventario, etc.). Sin esto, el hueco entre el ☰ y el nombre
+         de usuario variaba según cuánto contenido tuviera cada página. */
+      #app { grid-template-rows: auto 1fr; align-content: start; }
       .collapse-toggle { display: none; }
       .notes-grid { grid-template-columns: 1fr; gap: 8px; }
       .note-card { padding: 10px 12px; gap: 4px; border-left-width: 3px; }
@@ -877,7 +898,7 @@
       .profile {
         font-size: 12px;
         min-width: 0;
-        max-width: calc(100vw - 190px);
+        max-width: calc(100vw - 24px);
         flex: 0 1 auto;
         overflow: hidden;
       }
@@ -889,11 +910,24 @@
         text-overflow: ellipsis;
       }
       .aside-bottom-actions {
+        position: fixed;
+        top: 58px;
+        right: 10px;
+        bottom: auto;
+        left: auto;
+        width: auto;
+        height: auto;
+        z-index: 200;
         display: flex;
         align-items: center;
         gap: 6px;
         flex-wrap: nowrap;
         flex-shrink: 0;
+        background: var(--surface);
+        padding: 5px 8px;
+        border-radius: 999px;
+        box-shadow: var(--shadow);
+        border: 1px solid var(--line);
       }
       .mobile-sync-group {
         display: flex;
