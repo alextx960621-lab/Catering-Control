@@ -15,7 +15,7 @@
        bajo demanda solo cuando el usuario exporta un Excel (procesar día,
        exportar dietas, exportar orden de ruta). Así el panel carga más
        liviano y rápido en el uso normal del día a día. -->
-  <link rel="stylesheet" href="./index.css?v=9">
+  <link rel="stylesheet" href="./index.css?v=10">
 
   <!-- ===== PWA: manifest + íconos + color de tema ===== -->
   <link rel="manifest" href="./manifest.json">
@@ -60,7 +60,7 @@
           <button class="danger" id="logout-btn" title="Cerrar sesión"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg><span class="btn-text"> Salir</span></button>
           <div class="mobile-sync-group">
             <div class="sync-pill" id="sync-pill" title="Estado de sincronización"><span class="sync-dot" id="sync-dot"></span><span id="sync-text" class="sync-text-label">Listo</span></div>
-            <button class="outline" id="manual-sync-btn" title="Sincronizar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span class="btn-text"> Sincronizar</span></button>
+            <button class="refresh" id="manual-sync-btn" title="Sincronizar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span class="btn-text"> Sincronizar</span></button>
           </div>
         </div>
       </div>
@@ -85,7 +85,7 @@
   <input id="import-file" type="file" accept="application/json" hidden>
   <div class="notice" id="notice"></div>
 
-  <script src="./index.js?v=7" defer></script>
+  <script src="./index.js?v=8" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous" defer></script>
 <script src="./pwa-register.js?v=2" defer></script>
 </body>

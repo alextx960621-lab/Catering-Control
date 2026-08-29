@@ -11,9 +11,31 @@ document.title = `${APP_CONFIG.companyName} · Iniciar sesión`;
 // proyecto) y, más abajo, una vez llegaba la respuesta de Supabase, se
 // reemplazaba por el logo real guardado en Configuración — si eran
 // distintos, se veía un parpadeo del logo viejo antes del correcto. Ahora
-// no se pinta ningún logo hasta tener el definitivo: mientras se espera la
-// respuesta se deja el ícono neutro, y recién ahí se decide cuál mostrar.
-document.getElementById('brand-mark').textContent = '🍽';
+// no se pinta ningún logo "de config.js" hasta tener el definitivo.
+//
+// Mientras se espera la respuesta de Supabase, en vez de mostrar siempre el
+// ícono neutro 🍽, se usa el último nombre/logo/WhatsApp que Supabase haya
+// devuelto en este navegador (guardado en localStorage la última vez que
+// cargó bien) — así alguien que ya usó la app antes ve su marca de una,
+// sin parpadeo. Solo si este navegador nunca cargó nada (celular nuevo,
+// primera visita) se ve el ícono neutro mientras llega la respuesta: no hay
+// forma de adivinar el logo de una empresa que nunca se cargó acá.
+const BRANDING_CACHE_KEY = `${APP_CONFIG.storagePrefix}-branding-cache-v1`;
+function applyBranding(name, logo) {
+  const finalName = name || APP_CONFIG.companyName;
+  document.getElementById('brand-title').textContent = finalName;
+  document.title = `${finalName} · Iniciar sesión`;
+  document.getElementById('brand-mark').innerHTML = logo
+    ? `<img src="${logo}" alt="${finalName}" onerror="this.parentElement.textContent='🍽'">`
+    : '🍽';
+}
+let cachedBranding = null;
+try { cachedBranding = JSON.parse(localStorage.getItem(BRANDING_CACHE_KEY)); } catch (_) {}
+if (cachedBranding && (cachedBranding.name || cachedBranding.logo)) {
+  applyBranding(cachedBranding.name, cachedBranding.logo);
+} else {
+  document.getElementById('brand-mark').textContent = '🍽';
+}
 const waBtn = document.getElementById('whatsapp-support-btn');
 function updateWhatsappButton(number) {
   const num = String(number || '').replace(/\D/g, '');
@@ -24,7 +46,7 @@ function updateWhatsappButton(number) {
     waBtn.classList.add('d-none');
   }
 }
-updateWhatsappButton(APP_CONFIG.whatsappNumber);
+updateWhatsappButton(cachedBranding?.whatsappNumber || APP_CONFIG.whatsappNumber);
 (async () => {
   let settings = null;
   try {
@@ -41,11 +63,21 @@ updateWhatsappButton(APP_CONFIG.whatsappNumber);
   // (sin conexión, empresa recién creada, etc.) recién ahí se cae al logo
   // por defecto de config.js — nunca se muestran los dos, uno tras otro.
   const logo = settings?.logoUrl || APP_CONFIG.logoUrl;
-  if (name) { document.getElementById('brand-title').textContent = name; document.title = `${name} · Iniciar sesión`; }
-  document.getElementById('brand-mark').innerHTML = logo
-    ? `<img src="${logo}" alt="${name || APP_CONFIG.companyName}" onerror="this.parentElement.textContent='🍽'">`
-    : '🍽';
-  if (settings?.whatsappNumber) updateWhatsappButton(settings.whatsappNumber);
+  applyBranding(name, logo);
+  const whatsapp = settings?.whatsappNumber || '';
+  if (whatsapp) updateWhatsappButton(whatsapp);
+  // Si la llamada a Supabase funcionó (settings no es null), guarda estos
+  // datos para la próxima carga en este navegador. Si falló (sin conexión,
+  // etc.) no se toca el caché: se deja el último dato bueno que había.
+  if (settings) {
+    try {
+      localStorage.setItem(BRANDING_CACHE_KEY, JSON.stringify({
+        name: name || '',
+        logo: settings.logoUrl || '',
+        whatsappNumber: whatsapp
+      }));
+    } catch (_) {}
+  }
 })();
 /* ========================================================================== */
 

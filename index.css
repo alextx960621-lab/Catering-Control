@@ -119,6 +119,17 @@
       box-shadow: 0 4px 14px color-mix(in srgb, var(--danger) 38%, transparent);
     }
     button.danger:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--danger) 42%, transparent); }
+    /* Botones de "Actualizar/Sincronizar" (sidebar y Auditoría): mismo
+       patrón de degradado que .danger (Salir), pero en azul (--primary) y
+       con ícono + texto siempre blancos — a diferencia de .primary, cuyo
+       color de texto cambia según el tema (var(--primary-ink)) para
+       mantener contraste en el tema nocturno. */
+    button.refresh {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 78%, white 22%), var(--primary));
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 38%, transparent);
+    }
+    button.refresh:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 42%, transparent); }
     button.outline {
       background: transparent;
       border: 1px solid var(--line);

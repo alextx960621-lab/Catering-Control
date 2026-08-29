@@ -629,7 +629,7 @@
         const rows=item=>`<tr${idFn?` data-id="${idFn(item)}"`:''}>${columns.map(c=>`<td>${c.cell(item)}</td>`).join('')}</tr>`;
         return table(list,headers,rows,group);
       }
-      function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); updateNotesBadge(); }
+      function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); updateNotesBadge(); window.scrollTo(0,0); }
       function render(){ document.documentElement.dataset.theme=userTheme(); $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); updateNotesBadge(); }
       function renderPage(name){ const fn={dispatch:renderDispatch,delivery:renderDelivery,clients:renderClients,notes:renderNotes,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
       function enableTableTools(){
@@ -1484,7 +1484,7 @@
       async function renderAudit(forceRefresh){
         if(!canAccessPage('audit')) return;
         if(!hasPremiumAccess()){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios.')+premiumLockHtml('Auditoría'); return; }
-        const actions='<button class="outline" data-action="refresh-audit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>';
+        const actions='<button class="refresh" data-action="refresh-audit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>';
         if(forceRefresh||auditEntries===null){
           $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+'<p class="muted">Cargando historial…</p>';
           const rows=await window.SupabaseDB?.dbGetAuditLog(300);
