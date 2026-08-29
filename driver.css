@@ -1,0 +1,31 @@
+/* ==========================================================================
+   AJUSTES PROPIOS DE LA WEB DEL DRIVER
+   ==========================================================================
+   El motor visual (colores, tarjetas, tablas, botones, tema) sigue viviendo
+   en index.css — este archivo es solo lo que driver.html agrega ENCIMA
+   (se carga después) para pensar la pantalla para un celular en la mano de
+   un driver: botones más grandes para tocar con el dedo y que la columna
+   de Acciones de Despacho nunca quede apretada, incluso antes de que el
+   driver la ensanche a mano con el tirador de resize.
+   ========================================================================== */
+
+/* Tabla de Despacho del driver: overrides al mínimo por si la pantalla es
+   muy angosta — la columna "Acciones" no baja de este ancho aunque el
+   navegador quiera repartir el espacio parejo entre columnas, así el botón
+   "No entregado" nunca se corta ni queda tapado. */
+#delivery-page .sheet table colgroup col:last-child { min-width: 220px; }
+#delivery-page td:last-child, #delivery-page th:last-child { min-width: 220px; }
+
+/* Botones un poco más altos en toda la web del driver — más fáciles de
+   tocar manejando con una mano o con guantes que en la vista de escritorio
+   de Operaciones. */
+#delivery-page .primary, #delivery-page .outline, #delivery-page .icon-btn {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* En celulares angostos, mejor que "Entregado" y "No entregado" se vean
+   uno debajo del otro en vez de amontonados en una sola línea. */
+@media (max-width: 480px) {
+  #delivery-page td:last-child { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+}

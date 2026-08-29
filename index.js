@@ -629,7 +629,7 @@
         const rows=item=>`<tr${idFn?` data-id="${idFn(item)}"`:''}>${columns.map(c=>`<td>${c.cell(item)}</td>`).join('')}</tr>`;
         return table(list,headers,rows,group);
       }
-      function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); updateNotesBadge(); window.scrollTo(0,0); }
+      function activate(name){ if(!canAccessPage(name)) name='dispatch'; if(name!=='delivery') stopDeliveryPoll(); ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); updateNotesBadge(); window.scrollTo(0,0); }
       function render(){ document.documentElement.dataset.theme=userTheme(); $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); updateNotesBadge(); }
       function renderPage(name){ const fn={dispatch:renderDispatch,delivery:renderDelivery,clients:renderClients,notes:renderNotes,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
       function enableTableTools(){
@@ -759,9 +759,35 @@
       // cada vez que se re-renderiza la misma fecha.
       // ------------------------------------------------------------------
       let deliveryCache = {};
-      async function ensureDeliveryLoaded(date){
-        if (date in deliveryCache) return;
+      async function ensureDeliveryLoaded(date, force){
+        if (!force && date in deliveryCache) return;
         deliveryCache[date] = (await window.SupabaseDB?.dbGetDeliveryRows(date)) || [];
+      }
+      // ------------------------------------------------------------------
+      // Antes deliveryCache se pedía a Supabase UNA sola vez por fecha (la
+      // primera vez que se abría Despacho) y de ahí en más quedaba fijo en
+      // memoria — si un driver marcaba una entrega desde su celular, un
+      // admin que ya tenía Despacho abierto en esa misma fecha no se
+      // enteraba hasta recargar la página entera (ese era el "retraso").
+      // Ahora, mientras la pantalla de Despacho está abierta, se vuelve a
+      // pedir el estado de entregas al servidor cada 12s y se re-renderiza
+      // sola — así lo que marca un driver se ve reflejado en los demás
+      // dispositivos casi al instante, sin que nadie tenga que recargar.
+      // Se pausa sola si hay un modal abierto (para no interrumpir a quien
+      // está justo marcando/editando una entrega) y se detiene al salir de
+      // la página de Despacho o al cambiar de fecha.
+      // ------------------------------------------------------------------
+      let deliveryPollTimer = null;
+      function stopDeliveryPoll(){ if (deliveryPollTimer) { clearInterval(deliveryPollTimer); deliveryPollTimer = null; } }
+      function startDeliveryPoll(date){
+        stopDeliveryPoll();
+        deliveryPollTimer = setInterval(async () => {
+          if (ui.page !== 'delivery' || workDate() !== date) { stopDeliveryPoll(); return; }
+          if ($('#modal')?.open) return; // no interrumpir una marca/edición en curso
+          await ensureDeliveryLoaded(date, true);
+          if (ui.page !== 'delivery' || workDate() !== date) return; // cambió mientras esperaba la red
+          if (isDriverRole()) renderDeliveryDriver(date); else renderDeliveryAdmin(date);
+        }, 12000);
       }
       function deliveryRecord(date, clientId){
         return (deliveryCache[date] || []).find(r => r.clientId === clientId) || null;
@@ -776,7 +802,10 @@
       }
       function deliveryMarkForm(kind, existing){
         const isFail = kind === 'no_entregado';
-        const hasPhoto = existing?.image ? `<p class="muted" style="margin:-4px 0 0">Ya tiene una foto guardada; sube otra solo si quieres reemplazarla.</p>` : '';
+        // Antes acá solo se avisaba con texto "ya tiene una foto guardada"
+        // sin mostrarla — ahora se ve la miniatura real, tanto para el
+        // driver que la subió como para un admin/editor que entra a editar.
+        const hasPhoto = existing?.image ? `<div class="wide"><p class="muted" style="margin:0 0 6px">Foto guardada actualmente (sube otra solo si quieres reemplazarla):</p><img class="delivery-detail-photo" style="max-width:220px" src="${existing.image}" alt="Foto de respaldo guardada"></div>` : '';
         return `<div class="form-grid">
           ${isFail
             ? `<label class="wide">Motivo por el que no se entregó *<textarea name="reason" required rows="3" placeholder="Ej.: Cliente no se encontraba, dirección incorrecta…">${esc(existing?.reason||'')}</textarea></label>`
@@ -784,6 +813,35 @@
           <label class="wide">Foto de respaldo (opcional)<input type="file" name="photoFile" accept="image/*" capture="environment"></label>
           ${hasPhoto}
         </div>`;
+      }
+      // Vista de solo lectura del detalle de una entrega: observación/motivo
+      // y foto que dejó el driver. Se abre al tocar el nombre de un cliente
+      // en las tarjetas de ruta (vista admin/editor) — antes esas tarjetas
+      // solo mostraban el nombre coloreado, sin forma de ver el detalle.
+      function openDeliveryDetail(clientId){
+        const c = state.clients.find(x => x.id === clientId); if (!c) return;
+        const date = workDate();
+        const rec = deliveryRecord(date, clientId);
+        const st = rec?.status;
+        const statusBadge = st === 'entregado' ? '<span class="badge active">Entregado</span>' : st === 'no_entregado' ? '<span class="badge danger">No entregado</span>' : '<span class="badge off">Pendiente</span>';
+        const metaBits = [];
+        if (rec?.by) metaBits.push(`Marcado por ${esc(rec.by)}`);
+        if (rec?.at) metaBits.push(new Date(rec.at).toLocaleString('es-BO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
+        const canEdit = canEditPage('delivery');
+        const actions = !canEdit ? '' : (st === 'entregado' || st === 'no_entregado')
+          ? `<div class="delivery-detail-actions"><button class="icon-btn" data-action="edit-delivery" data-id="${c.id}" data-kind="${st}">Editar</button><button class="icon-btn delete" data-action="clear-delivery" data-id="${c.id}">Quitar marca</button></div>`
+          : `<div class="delivery-detail-actions"><button class="primary" data-action="mark-delivered" data-id="${c.id}">Marcar entregado</button><button class="outline" data-action="mark-not-delivered" data-id="${c.id}">Marcar no entregado</button></div>`;
+        const body = `<div class="stack">
+          <p style="margin:0"><b>${esc(c.name)}</b><br><small class="muted">${esc(routeName(effectiveRouteId(c, date)))}${c.address1 ? ` · ${esc(c.address1)}` : ''}</small></p>
+          <p style="margin:0">${statusBadge}${metaBits.length ? ` <small class="muted">${metaBits.join(' · ')}</small>` : ''}</p>
+          ${st === 'no_entregado' && rec?.reason ? `<p style="margin:0"><b>Motivo:</b> ${esc(rec.reason)}</p>` : ''}
+          ${rec?.note ? `<p style="margin:0"><b>Observación:</b> ${esc(rec.note)}</p>` : ''}
+          ${rec?.image ? `<img class="delivery-detail-photo" src="${rec.image}" alt="Foto de respaldo">` : (st ? '<p class="muted" style="margin:0">Sin foto de respaldo.</p>' : '<p class="muted" style="margin:0">Todavía no se marcó este pedido.</p>')}
+          ${actions}
+        </div>`;
+        showModal(`Detalle de entrega — ${c.name}`, body, () => false);
+        $('#modal-save').hidden = true;
+        $('#modal-cancel').textContent = 'Cerrar';
       }
       function openDeliveryMark(clientId, kind){
         if (!canEditPage('delivery')) { notice('No tienes permiso para marcar entregas.', true); return; }
@@ -814,6 +872,7 @@
         if (!confirm('¿Quitar la marca de entrega de este pedido?')) return;
         const ok = await saveDeliveryRecord(date, clientId, { status: 'pendiente', reason: '', note: '', image: '', at: new Date().toISOString(), by: activeUser?.name || roleLabel(role()) });
         renderDelivery();
+        $('#modal')?.open && $('#modal').close(); // por si se quitó desde el detalle (openDeliveryDetail)
         notice(ok ? 'Marca de entrega eliminada.' : 'Se quitó localmente, pero no se guardó en la base de datos.', !ok);
       }
       // Clientes activos de una ruta en una fecha, ya ordenados como los ve
@@ -824,11 +883,25 @@
       }
       async function renderDelivery(){
         if (!canAccessPage('delivery')) return;
+        stopDeliveryPoll();
         const date = workDate();
         $('#delivery-page').innerHTML = pageHead('Despacho', 'Cargando estado de entregas…');
         await ensureDeliveryLoaded(date);
         if (workDate() !== date || ui.page !== 'delivery') return; // cambió de fecha/página mientras cargaba
         if (isDriverRole()) renderDeliveryDriver(date); else renderDeliveryAdmin(date);
+        startDeliveryPoll(date);
+      }
+      // Columnas con ancho/orden editable: mismo sistema (colgroup +
+      // tirador de resize) que usan Día de trabajo y Clientes — antes esta
+      // tabla se armaba a mano sin colgroup ni resize-handle, por eso no se
+      // podía ajustar el ancho de columnas acá y, en pantallas angostas, la
+      // columna "Acciones" quedaba tan apretada que el botón "No entregado"
+      // no entraba. Con anchos por defecto ya generosos (ver DELIVERY_COLS)
+      // el botón entra de una, y además ahora se puede ensanchar a mano.
+      const DELIVERY_COLS = [['Orden', 'order', 60], ['Cliente', 'name', 210], ['Estado de entrega', 'status', 220], ['Acciones', 'actions', 260]];
+      function deliveryColgroup(){
+        const saved = userColPrefs().columnWidths?.delivery || {};
+        return `<colgroup>${DELIVERY_COLS.map(([, key, def]) => `<col data-col-key="${key}" style="width:${n(saved[key]) || def}px">`).join('')}</colgroup>`;
       }
       function renderDeliveryDriver(date){
         const list = deliveryListFor(activeUser.routeId, date);
@@ -848,9 +921,8 @@
             : `<button class="primary" data-action="mark-delivered" data-id="${c.id}">Entregado</button> <button class="outline" data-action="mark-not-delivered" data-id="${c.id}">No entregado</button>`;
           return `<tr data-id="${c.id}"><td>${n(c.order) || ''}</td><td><b>${esc(c.name)}</b><br><small class="muted">${esc(c.address1 || '')}</small></td><td>${statusBadge}${detail}</td><td>${actions}</td></tr>`;
         };
-        const headCols = ['Orden', 'Cliente', 'Estado de entrega', 'Acciones'];
-        $('#delivery-page').innerHTML = pageHead('Despacho', `Tu ruta: ${esc(routeName(activeUser.routeId))} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente.`, `<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
-          `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr>${headCols.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${list.length ? list.map(rows).join('') : '<tr><td colspan="4" class="empty">No hay pedidos activos para esta fecha en tu ruta.</td></tr>'}</tbody></table></div>`;
+        $('#delivery-page').innerHTML = pageHead('Despacho', `Tu ruta: ${esc(routeName(activeUser.routeId))} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente. Se actualiza sola cada pocos segundos.`, `<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
+          `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0">${deliveryColgroup()}<thead><tr>${DELIVERY_COLS.map(([label, key]) => th(label, key, 'delivery')).join('')}</tr></thead><tbody>${list.length ? list.map(rows).join('') : '<tr><td colspan="4" class="empty">No hay pedidos activos para esta fecha en tu ruta.</td></tr>'}</tbody></table></div>`;
       }
       function renderDeliveryAdmin(date){
         const groups = state.routes.map(r => ({ route: r, clients: deliveryListFor(r.id, date) })).filter(g => g.clients.length);
@@ -858,24 +930,27 @@
           const drv = driverForRoute(g.route.id);
           const delivered = g.clients.filter(c => deliveryRecord(date, c.id)?.status === 'entregado').length;
           let nextAssigned = false;
+          // Cada cliente es un botón (antes era texto suelto): al tocarlo
+          // abre el detalle con la observación/motivo y la foto que dejó
+          // el driver (openDeliveryDetail) — antes no había forma de ver
+          // eso desde acá, solo el color.
           const items = g.clients.map(c => {
             const st = deliveryRecord(date, c.id)?.status;
             let cls = 'delivery-purple';
             if (st === 'entregado') cls = 'delivery-green';
             else if (st === 'no_entregado') cls = 'delivery-red';
             else if (!nextAssigned) { cls = 'delivery-orange'; nextAssigned = true; }
-            return `<li class="delivery-client ${cls}">${esc(c.name)}</li>`;
+            return `<li><button type="button" class="delivery-client ${cls}" data-action="view-delivery" data-id="${c.id}">${esc(c.name)}</button></li>`;
           }).join('');
           return `<div class="card card-pad delivery-route-card">
             <div class="delivery-route-head">
-              <h3>${esc(g.route.name)}</h3>
-              <span class="muted">Driver: ${esc(drv ? `${drv.firstName} ${drv.lastName}` : 'Sin asignar')}</span>
-              <span class="delivery-counter">${delivered}/${g.clients.length}</span>
+              <div class="delivery-route-title"><h3>${esc(g.route.name)}</h3><span class="delivery-counter">${delivered}/${g.clients.length}</span></div>
+              <div class="delivery-route-driver">Driver: ${esc(drv ? `${drv.firstName} ${drv.lastName}` : 'Sin asignar')}</div>
             </div>
             <ul class="delivery-client-list">${items}</ul>
           </div>`;
         };
-        $('#delivery-page').innerHTML = pageHead('Despacho', `Progreso de entrega por ruta — ${date.split('-').reverse().join('/')}. Verde: entregado · Naranja: siguiente en la lista del driver · Morado: pendientes · Rojo: no entregado.`) +
+        $('#delivery-page').innerHTML = pageHead('Despacho', `Progreso de entrega por ruta — ${date.split('-').reverse().join('/')}. Verde: entregado · Naranja: siguiente en la lista del driver · Morado: pendientes · Rojo: no entregado. Toca un cliente para ver el detalle. Se actualiza sola cada pocos segundos.`) +
           `<div class="delivery-routes-grid">${groups.length ? groups.map(cardHtml).join('') : '<p class="muted">No hay rutas con pedidos activos para esta fecha.</p>'}</div>`;
       }
       async function renderDispatch(){
@@ -2001,7 +2076,7 @@
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
-        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
 
         const ACTION_PERMS={
           "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),
@@ -2016,7 +2091,7 @@
           "add-inventory-link":()=>canEditPage('inventory'),"edit-inventory-link":()=>canEditPage('inventory'),"delete-inventory-link":()=>canEditPage('inventory'),
           "add-user":isAdmin,"edit-user":isAdmin,"delete-user":isAdmin,"add-role":isAdmin,"edit-role":isAdmin,"delete-role":isAdmin,
           "process-day":()=>canEditPage('dispatch'),"unprocess-day":()=>canEditPage('dispatch'),"toggle-day-pause":()=>canEditPage('dispatch'),
-          "mark-delivered":()=>canEditPage('delivery'),"mark-not-delivered":()=>canEditPage('delivery'),"edit-delivery":()=>canEditPage('delivery'),"clear-delivery":()=>canEditPage('delivery'),
+          "mark-delivered":()=>canEditPage('delivery'),"mark-not-delivered":()=>canEditPage('delivery'),"edit-delivery":()=>canEditPage('delivery'),"clear-delivery":()=>canEditPage('delivery'),"view-delivery":()=>canAccessPage('delivery'),
           "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin,"refresh-audit":()=>canAccessPage('audit')
         };
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
@@ -2043,7 +2118,7 @@
         try{ await operationsSaveQueue; }catch(_){}
         sessionStorage.removeItem(STAFF_SESSION_KEY);
         location.href='./login.html';
-      };$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();const sd=await serverToday();normalize(sd);render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{
+      };$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();const sd=await serverToday();normalize(sd);deliveryCache={};render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{
         const file=e.target.files[0];if(!file)return;
         const r=new FileReader();
         r.onload=async()=>{

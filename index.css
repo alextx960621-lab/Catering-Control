@@ -119,17 +119,6 @@
       box-shadow: 0 4px 14px color-mix(in srgb, var(--danger) 38%, transparent);
     }
     button.danger:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--danger) 42%, transparent); }
-    /* Botones de "Actualizar/Sincronizar" (sidebar y Auditoría): mismo
-       patrón de degradado que .danger (Salir), pero en azul (--primary) y
-       con ícono + texto siempre blancos — a diferencia de .primary, cuyo
-       color de texto cambia según el tema (var(--primary-ink)) para
-       mantener contraste en el tema nocturno. */
-    button.refresh {
-      background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 78%, white 22%), var(--primary));
-      color: #fff;
-      box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 38%, transparent);
-    }
-    button.refresh:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 42%, transparent); }
     button.outline {
       background: transparent;
       border: 1px solid var(--line);
@@ -604,14 +593,29 @@
     [data-theme="night"] .badge.warn { color: #ffd58e; background: #5e4318; }
     [data-theme="night"] .badge.danger { color: #ffb3c2; background: #5c1626; }
 
-    /* ===== Despacho: tarjetas de progreso por ruta (vista admin/editor) ===== */
-    .delivery-routes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-    .delivery-route-card { display: flex; flex-direction: column; gap: 10px; }
-    .delivery-route-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
-    .delivery-route-head h3 { margin: 0; font-size: 15px; }
-    .delivery-counter { margin-left: auto; font-weight: 700; font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+    /* ===== Despacho: tarjetas de progreso por ruta (vista admin/editor) =====
+       Pensado para aguantar muchas rutas grandes (ej. 15 rutas de 50
+       clientes) sin desencuadrarse: el grid es responsivo (auto-fill), cada
+       tarjeta tiene min-width:0 para que un nombre largo nunca la empuje a
+       desbordar la fila, y la lista de clientes scrollea adentro de su
+       propia tarjeta (max-height) en vez de estirarla. */
+    .delivery-routes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; align-items: start; }
+    .delivery-route-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    /* Nombre de la ruta en su propia fila (con el contador al lado) y el
+       nombre del driver en la fila de abajo — antes las tres cosas iban en
+       una sola fila flex y, con nombres largos, se apretaban o el orden
+       visual no quedaba claro. */
+    .delivery-route-head { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .delivery-route-title { display: flex; align-items: center; gap: 8px 10px; min-width: 0; }
+    .delivery-route-title h3 { margin: 0; font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+    .delivery-route-driver { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+    .delivery-counter { margin-left: auto; flex: 0 0 auto; font-weight: 700; font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); white-space: nowrap; }
     .delivery-client-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; }
-    .delivery-client { padding: 7px 10px; border-radius: 8px; font-size: 13.5px; font-weight: 600; border: 1px solid transparent; }
+    /* Cada cliente es ahora un <button>, no solo texto: al tocarlo se abre
+       el detalle (observación/foto que dejó el driver). */
+    .delivery-client { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px; font: inherit; font-size: 13.5px; font-weight: 600; border: 1px solid transparent; cursor: pointer; transition: filter .15s ease, transform .1s ease; }
+    .delivery-client:hover { filter: brightness(.97); }
+    .delivery-client:active { transform: scale(.99); }
     .delivery-client.delivery-green { background: #dff7ed; color: #087354; border-color: #b9ecd4; }
     .delivery-client.delivery-orange { background: #fff2d9; color: #8d5a02; border-color: #ffdd9e; }
     .delivery-client.delivery-purple { background: #eee5ff; color: #7551ad; border-color: #ddccff; }
@@ -622,6 +626,17 @@
     [data-theme="night"] .delivery-client.delivery-purple { background: #423061; color: #d5b9ff; border-color: #5b4382; }
     [data-theme="night"] .delivery-client.delivery-red { background: #5c1626; color: #ffb3c2; border-color: #7c1e33; }
     [data-theme="forest"] .delivery-counter { background: #cde6cd; border-color: #a9d2ab; }
+    /* Detalle de una entrega dentro del modal (openDeliveryDetail): foto de
+       respaldo a tamaño legible pero sin desbordar el modal. */
+    .delivery-detail-photo { display: block; max-width: 100%; margin-top: 6px; border-radius: 10px; border: 1px solid var(--line); }
+    .delivery-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    /* Acciones de la tabla de Despacho del driver: que el botón "No
+       entregado" nunca quede recortado. Con la columna ya resizeable
+       (mismo sistema que el resto de tablas, ver enableTableTools) esto es
+       una defensa extra para cuando la columna queda angosta en un celular
+       antes de que el driver la ensanche. */
+    #delivery-page td:last-child { white-space: normal; }
+    #delivery-page td:last-child .icon-btn, #delivery-page td:last-child .primary, #delivery-page td:last-child .outline { white-space: nowrap; margin: 2px 4px 2px 0; }
 
     .route-totals {
       display: flex;
@@ -916,6 +931,16 @@
         background: var(--surface);
         box-shadow: 0 2px 10px rgba(0,0,0,0.05);
         flex-direction: row;
+        /* Reinicia el justify-content:space-between heredado de escritorio
+           (ahí ordenaba menú arriba / perfil abajo en columna); en móvil el
+           eje principal pasa a ser horizontal y cada fila envuelta
+           (aside-title, aside-bottom) ya se alinea por su cuenta, así que
+           dejarlo en space-between causaba que el ancho ocupado por la fila
+           de abajo variara según cuánto texto tuviera (nombre/rol cortos vs
+           largos), quedando a veces pegada a los bordes y a veces flotando
+           centrada con aire de sobra a los costados — un mismo usuario veía
+           un salto de tamaño distinto entre páginas sin motivo. */
+        justify-content: flex-start;
         align-items: center;
         flex-wrap: wrap;
       }
@@ -959,15 +984,29 @@
         border-top: 0;
         display: flex;
         align-items: center;
-        justify-content: center;
+        /* space-between (no center): así el avatar/nombre queda siempre
+           pegado a la izquierda y Salir/sincronizado/Actualizar siempre
+           pegados a la derecha, sin importar cuánto texto tenga el nombre
+           o el rol de la persona. */
+        justify-content: space-between;
         gap: 8px;
-        flex: 1 1 auto;
+        /* flex-basis:100% (no "auto"): obliga a esta fila a ocupar SIEMPRE
+           el ancho completo y a pasar a su propia línea debajo del logo,
+           en vez de "crecer" para llenar el espacio sobrante solo cuando
+           queda sola en su línea — eso es lo que hacía que el mismo header
+           se viera de un ancho distinto según la página. */
+        flex: 1 1 100%;
         flex-wrap: nowrap;
       }
       .profile {
         font-size: 12px;
         min-width: 0;
-        max-width: 96px;
+        /* Antes 96px cortaba con "…" nombres o roles un poco largos (ej.
+           "Administrador"); ahora se calcula a partir del ancho real
+           disponible en la fila (pantalla − avatar − botones de la derecha
+           − espacios) para mostrar el nombre/rol completos sin invadir los
+           botones de Salir/Actualizar. */
+        max-width: calc(100vw - 190px);
         flex: 0 1 auto;
         overflow: hidden;
       }
