@@ -35,6 +35,13 @@
       // usuario que inició sesión, en vez de guardarse en state.settings
       // (que es compartido y se sincroniza para todos los dispositivos).
       const COL_PREFS_KEY = `${APP_CONFIG.storagePrefix}-col-prefs-v1`;
+      // Día de trabajo que cada DRIVER decide ver, independiente del "Día de
+      // trabajo" global que fija un editor/admin (state.currentDate). Es
+      // preferencia personal (como el tema): vive en este navegador, no se
+      // sincroniza, y se indexa por el id del driver. Si no eligió nada
+      // todavía, se sigue viendo el día global (mismo comportamiento que
+      // antes de tener esta opción).
+      const DRIVER_VIEW_DATE_KEY = `${APP_CONFIG.storagePrefix}-driver-viewdate-v1`;
       const $ = (s, root=document) => root.querySelector(s);
       const $$ = (s, root=document) => [...root.querySelectorAll(s)];
       const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));
@@ -144,6 +151,24 @@
         store[key]=theme;
         localStorage.setItem(USER_THEME_KEY,JSON.stringify(store));
       }
+      function readDriverViewDateStore(){ try{ return JSON.parse(localStorage.getItem(DRIVER_VIEW_DATE_KEY))||{}; }catch(_){ return {}; } }
+      // Fecha real de HOY (no la del "Día de trabajo" global) — es la que
+      // usa un driver cuando elige "Día actual sin procesar".
+      function realToday(){ return cachedServerDate || today(); }
+      // Devuelve la fecha que un driver eligió ver, o null si nunca la
+      // cambió (=> sigue el Día de trabajo global, como siempre).
+      function driverViewDateOverride(){ return isDriverRole() ? (readDriverViewDateStore()[activeUser.id] || '') : ''; }
+      function setDriverViewDate(dateStr){
+        if(!isDriverRole()) return;
+        const store=readDriverViewDateStore();
+        if(dateStr) store[activeUser.id]=dateStr; else delete store[activeUser.id];
+        localStorage.setItem(DRIVER_VIEW_DATE_KEY,JSON.stringify(store));
+      }
+      // Fecha efectiva para las pantallas de un driver (Día de trabajo y
+      // Despacho): su propia elección si hizo una, si no, el Día de trabajo
+      // global fijado por el equipo de administración. Para admin/editor/
+      // cocina esto siempre es simplemente el Día de trabajo global.
+      function workDate(){ return isDriverRole() ? (driverViewDateOverride() || state.currentDate) : state.currentDate; }
 
       // 'superadmin' es un rol fijo más (como 'admin'), pero solo puede existir
       // UN usuario con ese rol (se valida al crear/editar usuarios en openUser).
@@ -151,6 +176,7 @@
       const ROLE_LABELS = {admin:'Administrador', editor:'Editor', kitchen:'Cocina', driver:'Driver', superadmin:'Super Administrador'};
       const NAV_PERMS = {
         dispatch: ['admin','editor','kitchen','driver','superadmin'],
+        delivery: ['admin','editor','driver','superadmin'],
         clients: ['admin','editor','driver','superadmin'],
         drivers: ['admin','editor','superadmin'],
         routes: ['admin','editor','superadmin'],
@@ -168,6 +194,7 @@
 
       const ROLE_PAGE_OPTIONS = [
         ['dispatch','Día de trabajo',true],
+        ['delivery','Despacho',true],
         ['clients','Clientes',true],
         ['drivers','Drivers',true],
         ['routes','Rutas',true],
@@ -193,12 +220,16 @@
       const canManage = () => ['admin','editor','superadmin'].includes(role());
       // Puede administrar el inventario de cocina.
       const canManageInventory = () => ['admin','editor','kitchen','superadmin'].includes(role());
+      // Puede marcar entregas en Despacho: a diferencia de "Día de trabajo"
+      // (solo admin/editor), acá el driver también puede marcar sus propias
+      // entregas — es la razón de ser de esta pantalla.
+      const canManageDelivery = () => ['admin','editor','driver','superadmin'].includes(role());
       function canAccessPage(page){
         if (page === 'users') return isAdmin();
         if (isBuiltinRole()) return (NAV_PERMS[page] || []).includes(role());
         return !!customRole(role())?.pages?.[page]?.view;
       }
-      const BUILTIN_EDIT = { dispatch:canManage, clients:canManage, drivers:canManage, routes:canManage, plans:canManage, payroll:isAdmin, inventory:canManageInventory, notes:canManage };
+      const BUILTIN_EDIT = { dispatch:canManage, delivery:canManageDelivery, clients:canManage, drivers:canManage, routes:canManage, plans:canManage, payroll:isAdmin, inventory:canManageInventory, notes:canManage };
       function canEditPage(page){
         if (page === 'users') return isAdmin();
         if (isBuiltinRole()) return !!BUILTIN_EDIT[page]?.();
@@ -600,7 +631,7 @@
       }
       function activate(name){ if(!canAccessPage(name)) name='dispatch'; ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); updateNotesBadge(); }
       function render(){ document.documentElement.dataset.theme=userTheme(); $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); updateNotesBadge(); }
-      function renderPage(name){ const fn={dispatch:renderDispatch,clients:renderClients,notes:renderNotes,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
+      function renderPage(name){ const fn={dispatch:renderDispatch,delivery:renderDelivery,clients:renderClients,notes:renderNotes,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
       function enableTableTools(){
       function syncTableWidth(tbl,cols){
         cols=cols||$$('colgroup col',tbl);
@@ -719,9 +750,137 @@
       // sesión (fecha → snapshot o null) para no volver a pedirlas cada
       // vez que se re-renderiza la misma fecha.
       let dispatchHistorialCache = {};
+      // ------------------------------------------------------------------
+      // DESPACHO: estado de entrega por (fecha, cliente). Se guarda en la
+      // tabla db_delivery_status (una fila por cliente y día, ver
+      // supabase-client.js) para que varios drivers puedan marcar entregas
+      // al mismo tiempo sin pisarse. deliveryCache guarda lo ya traído de
+      // Supabase para esta sesión, por fecha, para no volver a pedirlo
+      // cada vez que se re-renderiza la misma fecha.
+      // ------------------------------------------------------------------
+      let deliveryCache = {};
+      async function ensureDeliveryLoaded(date){
+        if (date in deliveryCache) return;
+        deliveryCache[date] = (await window.SupabaseDB?.dbGetDeliveryRows(date)) || [];
+      }
+      function deliveryRecord(date, clientId){
+        return (deliveryCache[date] || []).find(r => r.clientId === clientId) || null;
+      }
+      async function saveDeliveryRecord(date, clientId, payload){
+        const list = deliveryCache[date] ||= [];
+        const idx = list.findIndex(r => r.clientId === clientId);
+        const record = { clientId, ...payload };
+        if (idx >= 0) list[idx] = record; else list.push(record);
+        const ok = await window.SupabaseDB?.dbUpsertDeliveryRows([{ date, clientId, payload }]);
+        return ok;
+      }
+      function deliveryMarkForm(kind, existing){
+        const isFail = kind === 'no_entregado';
+        const hasPhoto = existing?.image ? `<p class="muted" style="margin:-4px 0 0">Ya tiene una foto guardada; sube otra solo si quieres reemplazarla.</p>` : '';
+        return `<div class="form-grid">
+          ${isFail
+            ? `<label class="wide">Motivo por el que no se entregó *<textarea name="reason" required rows="3" placeholder="Ej.: Cliente no se encontraba, dirección incorrecta…">${esc(existing?.reason||'')}</textarea></label>`
+            : `<label class="wide">Observación (opcional)<textarea name="note" rows="2" placeholder="Ej.: Recibió un familiar, dejado en portería…">${esc(existing?.note||'')}</textarea></label>`}
+          <label class="wide">Foto de respaldo (opcional)<input type="file" name="photoFile" accept="image/*" capture="environment"></label>
+          ${hasPhoto}
+        </div>`;
+      }
+      function openDeliveryMark(clientId, kind){
+        if (!canEditPage('delivery')) { notice('No tienes permiso para marcar entregas.', true); return; }
+        const c = state.clients.find(x => x.id === clientId); if (!c) return;
+        const date = workDate();
+        const existing = deliveryRecord(date, clientId);
+        const title = (kind === 'no_entregado' ? 'No entregado — ' : 'Entregado — ') + c.name;
+        showModal(title, deliveryMarkForm(kind, existing), async f => {
+          const data = Object.fromEntries(new FormData(f));
+          const file = f.elements['photoFile']?.files?.[0];
+          let image = existing?.status === kind ? (existing.image || '') : '';
+          if (file) {
+            try { image = await readImageAsDataURL(file, 480, .75); }
+            catch (_) { notice('No se pudo procesar la foto.', true); return false; }
+          }
+          const reason = (data.reason || '').trim();
+          if (kind === 'no_entregado' && !reason) { notice('Debes indicar el motivo.', true); return false; }
+          const payload = { status: kind, reason: kind === 'no_entregado' ? reason : '', note: (data.note || '').trim(), image, at: new Date().toISOString(), by: activeUser?.name || roleLabel(role()) };
+          const ok = await saveDeliveryRecord(date, clientId, payload);
+          renderDelivery();
+          notice(ok ? (kind === 'no_entregado' ? 'Marcado como no entregado.' : 'Marcado como entregado.') : 'Se guardó localmente, pero no en la base de datos.', !ok);
+          logAudit(kind === 'no_entregado' ? 'Pedido marcado no entregado' : 'Pedido marcado entregado', 'delivery', c.name, c.id, { fecha: date, motivo: payload.reason || undefined });
+        });
+      }
+      async function clearDelivery(clientId){
+        if (!canEditPage('delivery')) { notice('No tienes permiso para hacer esto.', true); return; }
+        const date = workDate(), c = state.clients.find(x => x.id === clientId);
+        if (!confirm('¿Quitar la marca de entrega de este pedido?')) return;
+        const ok = await saveDeliveryRecord(date, clientId, { status: 'pendiente', reason: '', note: '', image: '', at: new Date().toISOString(), by: activeUser?.name || roleLabel(role()) });
+        renderDelivery();
+        notice(ok ? 'Marca de entrega eliminada.' : 'Se quitó localmente, pero no se guardó en la base de datos.', !ok);
+      }
+      // Clientes activos de una ruta en una fecha, ya ordenados como los ve
+      // el driver (mismo criterio que Día de trabajo: campo "Orden").
+      function deliveryListFor(routeId, date){
+        const list = state.clients.filter(c => effectiveRouteId(c, date) === routeId && status(c, date) === 'Activo');
+        return list.sort((a, b) => (n(a.order) || 9999) - (n(b.order) || 9999) || String(a.name).localeCompare(String(b.name)));
+      }
+      async function renderDelivery(){
+        if (!canAccessPage('delivery')) return;
+        const date = workDate();
+        $('#delivery-page').innerHTML = pageHead('Despacho', 'Cargando estado de entregas…');
+        await ensureDeliveryLoaded(date);
+        if (workDate() !== date || ui.page !== 'delivery') return; // cambió de fecha/página mientras cargaba
+        if (isDriverRole()) renderDeliveryDriver(date); else renderDeliveryAdmin(date);
+      }
+      function renderDeliveryDriver(date){
+        const list = deliveryListFor(activeUser.routeId, date);
+        const delivered = list.filter(c => deliveryRecord(date, c.id)?.status === 'entregado').length;
+        const rows = c => {
+          const rec = deliveryRecord(date, c.id);
+          const st = rec?.status;
+          const statusBadge = st === 'entregado' ? '<span class="badge active">Entregado</span>' : st === 'no_entregado' ? '<span class="badge danger">No entregado</span>' : '<span class="badge off">Pendiente</span>';
+          const detailBits = [];
+          if (rec?.at) detailBits.push(new Date(rec.at).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' }));
+          if (rec?.reason) detailBits.push(esc(rec.reason));
+          if (rec?.note) detailBits.push(esc(rec.note));
+          if (rec?.image) detailBits.push('📷 con foto');
+          const detail = detailBits.length ? `<br><small class="muted">${detailBits.join(' · ')}</small>` : '';
+          const actions = !canEditPage('delivery') ? '—' : (st === 'entregado' || st === 'no_entregado')
+            ? `<button class="icon-btn" data-action="edit-delivery" data-id="${c.id}" data-kind="${st}">Editar</button><button class="icon-btn delete" data-action="clear-delivery" data-id="${c.id}">Quitar</button>`
+            : `<button class="primary" data-action="mark-delivered" data-id="${c.id}">Entregado</button> <button class="outline" data-action="mark-not-delivered" data-id="${c.id}">No entregado</button>`;
+          return `<tr data-id="${c.id}"><td>${n(c.order) || ''}</td><td><b>${esc(c.name)}</b><br><small class="muted">${esc(c.address1 || '')}</small></td><td>${statusBadge}${detail}</td><td>${actions}</td></tr>`;
+        };
+        const headCols = ['Orden', 'Cliente', 'Estado de entrega', 'Acciones'];
+        $('#delivery-page').innerHTML = pageHead('Despacho', `Tu ruta: ${esc(routeName(activeUser.routeId))} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente.`, `<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
+          `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr>${headCols.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${list.length ? list.map(rows).join('') : '<tr><td colspan="4" class="empty">No hay pedidos activos para esta fecha en tu ruta.</td></tr>'}</tbody></table></div>`;
+      }
+      function renderDeliveryAdmin(date){
+        const groups = state.routes.map(r => ({ route: r, clients: deliveryListFor(r.id, date) })).filter(g => g.clients.length);
+        const cardHtml = g => {
+          const drv = driverForRoute(g.route.id);
+          const delivered = g.clients.filter(c => deliveryRecord(date, c.id)?.status === 'entregado').length;
+          let nextAssigned = false;
+          const items = g.clients.map(c => {
+            const st = deliveryRecord(date, c.id)?.status;
+            let cls = 'delivery-purple';
+            if (st === 'entregado') cls = 'delivery-green';
+            else if (st === 'no_entregado') cls = 'delivery-red';
+            else if (!nextAssigned) { cls = 'delivery-orange'; nextAssigned = true; }
+            return `<li class="delivery-client ${cls}">${esc(c.name)}</li>`;
+          }).join('');
+          return `<div class="card card-pad delivery-route-card">
+            <div class="delivery-route-head">
+              <h3>${esc(g.route.name)}</h3>
+              <span class="muted">Driver: ${esc(drv ? `${drv.firstName} ${drv.lastName}` : 'Sin asignar')}</span>
+              <span class="delivery-counter">${delivered}/${g.clients.length}</span>
+            </div>
+            <ul class="delivery-client-list">${items}</ul>
+          </div>`;
+        };
+        $('#delivery-page').innerHTML = pageHead('Despacho', `Progreso de entrega por ruta — ${date.split('-').reverse().join('/')}. Verde: entregado · Naranja: siguiente en la lista del driver · Morado: pendientes · Rojo: no entregado.`) +
+          `<div class="delivery-routes-grid">${groups.length ? groups.map(cardHtml).join('') : '<p class="muted">No hay rutas con pedidos activos para esta fecha.</p>'}</div>`;
+      }
       async function renderDispatch(){
         syncReturnDates(state.currentDate);
-        const date=state.currentDate, d=day(date);
+        const date=workDate(), d=day(date);
         // Un día que YA fue procesado (y no es el de hoy) se muestra con la
         // "foto" congelada que se guardó en Supabase al tocar "Procesar
         // día" — así, si después editás la dirección/ruta/plan de un
@@ -801,10 +960,17 @@
           ?`<button class="outline" data-action="export-diets">Imprimir orden de ruta</button>`
           :`<button class="outline" data-action="export-diets">Imprimir dietas especiales</button><button class="outline" data-action="export-route-order">Imprimir orden de ruta</button>`;
         const routeField=isDriverRole()?`<label class="field">Ruta<div class="field-locked" aria-disabled="true">${esc(routeName(activeUser.routeId))}</div></label>`:`<label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label>`;
-        $('#dispatch-page').innerHTML=pageHead('Día de trabajo','La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`${printButtons}${canEditPage('dispatch')?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}`)+
-          `<div class="toolbar"><label class="field">Día de trabajo${isDriverRole()?`<div class="field-locked" aria-disabled="true">${esc(date.split('-').reverse().join('/'))}</div>`:`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`}</label>${routeField}<label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${canEditPage('dispatch')?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
+        const dateField=isDriverRole()
+          ?`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div><button type="button" class="outline" id="work-date-today" style="margin-top:6px" title="Volver a ver el día actual, sin procesar">Ver hoy</button>`
+          :`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`;
+        $('#dispatch-page').innerHTML=pageHead('Día de trabajo',isDriverRole()?'Puedes elegir qué día ver: el día actual (en vivo) o una fecha pasada (verás lo que quedó guardado ese día).':'La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`${printButtons}${canEditPage('dispatch')?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}`)+
+          `<div class="toolbar"><label class="field">Día de trabajo${dateField}</label>${routeField}<label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${canEditPage('dispatch')?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
           `<div class="sheet"><table id="dispatch-table">${colgroupHtml(columns.map(c=>[c.label,c.key]),'dispatch')}<thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
-        $('#work-date')?.addEventListener('change',e=>{ if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch(); });
+        $('#work-date')?.addEventListener('change',e=>{
+          if(isDriverRole()){ setDriverViewDate(e.target.value); ui.forceLiveDispatch=false; renderDispatch(); return; }
+          if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch();
+        });
+        $('#work-date-today')?.addEventListener('click',()=>{ setDriverViewDate(realToday()); ui.forceLiveDispatch=false; renderDispatch(); });
         $('#dispatch-route')?.addEventListener('change',e=>{ui.route=e.target.value;renderDispatch();}); $('#dispatch-status')?.addEventListener('change',e=>{ui.dispatchStatus=e.target.value;renderDispatch();}); $('#work-status')?.addEventListener('change',e=>{if(!canEditPage('dispatch'))return;day().laborable=e.target.value==='work';save();renderDispatch();}); bindSearch('dispatch-search','dispatch',renderDispatch);
         $$('.day-edit').forEach(i=>i.onchange=()=>{
           const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return;
@@ -839,10 +1005,17 @@
           itemLabels.map(l=>`<td>${n(c.items?.[l])}</td>`).join('')+
           `<td>${esc(c.direccion||'—')}</td><td>${esc(c.telefono1||'—')}</td><td>${esc(c.telefono2||'—')}</td><td>${esc(c.dietaEspecial||'—')}</td><td>${esc(c.observaciones||'—')}</td><td>${n(c.carreras)}</td><td>${n(c.bolsas)}</td><td>${badge(c.estado)}</td><td>${c.serviciosRestantes??'—'}</td>`+
           `</tr>`;
+        const dateFieldHist=isDriverRole()
+          ?`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div><button type="button" class="outline" id="work-date-today" style="margin-top:6px" title="Volver a ver el día actual, sin procesar">Ver hoy</button>`
+          :`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`;
         $('#dispatch-page').innerHTML=pageHead('Día de trabajo',`Historial guardado el ${savedAt} · ${rows.length} pedidos atendidos ese día. Son datos congelados: no cambian aunque después edites al cliente.`,canEditPage('dispatch')?'<button class="outline" data-action="dispatch-force-live">Ver datos actuales en vez del historial</button>':'')+
-          `<div class="toolbar"><label class="field">Día de trabajo${isDriverRole()?`<div class="field-locked" aria-disabled="true">${esc(date.split('-').reverse().join('/'))}</div>`:`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`}</label><span class="spacer"></span><span class="badge off" title="Estos datos vienen del historial guardado, no de la ficha actual del cliente">📷 Viendo historial</span></div>`+
+          `<div class="toolbar"><label class="field">Día de trabajo${dateFieldHist}</label><span class="spacer"></span><span class="badge off" title="Estos datos vienen del historial guardado, no de la ficha actual del cliente">📷 Viendo historial</span></div>`+
           `<div class="sheet"><table>${colgroupHtml(headCols.map(h=>[h,h]),'dispatch-historial')}<thead><tr>${headCols.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="${headCols.length}" class="empty">Ese día no tuvo pedidos atendidos.</td></tr>`}</tbody></table></div>`;
-        $('#work-date')?.addEventListener('change',e=>{ if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch(); });
+        $('#work-date')?.addEventListener('change',e=>{
+          if(isDriverRole()){ setDriverViewDate(e.target.value); ui.forceLiveDispatch=false; renderDispatch(); return; }
+          if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch();
+        });
+        $('#work-date-today')?.addEventListener('click',()=>{ setDriverViewDate(realToday()); ui.forceLiveDispatch=false; renderDispatch(); });
       }
       function bindSearch(id,key,fn){
         const el=$('#'+id);
@@ -1133,7 +1306,7 @@
           {key:'id',label:'Acciones',cell:p=>canEditPage('plans')?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}
         ];
         const menuRows=()=>cols.map(([key,label])=>`<tr><td>${esc(label)}</td><td>${canEditPage('plans')?`<button class="icon-btn" data-action="edit-menu-item" data-id="${key}">Editar</button><button class="icon-btn delete" data-action="delete-menu-item" data-id="${key}">×</button>`:'—'}</td></tr>`).join('');
-        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="primary" data-action="add-plan">+ Crear plan</button><button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button>':'')+orderedTable(planList,definitions,'plans')
+        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button><button class="primary" data-action="add-plan">+ Crear plan</button>':'')+orderedTable(planList,definitions,'plans')
           +pageHead('Artículos del menú','Aparecen como columnas en Día de trabajo, en el Excel del día procesado y en el portal del cliente. Se pueden crear, renombrar o eliminar artículos (incluidos los que vienen por defecto).')
           +`<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Artículo</th><th>Acciones</th></tr></thead><tbody>${cols.length?menuRows():'<tr><td colspan="2" class="empty">No hay artículos definidos.</td></tr>'}</tbody></table></div>`;
       }
@@ -1432,9 +1605,17 @@
             <div class="toggle-list">${dispatchColumns.map(([key,label])=>`<label><input type="checkbox" data-column="${key}" ${!userColPrefs().hiddenColumns.includes(key)?'checked':''}>${label}</label>`).join('')}</div>
           </div>`;
         if(!isAdmin()){
-          $('#settings-page').innerHTML=pageHead('Configuración','Elige tu tema y qué columnas ver en la tabla de Día de trabajo.')+`<div class="two-col">${columnsCard}</div>`;
+          const workDateCard=isDriverRole()?`<div class="card card-pad stack">
+            <h3>Tu día de trabajo</h3>
+            <p class="muted">Por defecto ves el Día de trabajo que fija el equipo de administración. Acá puedes elegir ver otro: el día actual en vivo (sin procesar, igual que antes) o una fecha pasada (verás lo que quedó guardado ese día). Esto solo cambia lo que TÚ ves, no afecta a nadie más.</p>
+            <label>Fecha a ver<div class="date-input-wrap"><input type="date" id="driver-view-date" value="${workDate()}"></div></label>
+            <button type="button" class="outline" id="driver-view-date-today" style="align-self:flex-start">Volver a ver el día actual</button>
+          </div>`:'';
+          $('#settings-page').innerHTML=pageHead('Configuración','Elige tu tema y qué columnas ver en la tabla de Día de trabajo.')+`<div class="two-col">${columnsCard}${workDateCard}</div>`;
           $('#my-theme').onchange=e=>{saveUserTheme(e.target.value);render();};
           $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column,hidden=userColPrefs().hiddenColumns;saveHiddenColumns(input.checked?hidden.filter(x=>x!==key):[...hidden,key]);notice('Columnas actualizadas.');});
+          $('#driver-view-date')?.addEventListener('change',e=>{ setDriverViewDate(e.target.value); notice('Ahora estás viendo esa fecha en Día de trabajo y Despacho.'); });
+          $('#driver-view-date-today')?.addEventListener('click',()=>{ setDriverViewDate(realToday()); renderSettings(); notice('Volviste a ver el día actual.'); });
           return;
         }
         $('#settings-page').innerHTML=pageHead('Configuración','Preferencias visuales, columnas y respaldo de datos.')+`<div class="two-col">
@@ -1819,7 +2000,8 @@
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
       }
-      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id;if(!action)return;const map={"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
+      document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":()=>{const scope=$('#export-scope')?.value||'all';const scopes={all:{data:{...state,staffUsers},label:'respaldo-completo'},clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};const chosen=scopes[scope]||scopes.all;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();},"import-json":()=>$('#import-file').click()};
 
         const ACTION_PERMS={
           "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),
@@ -1834,6 +2016,7 @@
           "add-inventory-link":()=>canEditPage('inventory'),"edit-inventory-link":()=>canEditPage('inventory'),"delete-inventory-link":()=>canEditPage('inventory'),
           "add-user":isAdmin,"edit-user":isAdmin,"delete-user":isAdmin,"add-role":isAdmin,"edit-role":isAdmin,"delete-role":isAdmin,
           "process-day":()=>canEditPage('dispatch'),"unprocess-day":()=>canEditPage('dispatch'),"toggle-day-pause":()=>canEditPage('dispatch'),
+          "mark-delivered":()=>canEditPage('delivery'),"mark-not-delivered":()=>canEditPage('delivery'),"edit-delivery":()=>canEditPage('delivery'),"clear-delivery":()=>canEditPage('delivery'),
           "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin,"refresh-audit":()=>canAccessPage('audit')
         };
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
@@ -1900,7 +2083,7 @@
       const onDriverApp = /driver\.html$/.test(location.pathname);
       if (activeUser.role === 'driver' && !onDriverApp) { window.location.replace('./driver.html'); return; }
       if (activeUser.role !== 'driver' && onDriverApp) { window.location.replace('./index.html'); return; }
-      load(); applyBranding(); loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate('dispatch');
+      load(); applyBranding(); loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate(isDriverRole()?'delivery':'dispatch');
       // Si se cierra la pestaña o se recarga mientras hay un guardado en
       // curso (p. ej. justo después de resizar una columna), el navegador
       // puede cortar esa subida a Supabase a mitad de camino — el cambio

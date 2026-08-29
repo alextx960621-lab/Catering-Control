@@ -250,5 +250,44 @@
     }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, client };
+  // ------------------------------------------------------------------------
+  // db_delivery_status: UNA FILA POR (fecha, cliente) con el estado de
+  // entrega de Despacho (entregado / no entregado, observación, foto de
+  // respaldo). Es tabla aparte de db_dispatch_snapshots a propósito: acá se
+  // escribe todo el día, en paralelo, desde el celular de cada driver —
+  // si viviera dentro del bloque grande de "clientes" (como state.days),
+  // dos drivers guardando casi al mismo tiempo podrían pisarse los cambios
+  // el uno al otro. Con una fila por cliente y por día, cada guardado solo
+  // toca su propia fila. Se limpia sola pasados ~30 días vía pg_cron (ver
+  // supabase-delivery-status-migration.sql), igual que los snapshots.
+  // ------------------------------------------------------------------------
+
+  // Trae el estado de entrega de todos los clientes para UNA fecha.
+  async function dbGetDeliveryRows(date) {
+    try {
+      const { data, error } = await client.from('db_delivery_status').select('id,client_id,payload').eq('date', date);
+      if (error) { console.error('[supabase] Error leyendo db_delivery_status:', error.message); return null; }
+      return (data || []).map(r => ({ id: r.id, clientId: r.client_id, ...r.payload }));
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo db_delivery_status:', err);
+      return null;
+    }
+  }
+
+  // Guarda (upsert) el estado de entrega de uno o varios clientes para una
+  // fecha. rows: [{date, clientId, payload}]. Siempre una sola llamada.
+  async function dbUpsertDeliveryRows(rows) {
+    if (!rows || !rows.length) return true;
+    try {
+      const upsertRows = rows.map(r => ({ id: `${r.date}_${r.clientId}`, date: r.date, client_id: r.clientId, payload: r.payload, updated_at: new Date().toISOString() }));
+      const { error } = await client.from('db_delivery_status').upsert(upsertRows, { onConflict: 'id' });
+      if (error) { console.error('[supabase] Error guardando db_delivery_status:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red guardando db_delivery_status:', err);
+      return false;
+    }
+  }
+
+  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, dbGetDeliveryRows, dbUpsertDeliveryRows, client };
 })();

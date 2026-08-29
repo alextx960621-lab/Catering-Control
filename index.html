@@ -15,7 +15,7 @@
        bajo demanda solo cuando el usuario exporta un Excel (procesar día,
        exportar dietas, exportar orden de ruta). Así el panel carga más
        liviano y rápido en el uso normal del día a día. -->
-  <link rel="stylesheet" href="./index.css?v=8">
+  <link rel="stylesheet" href="./index.css?v=9">
 
   <!-- ===== PWA: manifest + íconos + color de tema ===== -->
   <link rel="manifest" href="./manifest.json">
@@ -44,6 +44,7 @@
         <button data-page="drivers" data-roles="admin,editor"><span class="nav-icon">⌁</span><span class="nav-label">Drivers</span></button>
         <button data-page="routes" data-roles="admin,editor"><span class="nav-icon">⌘</span><span class="nav-label">Rutas</span></button>
         <button data-page="plans" data-roles="admin,editor"><span class="nav-icon">▤</span><span class="nav-label">Planes</span></button>
+        <button data-page="delivery" data-roles="admin,editor,driver"><span class="nav-icon">🚚</span><span class="nav-label">Despacho</span></button>
         <button data-page="payroll" data-roles="admin,editor,driver"><span class="nav-icon">💵</span><span class="nav-label">Sueldos</span></button>
         <button data-page="inventory" data-roles="admin,editor,kitchen"><span class="nav-icon">▧</span><span class="nav-label">Inventario</span></button>
         <button data-page="users" data-roles="admin"><span class="nav-icon">♟</span><span class="nav-label">Usuarios</span></button>
@@ -70,6 +71,7 @@
       <section class="page" id="drivers-page"></section>
       <section class="page" id="routes-page"></section>
       <section class="page" id="plans-page"></section>
+      <section class="page" id="delivery-page"></section>
       <section class="page" id="notes-page"></section>
       <section class="page" id="payroll-page"></section>
       <section class="page" id="inventory-page"></section>
@@ -83,7 +85,7 @@
   <input id="import-file" type="file" accept="application/json" hidden>
   <div class="notice" id="notice"></div>
 
-  <script src="./index.js?v=6" defer></script>
+  <script src="./index.js?v=7" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous" defer></script>
 <script src="./pwa-register.js?v=2" defer></script>
 </body>
