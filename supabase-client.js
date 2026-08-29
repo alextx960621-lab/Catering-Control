@@ -279,5 +279,37 @@
     }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetAllAuditLog, dbInsertAuditBulk, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, dbGetAllSnapshots, dbUpsertSnapshotsBulk, dbGetDeliveryRows, dbUpsertDeliveryRows, dbGetAllDeliveryStatus, client };
+  // --- Presencia en línea (contador de "personas conectadas ahora") ---
+  // Usa un canal de Supabase Realtime (Presence). No requiere ninguna tabla:
+  // cada pestaña abierta se anuncia a sí misma y desaparece sola al cerrarse
+  // o perder conexión. Requiere que Realtime esté habilitado en el proyecto
+  // (viene habilitado por defecto).
+  let presenceChannel = null;
+  function joinPresence(info, onChange) {
+    try {
+      if (presenceChannel) return presenceChannel;
+      const sessionId = `${info.role}-${info.id || 'anon'}-${Math.random().toString(36).slice(2, 9)}`;
+      presenceChannel = client.channel('catering-online-users', { config: { presence: { key: sessionId } } });
+      if (typeof onChange === 'function') {
+        presenceChannel.on('presence', { event: 'sync' }, () => {
+          try { onChange(presenceChannel.presenceState()); } catch (_) {}
+        });
+      }
+      presenceChannel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          try { await presenceChannel.track({ role: info.role, name: info.name || '' }); } catch (_) {}
+        }
+      });
+      return presenceChannel;
+    } catch (err) {
+      console.error('[supabase] Error uniéndose al canal de presencia:', err);
+      return null;
+    }
+  }
+  function presenceState() {
+    try { return presenceChannel ? presenceChannel.presenceState() : {}; }
+    catch (_) { return {}; }
+  }
+
+  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetAllAuditLog, dbInsertAuditBulk, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, dbGetAllSnapshots, dbUpsertSnapshotsBulk, dbGetDeliveryRows, dbUpsertDeliveryRows, dbGetAllDeliveryStatus, joinPresence, presenceState, client };
 })();

@@ -141,6 +141,7 @@
         await syncBranding();
         if(!(await fetchIsPremium())){ renderLocked(); return; }
         render();
+        window.SupabaseDB?.joinPresence({id:client.id, role:'cliente', name:client.name});
         Promise.all([syncFromServer(),syncBranding()]).then(async()=>{ if(!(await fetchIsPremium())){ renderLocked(); return; } render(); });
       }
       boot();
