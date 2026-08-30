@@ -391,8 +391,14 @@
         try {
           const db=window.SupabaseDB;
           if(!db) throw new Error('Supabase no está disponible');
+          // El driver no tiene acceso a Notas ni a Inventario (ver NAV_PERMS), así
+          // que no tiene sentido bajar esos datos en cada apertura/sincronización.
+          const skipExtra = isDriverRole();
           const [clientesData,clientRows,noteRows,personalData,inventarioData]=await Promise.all([
-            db.dbGet('clientes'), db.dbGetClientRows(), db.dbGetNoteRows(), db.dbGet('personal'), db.dbGet('inventario')
+            db.dbGet('clientes'), db.dbGetClientRows(),
+            skipExtra?Promise.resolve(null):db.dbGetNoteRows(),
+            db.dbGet('personal'),
+            skipExtra?Promise.resolve(null):db.dbGet('inventario')
           ]);
           let gotAny=false;
           if (clientesData) {
@@ -563,7 +569,7 @@
       }
       function activate(name){ if(!canAccessPage(name)) name='dispatch'; if(name!=='delivery') stopDeliveryPoll(); ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); updateNotesBadge(); window.scrollTo(0,0); }
       function render(){ document.documentElement.dataset.theme=userTheme(); $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); updateNotesBadge(); }
-      function renderPage(name){ const fn={dispatch:renderDispatch,delivery:renderDelivery,clients:renderClients,notes:renderNotes,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
+      function renderPage(name){ const fn={dispatch:renderDispatch,delivery:renderDelivery,clients:renderClients,payroll:renderPayroll,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
       function enableTableTools(){
       function syncTableWidth(tbl,cols){
         cols=cols||$$('colgroup col',tbl);
@@ -1088,302 +1094,6 @@
         logAudit('Cliente reactivado','client',c.name,c.id,{});
       }
       function notesDueToday(){ return state.notes.filter(nt=>nt.status==='pendiente' && nt.dueDate<=state.currentDate); }
-      function updateNotesBadge(){
-        const el=$('#notes-badge'); if(!el) return;
-        const count=(canAccessPage('notes')&&hasPremiumAccess())?notesDueToday().length:0;
-        el.textContent=count>99?'99+':String(count);
-        el.hidden=count===0;
-      }
-      function noteClientOptions(current){ return options(state.clients,current,'Sin vincular a un cliente'); }
-      function noteForm(nt={}){
-        return `<div class="form-grid"><label class="wide">Nota *<textarea name="text" required rows="3" placeholder="Ej.: Llamar de nuevo a Juan Pérez para ver si renueva el plan.">${esc(nt.text)}</textarea></label><label>Fecha para que aparezca *<input name="dueDate" type="date" required value="${esc(nt.dueDate||state.currentDate)}"></label><label>Cliente relacionado (opcional)<select name="clientId">${noteClientOptions(nt.clientId)}</select></label></div>`;
-      }
-      function openNote(id){
-        const nt=id?state.notes.find(x=>x.id===id):null;
-        showModal(nt?'Editar nota':'Añadir nota',noteForm(nt||{}),async f=>{
-          const data=Object.fromEntries(new FormData(f));
-          const client=data.clientId?state.clients.find(x=>x.id===data.clientId):null;
-          data.clientName=client?client.name:'';
-          if(nt){ Object.assign(nt,data); }
-          else { state.notes.push({id:uid('n'),status:'pendiente',source:'staff',read:true,createdAt:new Date().toISOString(),createdBy:activeUser?.name||roleLabel(role()),...data}); }
-          const saved=await save();
-          if(!saved)return false;
-          renderNotes();updateNotesBadge();notice('Nota guardada.');
-          logAudit(nt?'Nota editada':'Nota creada','note',data.clientName||nt?.createdBy||activeUser?.name||'Nota interna',nt?.id||'',{texto:data.text.slice(0,60),fecha:data.dueDate});
-        });
-      }
-      async function markNoteDone(id){
-        const nt=state.notes.find(x=>x.id===id);if(!nt)return;
-        nt.status='cumplida';nt.completedAt=state.currentDate;nt.read=true;
-        const saved=await save();
-        if(!saved){notice('No se pudo guardar en la base de datos. Intenta nuevamente.',true);return;}
-        renderNotes();updateNotesBadge();notice('Nota marcada como cumplida.');
-        logAudit('Nota cumplida','note',nt.clientName||nt.createdBy||'Nota interna',nt.id,{texto:nt.text.slice(0,60)});
-      }
-      function openNoteReschedule(id){
-        const nt=state.notes.find(x=>x.id===id);if(!nt)return;
-        const html=`<div class="form-grid"><label class="wide">Nota<textarea name="text" required rows="3">${esc(nt.text)}</textarea></label><label>Nueva fecha *<input name="dueDate" type="date" required value="${esc(nt.dueDate)}"></label></div>`;
-        showModal('Reprogramar nota',html,async f=>{
-          const data=Object.fromEntries(new FormData(f));
-          nt.text=data.text;nt.dueDate=data.dueDate;nt.status='pendiente';nt.read=true;
-          const saved=await save();
-          if(!saved)return false;
-          renderNotes();updateNotesBadge();notice('Nota reprogramada.');
-          logAudit('Nota reprogramada','note',nt.clientName||nt.createdBy||'Nota interna',nt.id,{texto:nt.text.slice(0,60),nuevaFecha:data.dueDate});
-        });
-      }
-      async function deleteNote(id){
-        if(!confirm('¿Eliminar esta nota?'))return;
-        const nt=state.notes.find(x=>x.id===id);
-        state.notes=state.notes.filter(x=>x.id!==id);
-        const saved=await save();
-        if(!saved){notice('No se pudo eliminar en la base de datos.',true);return;}
-        renderNotes();updateNotesBadge();notice('Nota eliminada.');
-        if(nt)logAudit('Nota eliminada','note',nt.clientName||nt.createdBy||'Nota interna',id,{texto:nt.text.slice(0,60)});
-      }
-      function renderNotes(){
-        if(!canAccessPage('notes')) return;
-        if(!hasPremiumAccess()){ $('#notes-page').innerHTML=pageHead('Notas','Recordatorios internos y mensajes que dejan los clientes desde su portal.')+premiumLockHtml('Notas'); return; }
-        let touched=false;
-        state.notes.forEach(nt=>{ if(nt.source==='cliente' && !nt.read){ nt.read=true; touched=true; } });
-        if(touched) save();
-        const q=(ui.search.notes||'').toLowerCase();
-        const filter=ui.notesFilter||'today';
-        const t=state.currentDate;
-        let list=state.notes.filter(nt=>{
-          if(filter==='today') return nt.status==='pendiente' && nt.dueDate<=t;
-          if(filter==='upcoming') return nt.status==='pendiente' && nt.dueDate>t;
-          if(filter==='history') return nt.status==='cumplida';
-          return true;
-        });
-        if(q) list=list.filter(nt=>[nt.text,nt.clientName].join(' ').toLowerCase().includes(q));
-        list=[...list].sort((a,b)=>filter==='history'?(b.completedAt||b.dueDate).localeCompare(a.completedAt||a.dueDate):(a.dueDate.localeCompare(b.dueDate)));
-        const counts={today:notesDueToday().length,upcoming:state.notes.filter(nt=>nt.status==='pendiente'&&nt.dueDate>t).length,history:state.notes.filter(nt=>nt.status==='cumplida').length};
-        const cardHtml=nt=>{
-          const overdue=nt.status==='pendiente' && nt.dueDate<t;
-          const statusBadge=nt.status==='cumplida'?`<span class="badge active">Cumplida</span>`:(overdue?`<span class="badge warn">Atrasada</span>`:`<span class="badge pending">Pendiente</span>`);
-          const sourceBadge=nt.source==='cliente'?`<span class="badge off">Desde el portal</span>`:'';
-          const canEdit=canEditPage('notes');
-          const actions=canEdit?`<div class="note-actions">${nt.status!=='cumplida'?`<button class="outline" data-action="note-done" data-id="${nt.id}">✓ Cumplida</button><button class="outline" data-action="note-reschedule" data-id="${nt.id}">Reprogramar</button>`:`<button class="outline" data-action="note-reschedule" data-id="${nt.id}">Reabrir</button>`}<button class="icon-btn delete" data-action="delete-note" data-id="${nt.id}" title="Eliminar">×</button></div>`:'';
-          return `<div class="note-card${overdue?' note-overdue':''}">
-            <div class="note-card-top">${statusBadge}${sourceBadge}<span class="muted note-date">${esc(nt.dueDate.split('-').reverse().join('/'))}</span></div>
-            <p class="note-text">${esc(nt.text)}</p>
-            ${nt.clientName?`<p class="muted note-client">Cliente: ${esc(nt.clientName)}</p>`:''}
-            ${actions}
-          </div>`;
-        };
-        const emptyMsg={today:'No hay notas pendientes para hoy. 🎉',upcoming:'No hay notas programadas a futuro.',history:'Todavía no hay notas cumplidas.',all:'No hay notas.'}[filter];
-        $('#notes-page').innerHTML=pageHead('Notas','Recordatorios internos y mensajes que dejan los clientes desde su portal.',canEditPage('notes')?'<button class="primary" data-action="add-note">+ Añadir nota</button>':'')+
-          `<div class="toolbar"><label class="field">Ver<select id="notes-filter">
-            <option value="today" ${filter==='today'?'selected':''}>Hoy y atrasadas (${counts.today})</option>
-            <option value="upcoming" ${filter==='upcoming'?'selected':''}>Programadas a futuro (${counts.upcoming})</option>
-            <option value="history" ${filter==='history'?'selected':''}>Historial (cumplidas) (${counts.history})</option>
-            <option value="all" ${filter==='all'?'selected':''}>Todas</option>
-          </select></label><input id="notes-search" class="search" placeholder="Buscar en las notas…" value="${esc(ui.search.notes||'')}"><span class="spacer"></span><span class="muted">${list.length} notas</span></div>`+
-          (list.length?`<div class="notes-grid">${list.map(cardHtml).join('')}</div>`:`<p class="muted" style="padding:20px 4px">${emptyMsg}</p>`);
-        $('#notes-filter').onchange=e=>{ui.notesFilter=e.target.value;renderNotes();};
-        bindSearch('notes-search','notes',renderNotes);
-        updateNotesBadge();
-      }
-      function renderDrivers(){
-        if(!canAccessPage('drivers')) return;
-        const q=(ui.search.drivers||'').toLowerCase();
-        let list=state.drivers.filter(d=>!q||[d.firstName,d.lastName,d.carnet,d.phone,d.address,routeName(d.routeId)].join(' ').toLowerCase().includes(q));
-        list=sort(list,'order','drivers');
-        const definitions=[
-          {key:'order',label:'Orden',cell:d=>n(route(d.routeId)?.order)||''},
-          {key:'firstName',label:'Nombre',cell:d=>`<div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><b>${esc(d.firstName)} ${esc(d.lastName)}</b></div>`},
-          {key:'carnet',label:'Carnet',cell:d=>esc(d.carnet||'—')},
-          {key:'phone',label:'Teléfono',cell:d=>esc(d.phone||'—')},
-          {key:'address',label:'Dirección domicilio',cell:d=>esc(d.address||'—')},
-          {key:'route',label:'Ruta',cell:d=>esc(routeName(d.routeId))},
-          {key:'id',label:'Acciones',cell:d=>canEditPage('drivers')?`<button class="icon-btn" data-action="edit-driver" data-id="${d.id}">Editar</button><button class="icon-btn delete" data-action="delete-driver" data-id="${d.id}">×</button>`:'—'}
-        ];
-        $('#drivers-page').innerHTML=pageHead('Drivers','Personal de entrega registrado.',canEditPage('drivers')?'<button class="primary" data-action="add-driver">+ Añadir driver</button>':'')+`<div class="toolbar"><input id="drivers-search" class="search" placeholder="Buscar driver…" value="${esc(ui.search.drivers||'')}"></div>`+orderedTable(list,definitions,'drivers');
-        bindSearch('drivers-search','drivers',renderDrivers);
-      }
-      function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="outline" data-action="remove-driver-photo" data-id="${d.id}">Quitar foto</button>`:''}</div></label></div>`;}
-      async function removeDriverPhoto(id){const d=driver(id);if(!d)return;d.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openDriver(id);}
-      function openDriver(id){const isNew=!id;const d0=id?driver(id):null;showModal(d0?'Editar driver':'Añadir driver',driverForm(d0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}let d=d0;if(d){Object.assign(d,data);state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);
-        const linkedUser=staffUsers.find(u=>u.driverId===d.id);
-        if(linkedUser) linkedUser.routeId=d.routeId;
-      }else{d={id:uid('d'),...data};state.drivers.push(d);}const saved=await save();if(!saved)return false;renderDrivers();notice('Driver guardado.');logAudit(isNew?'Driver creado':'Driver editado','driver',`${d.firstName||''} ${d.lastName||''}`.trim(),d.id,{});});}
-      const ROUTE_TYPES={short:['Corta','done'],long:['Larga','pending'],verylong:['Muy larga','warn']};
-      function routeTypeBadge(r){const [label,cl]=ROUTE_TYPES[r.type]||ROUTE_TYPES.short;return `<span class="badge ${cl}">${label}</span>`;}
-      function renderRoutes(){
-        if(!canAccessPage('routes')) return;
-        const q=(ui.search.routes||'').toLowerCase();
-        let list=state.routes.filter(r=>!q||[r.name,r.description].join(' ').toLowerCase().includes(q));
-        list=sort(list,'order','routes');
-        const definitions=[
-          {key:'order',label:'Orden',cell:r=>n(r.order)||''},
-          {key:'name',label:'Ruta',cell:r=>`<b>${esc(r.name)}</b>${r.open?' <span class="badge off">Abierta</span>':''}`},
-          {key:'type',label:'Tipo',cell:routeTypeBadge},
-          {key:'description',label:'Descripción',cell:r=>esc(r.description||'—')},
-          {key:'clients',label:'Clientes',cell:r=>state.clients.filter(c=>c.routeId===r.id).length},
-          {key:'drivers',label:'Drivers',cell:r=>state.drivers.filter(d=>d.routeId===r.id).length},
-          {key:'id',label:'Acciones',cell:r=>canEditPage('routes')&&!r.open?`<button class="icon-btn" data-action="edit-route" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-route" data-id="${r.id}">×</button>`:'—'}
-        ];
-        $('#routes-page').innerHTML=pageHead('Rutas','Incluye una ruta abierta para drivers disponibles sin ruta de trabajo.',canEditPage('routes')?'<button class="primary" data-action="add-route">+ Crear ruta</button>':'')+`<div class="toolbar"><input id="routes-search" class="search" placeholder="Buscar ruta…" value="${esc(ui.search.routes||'')}"></div>`+orderedTable(list,definitions,'routes');
-        bindSearch('routes-search','routes',renderRoutes);
-      }
-      function routeForm(r={}){return `<div class="form-grid"><label>Nombre de ruta *<input name="name" required value="${esc(r.name)}"></label><label>Orden<input type="number" min="0" name="order" value="${esc(r.order)}"></label><label>Tipo de ruta<select name="type"><option value="short" ${(r.type||'short')==='short'?'selected':''}>Corta</option><option value="long" ${r.type==='long'?'selected':''}>Larga</option><option value="verylong" ${r.type==='verylong'?'selected':''}>Muy larga</option></select></label><label class="wide">Descripción / zona<input name="description" value="${esc(r.description)}"></label></div>`;}
-      function openRoute(id){const isNew=!id;const r0=id?route(id):null;showModal(r0?'Editar ruta':'Crear ruta',routeForm(r0||{}),f=>{const data=Object.fromEntries(new FormData(f));let r=r0;if(r)Object.assign(r,data);else{r={id:uid('r'),...data};state.routes.push(r);}save();renderRoutes();notice('Ruta guardada.');logAudit(isNew?'Ruta creada':'Ruta editada','route',r.name,r.id,{});});}
-
-      function renderPlans(){ if(!canAccessPage('plans')) return; const cols=menuItems(); let planList=sort(state.plans,'name','plans');
-        const definitions=[
-          {key:'name',label:'Plan',cell:p=>`<div style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;border-radius:8px;overflow:hidden;flex:0 0 auto;display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><b>${esc(p.name)}</b></div>`},
-          {key:'type',label:'Tipo',cell:p=>esc(p.type||'General')},
-          ...cols.map(([key,label])=>({key,label,cell:p=>n(p.items?.[key])})),
-          {key:'id',label:'Acciones',cell:p=>canEditPage('plans')?`<button class="icon-btn" data-action="edit-plan" data-id="${p.id}">Editar</button><button class="icon-btn delete" data-action="delete-plan" data-id="${p.id}">×</button>`:'—'}
-        ];
-        const menuDefs=[
-          {key:'label',label:'Artículo',cell:m=>esc(m.label)},
-          {key:'id',label:'Acciones',cell:m=>canEditPage('plans')?`<button class="icon-btn" data-action="edit-menu-item" data-id="${m.key}">Editar</button><button class="icon-btn delete" data-action="delete-menu-item" data-id="${m.key}">×</button>`:'—'}
-        ];
-        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="primary" data-action="add-plan">+ Crear plan</button><button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button>':'')+orderedTable(planList,definitions,'plans')
-          +pageHead('Artículos del menú','Aparecen como columnas en Día de trabajo, en el Excel del día procesado y en el portal del cliente. Se pueden crear, renombrar o eliminar artículos (incluidos los que vienen por defecto).')
-          +orderedTable(state.settings.menuItems||[],menuDefs,'menu-items',m=>m.key);
-      }
-      function menuItemForm(item={}){ return `<div class="form-grid"><label class="wide">Nombre del artículo *<input name="label" required value="${esc(item.label)}" placeholder="Ej.: Postre"></label></div>`; }
-      function openMenuItem(key){
-        const isNew=!key;
-        const current=isNew?null:state.settings.menuItems.find(x=>x.key===key);
-        showModal(current?'Editar artículo':'Crear artículo',menuItemForm(current||{}),async f=>{
-          const label=f.elements.label.value.trim();
-          if(!label){notice('El nombre no puede estar vacío.',true);return false;}
-          if(current){ current.label=label; }
-          else { state.settings.menuItems.push({key:uid('item'),label}); }
-          const saved=await save();
-          if(!saved)return false;
-          renderPlans();
-          notice(isNew?'Artículo creado.':'Artículo actualizado.');
-          logAudit(isNew?'Artículo de menú creado':'Artículo de menú editado','menu-item',label,current?.key||'',{});
-        });
-      }
-      async function deleteMenuItem(key){
-        const current=state.settings.menuItems.find(x=>x.key===key);
-        if(!current)return;
-        if(state.settings.menuItems.length<=1){notice('Debe existir al menos un artículo en el menú.',true);return;}
-        if(!confirm(`¿Eliminar el artículo "${current.label}"? Se quitará de planes, clientes y vínculos de inventario que lo usen.`))return;
-        state.settings.menuItems=state.settings.menuItems.filter(x=>x.key!==key);
-        state.plans.forEach(p=>{ if(p.items) delete p.items[key]; });
-        state.clients.forEach(c=>{ if(c.items) delete c.items[key]; });
-        if(state.settings.itemIcons) delete state.settings.itemIcons[key];
-        state.inventory.links=state.inventory.links.filter(l=>l.clientItemKey!==key);
-        const saved=await save();
-        renderPlans();
-        notice(saved?'Artículo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved);
-        if(saved) logAudit('Artículo de menú eliminado','menu-item',current.label,key,{});
-      }
-      function itemIconsForm(){
-        return `<p class="muted">Sube una imagen para cada artículo del menú. Aparece junto a la cantidad de ese artículo cuando editas un plan o un cliente, y también en el portal de autoservicio del cliente.</p>
-        <div class="toggle-list" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${menuItems().map(([key,label])=>{const icon=state.settings.itemIcons?.[key];return `<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px">
-          <div style="width:34px;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${icon?`<img loading="lazy" decoding="async" src="${icon}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:12px;font-weight:650;margin-bottom:4px">${label}</div>
-            <input type="file" accept="image/*" data-item-icon="${key}" style="font-size:11px">
-          </div>
-          ${icon?`<button type="button" class="icon-btn" data-action="remove-item-icon" data-id="${key}" title="Quitar">✕</button>`:''}
-        </div>`;}).join('')}</div>`;
-      }
-      function openItemIcons(){
-        showModal('Asignar imagen a artículos',itemIconsForm(),()=>false); // false: este modal se cierra con la X, no "Guardar" (cada imagen se guarda al elegirla)
-        $('#modal-save').hidden=true;
-        $('#modal-cancel').textContent='Cerrar'; // acá no hay nada que "cancelar": cada imagen ya quedó guardada al elegirla
-        openItemIconsHandlers();
-      }
-      function openItemIconsHandlers(){
-        $$('[data-item-icon]').forEach(input=>input.onchange=async e=>{const file=e.target.files[0];if(!file)return;const key=input.dataset.itemIcon;try{state.settings.itemIcons[key]=await readImageAsDataURL(file,160,.8);const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}});
-      }
-      function planForm(p={}){return `<div class="form-grid"><label>Nombre *<input name="name" required value="${esc(p.name)}"></label><label>Tipo<input name="type" value="${esc(p.type||'General')}"></label><label class="wide">Foto del plan<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><input type="file" name="photoFile" accept="image/*">${p.id&&p.photoUrl?`<button type="button" class="outline" data-action="remove-plan-photo" data-id="${p.id}">Quitar foto</button>`:''}</div></label><div class="wide"><label>Artículos incluidos</label>${itemFields(p.items)}</div></div>`;}
-      async function removePlanPhoto(id){const p=plan(id);if(!p)return;p.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openPlan(id);}
-      function openPlan(id){const isNew=!id;const p0=id?plan(id):null;showModal(p0?'Editar plan':'Crear plan',planForm(p0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;data.items=formItems(f);if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}let p=p0;if(p)Object.assign(p,data);else{p={id:uid('p'),...data};state.plans.push(p);}const saved=await save();if(!saved)return false;renderPlans();notice('Plan guardado.');logAudit(isNew?'Plan creado':'Plan editado','plan',p.name,p.id,{});});}
-
-      function kitchenItem(id){ return state.inventory.items.find(x=>x.id===id); }
-      function clientItemQuantity(c,key){ const own=c.items && Object.keys(c.items).length ? c.items : plan(c.planId)?.items || {}; return n(own[key]); }
-      function inventoryItemForm(item={}){ return `<div class="form-grid"><label>Producto de cocina *<input name="name" required value="${esc(item.name)}" placeholder="Ej.: Envase mediano"></label><label>Unidad *<input name="unit" required value="${esc(item.unit||'unidades')}" placeholder="unidades, kg, litros"></label><label>Stock inicial / actual<input name="stock" type="number" step="0.01" value="${n(item.stock)}"></label><label>Stock mínimo<input name="minimum" type="number" min="0" step="0.01" value="${n(item.minimum)}"></label></div>`; }
-      function openInventoryItem(id){ const isNew=!id; const item0=id?kitchenItem(id):null; showModal(item0?'Editar producto':'Añadir producto de cocina',inventoryItemForm(item0||{}),async f=>{const data=Object.fromEntries(new FormData(f));let item=item0;if(item)Object.assign(item,data);else{item={id:uid('inv'),...data};state.inventory.items.push(item);}const saved=await save();if(!saved)return false;renderInventory();notice('Producto de inventario guardado.');logAudit(isNew?'Producto de inventario creado':'Producto de inventario editado','inventory-item',item.name,item.id,{});}); }
-      function inventoryOptions(current=''){ return `<option value="">Seleccionar producto</option>`+state.inventory.items.map(x=>`<option value="${x.id}" ${x.id===current?'selected':''}>${esc(x.name)} (${esc(x.unit||'unidades')})</option>`).join(''); }
-      function inventoryMovementForm(type,m={}){ const title=(m.id?'Editar ':'')+(type==='entry'?'Ingreso de producto':type==='waste'?'Salida por merma':'Salida por uso'); return {title,html:`<div class="form-grid"><label>Fecha<input name="date" type="date" value="${m.date||state.currentDate}"></label><label>Producto *<select name="inventoryId" required>${inventoryOptions(m.inventoryId)}</select></label><label>Cantidad *<input name="quantity" type="number" min="0.01" step="0.01" required value="${m.id?Math.abs(n(m.quantity)):''}"></label><label>Motivo / detalle<input name="note" required placeholder="Ej.: recepción proveedor" value="${esc(m.note)}"></label></div>`}; }
-      function openInventoryMovement(type,id){
-        const existing=id?state.inventory.movements.find(x=>x.id===id):null;
-        const form=inventoryMovementForm(type,existing||{});
-        showModal(form.title,form.html,async f=>{
-          const data=Object.fromEntries(new FormData(f)), item=kitchenItem(data.inventoryId); if(!item)return false;
-          const qty=n(data.quantity), delta=type==='entry'?qty:-qty;
-          if(existing){ const oldItem=kitchenItem(existing.inventoryId); if(oldItem)oldItem.stock=n(oldItem.stock)-n(existing.quantity); }
-          item.stock=n(item.stock)+delta;
-          if(existing){ Object.assign(existing,{date:data.date,inventoryId:data.inventoryId,type,quantity:delta,note:data.note}); }
-          else state.inventory.movements.unshift({id:uid('mov'),date:data.date,inventoryId:data.inventoryId,type,quantity:delta,note:data.note});
-          const saved=await save(); if(!saved)return false;
-          renderInventory();notice(existing?'Movimiento actualizado.':(type==='entry'?'Ingreso registrado.':'Salida de inventario registrada.'));
-          logAudit(existing?'Movimiento de inventario editado':'Movimiento de inventario registrado','inventory-movement',item.name,existing?.id||'',{tipo:type,cantidad:delta,motivo:data.note,fecha:data.date});
-        });
-      }
-      async function deleteInventoryMovement(id){
-        const m=state.inventory.movements.find(x=>x.id===id); if(!m||m.type==='delivery')return;
-        if(!confirm('¿Eliminar este movimiento? Se revertirá su efecto sobre el stock.'))return;
-        const item=kitchenItem(m.inventoryId); if(item)item.stock=n(item.stock)-n(m.quantity);
-        state.inventory.movements=state.inventory.movements.filter(x=>x.id!==id);
-        const saved=await save(); renderInventory();
-        notice(saved?'Movimiento eliminado y stock ajustado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved);
-        if(saved) logAudit('Movimiento de inventario eliminado','inventory-movement',item?.name||m.inventoryId,m.id,{tipo:m.type,cantidad:m.quantity,motivo:m.note});
-      }
-      function inventoryLinkForm(link={}){ return `<div class="form-grid"><label>Producto de cocina *<select name="inventoryId" required>${inventoryOptions(link.inventoryId)}</select></label><label>Artículo entregado al cliente *<select name="clientItemKey" required>${menuItems().map(([key,label])=>`<option value="${key}" ${link.clientItemKey===key?'selected':''}>${label}</option>`).join('')}</select></label><label class="wide">Cantidad a descontar por cada artículo entregado *<input name="quantity" type="number" min="0.01" step="0.01" required value="${n(link.quantity)||1}"></label></div>`; }
-      function openInventoryLink(id){ const isNew=!id; const link0=id?state.inventory.links.find(x=>x.id===id):null; showModal(link0?'Editar vínculo de consumo':'Vincular consumo a artículo entregado',inventoryLinkForm(link0||{}),async f=>{const data=Object.fromEntries(new FormData(f));let link=link0;if(link)Object.assign(link,data);else{link={id:uid('link'),...data};state.inventory.links.push(link);}const saved=await save();if(!saved)return false;renderInventory();notice('Vínculo de consumo guardado.');logAudit(isNew?'Vínculo de consumo creado':'Vínculo de consumo editado','inventory-link',kitchenItem(link.inventoryId)?.name||link.inventoryId,link.id,{});}); }
-      async function deleteInventoryItem(id){ const item=kitchenItem(id); if(!item || !confirm(`¿Eliminar ${item.name} del inventario?`))return; state.inventory.items=state.inventory.items.filter(x=>x.id!==id); state.inventory.links=state.inventory.links.filter(x=>x.inventoryId!==id); const saved=await save();renderInventory();notice(saved?'Producto eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); if(saved) logAudit('Producto de inventario eliminado','inventory-item',item.name,id,{}); }
-      async function deleteInventoryLink(id){ const link=state.inventory.links.find(x=>x.id===id); if(!link||!confirm('¿Eliminar este vínculo de consumo?'))return; state.inventory.links=state.inventory.links.filter(x=>x.id!==id);const saved=await save();renderInventory();notice(saved?'Vínculo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); if(saved) logAudit('Vínculo de consumo eliminado','inventory-link',kitchenItem(link.inventoryId)?.name||link.inventoryId,id,{}); }
-      function renderInventory(){
-        if(!canAccessPage('inventory')) return;
-        if(!hasPremiumAccess()){ $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina.')+premiumLockHtml('Inventario'); return; }
-        const itemDefs=[
-          {key:'name',label:'Producto',cell:item=>{const low=n(item.stock)<=n(item.minimum);return `<b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}`;}},
-          {key:'unit',label:'Unidad',cell:item=>esc(item.unit||'unidades')},
-          {key:'stock',label:'Stock',cell:item=>n(item.stock)},
-          {key:'minimum',label:'Mínimo',cell:item=>n(item.minimum)},
-          {key:'links',label:'Se descuenta con',cell:item=>{const links=state.inventory.links.filter(l=>l.inventoryId===item.id);return links.length?links.map(l=>`${n(l.quantity)} × ${esc(menuItems().find(([key])=>key===l.clientItemKey)?.[1]||l.clientItemKey)}`).join('<br>'):'—';}},
-          {key:'id',label:'Acciones',cell:item=>canEditPage('inventory')?`<button class="icon-btn" data-action="edit-inventory-item" data-id="${item.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-item" data-id="${item.id}">×</button>`:'—'}
-        ];
-        const linkDefs=[
-          {key:'inventoryId',label:'Producto de cocina',cell:link=>esc(kitchenItem(link.inventoryId)?.name||'Producto eliminado')},
-          {key:'clientItemKey',label:'Artículo entregado',cell:link=>esc(menuItems().find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey)},
-          {key:'quantity',label:'Cantidad por entrega',cell:link=>n(link.quantity)},
-          {key:'id',label:'Acciones',cell:link=>canEditPage('inventory')?`<button class="icon-btn" data-action="edit-inventory-link" data-id="${link.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-link" data-id="${link.id}">×</button>`:'—'}
-        ];
-        const movementDefs=[
-          {key:'date',label:'Fecha',cell:m=>esc(m.date)},
-          {key:'inventoryId',label:'Producto',cell:m=>esc(kitchenItem(m.inventoryId)?.name||'Producto eliminado')},
-          {key:'quantity',label:'Cantidad',cell:m=>m.quantity>0?`+${n(m.quantity)}`:n(m.quantity)},
-          {key:'type',label:'Tipo',cell:m=>m.type==='entry'?'Ingreso':m.type==='waste'?'Merma':m.type==='delivery'?'Entrega procesada':'Uso'},
-          {key:'note',label:'Detalle',cell:m=>esc(m.note||'—')},
-          {key:'id',label:'Acciones',cell:m=>canEditPage('inventory')&&m.type!=='delivery'?`<button class="icon-btn" data-action="edit-inventory-movement" data-id="${m.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-movement" data-id="${m.id}">×</button>`:'—'}
-        ];
-        const recent=state.inventory.movements.slice(0,12);
-        const actions=canEditPage('inventory')?`<button class="primary" data-action="add-inventory-item">+ Producto de cocina</button><button class="outline" data-action="add-inventory-entry">+ Ingreso</button><button class="outline" data-action="add-inventory-use">− Uso</button><button class="outline" data-action="add-inventory-waste">− Merma</button><button class="outline" data-action="add-inventory-link">Vincular consumo</button>`:'';
-        $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina. Los vínculos descuentan insumos automáticamente al procesar pedidos activos.',actions)+`<div class="two-col"><div class="card card-pad"><h3 style="margin-bottom:12px">Productos de cocina</h3>${orderedTable(state.inventory.items,itemDefs,'inventory')}</div><div class="card card-pad"><h3 style="margin-bottom:12px">Vínculos de consumo</h3>${orderedTable(state.inventory.links,linkDefs,'inventory-links')}</div></div><div class="card card-pad" style="margin-top:18px"><h3 style="margin-bottom:12px">Últimos movimientos</h3>${orderedTable(recent,movementDefs,'inventory-movements')}</div>`;
-      }
-      function applyInventoryForProcessedDay(date){
-        const active=state.clients.filter(c=>status(c,date)==='Activo');
-        state.inventory.links.forEach(link=>{
-          const item=kitchenItem(link.inventoryId); if(!item)return;
-          const delivered=active.reduce((sum,c)=>sum+clientItemQuantity(c,link.clientItemKey),0), used=delivered*n(link.quantity);
-          if(!used)return;
-          item.stock=n(item.stock)-used;
-          state.inventory.movements.unshift({id:uid('mov'),date,inventoryId:item.id,type:'delivery',quantity:-used,note:`Descuento automático: ${delivered} ${menuItems().find(([key])=>key===link.clientItemKey)?.[1]||link.clientItemKey}`});
-        });
-      }
-      function revertInventoryForProcessedDay(date){
-        const kept=[];
-        state.inventory.movements.forEach(m=>{
-          if(m.type==='delivery'&&m.date===date){
-            const item=kitchenItem(m.inventoryId);
-            if(item)item.stock=n(item.stock)-n(m.quantity); // quantity es negativo: al restarlo, se repone
-          } else kept.push(m);
-        });
-        state.inventory.movements=kept;
-      }
-
       function monthDates(month){const [y,m]=month.split('-').map(Number),end=new Date(y,m,0).getDate();return Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
       function renderPayroll(){ if(!canAccessPage('payroll')) return; if(!hasPremiumAccess()){ $('#payroll-page').innerHTML=pageHead('Sueldos','Cálculo de tarifas por driver.')+premiumLockHtml('Sueldos'); return; } const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const dayValues=d=>dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const rows=d=>{const values=dayValues(d);const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
         const dayTotals=dates.map((date,i)=>list.reduce((sum,d)=>sum+n(dayValues(d)[i]),0));
@@ -1391,133 +1101,12 @@
         const totalsRow=`<tfoot><tr class="table-totals"><td>Total (carreras/día)</td>${dayTotals.map(v=>`<td>${v||'—'}</td>`).join('')}<td>${grandTotal}</td><td>—</td><td>—</td></tr></tfoot>`;
         const headers=[['Driver / Ruta','driver'],...dates.map((d,i)=>[String(Number(d.slice(-2))),`d${i+1}`]),['Total','total'],['Día tarifa','rate'],['Monto Bs','amount']];
         $('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<div class="date-input-wrap"><input id="payroll-month" type="month" value="${ui.month}"></div></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet table-responsive"><table class="table table-hover align-middle mb-0 payroll">${colgroupHtml(headers,'payroll')}<thead><tr>${headers.map(h=>th(h[0],h[1],'payroll')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody>${list.length?totalsRow:''}</table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
-
-      function renderUsers(){if(!canAccessPage('users'))return;
-        const userDefs=[
-          {key:'username',label:'Usuario',cell:u=>`<b>${esc(u.username)}</b>`},
-          {key:'name',label:'Nombre',cell:u=>esc(u.name)},
-          {key:'email',label:'Correo',cell:u=>esc(u.email||'—')},
-          {key:'role',label:'Rol',cell:u=>badge(roleLabel(u.role))},
-          {key:'route',label:'Ruta asignada',cell:u=>u.role==='driver'?esc(routeName(u.routeId)):'—'},
-          {key:'id',label:'Acciones',cell:u=>`<button class="icon-btn" data-action="edit-user" data-id="${u.id}">Editar</button>${u.id!==activeUser.id?`<button class="icon-btn delete" data-action="delete-user" data-id="${u.id}">×</button>`:''}`}
-        ];
-        const roleSummary=r=>ROLE_PAGE_OPTIONS.filter(([key])=>r.pages?.[key]?.view).map(([key,label,editable])=>editable&&r.pages[key].edit?`${label} (editar)`:label).join(', ')||'Sin páginas asignadas';
-        const roleDefs=[
-          {key:'label',label:'Rol',cell:r=>{const inUse=staffUsers.filter(u=>u.role===r.id).length;return `<b>${esc(r.label)}</b>${inUse?` <small class="muted">(${inUse} usuario${inUse===1?'':'s'})</small>`:''}`;}},
-          {key:'perms',label:'Permisos',cell:r=>esc(roleSummary(r))},
-          {key:'id',label:'Acciones',cell:r=>`<button class="icon-btn" data-action="edit-role" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-role" data-id="${r.id}">×</button>`}
-        ];
-        $('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Roles fijos: Administrador, Editor, Cocina y Driver. También se pueden crear roles a medida.', '<button class="primary" data-action="add-user">+ Crear usuario</button><button class="outline" data-action="add-role">+ Crear rol</button>')
-          +orderedTable(staffUsers,userDefs,'users')
-          +pageHead('Roles personalizados','Qué páginas puede ver y editar cada rol creado a medida. Administrador, Editor, Cocina y Driver son fijos y no aparecen aquí.')
-          +orderedTable(state.settings.customRoles||[],roleDefs,'roles',r=>r.id);
+      function updateNotesBadge(){
+        const el=$('#notes-badge'); if(!el) return;
+        const count=(canAccessPage('notes')&&hasPremiumAccess())?notesDueToday().length:0;
+        el.textContent=count>99?'99+':String(count);
+        el.hidden=count===0;
       }
-      let auditEntries=null;
-      async function renderAudit(forceRefresh){
-        if(!canAccessPage('audit')) return;
-        if(!hasPremiumAccess()){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios.')+premiumLockHtml('Auditoría'); return; }
-        const actions='<button class="refresh" data-action="refresh-audit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>';
-        if(forceRefresh||auditEntries===null){
-          $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+'<p class="muted">Cargando historial…</p>';
-          const rows=await window.SupabaseDB?.dbGetAuditLog(300);
-          auditEntries=rows||[];
-          if(!rows){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo.',actions)+'<p class="muted">No se pudo cargar el historial. Verifica que la tabla db_audit_log exista (corre supabase-audit-log-migration.sql) y vuelve a intentar.</p>'; return; }
-        }
-        const q=(ui.search.audit||'').toLowerCase();
-        let list=auditEntries.filter(e=>!q||[e.actor_name,e.actor_role,e.action,e.entity_type,e.entity_label].join(' ').toLowerCase().includes(q));
-        list=sort(list,'at','audit');
-        const definitions=[
-          {key:'at',label:'Fecha',cell:e=>new Date(e.at).toLocaleString('es-BO',{dateStyle:'short',timeStyle:'short'})},
-          {key:'actor_name',label:'Quién',cell:e=>`${esc(e.actor_name||'—')}<br><small class="muted">${esc(roleLabel(e.actor_role))}</small>`},
-          {key:'action',label:'Acción',cell:e=>esc(e.action)},
-          {key:'entity_label',label:'Registro',cell:e=>esc(e.entity_label||e.entity_type||'—')},
-          {key:'details',label:'Detalle',cell:e=>Object.keys(e.details||{}).length?esc(Object.entries(e.details).map(([k,v])=>`${k}: ${v}`).join(' · ')):'—'}
-        ];
-        $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+`<div class="toolbar"><input id="audit-search" class="search" placeholder="Buscar por persona, acción o registro…" value="${esc(ui.search.audit||'')}"><span class="spacer"></span><span class="muted">${list.length} eventos</span></div>`+orderedTable(list,definitions,'audit');
-        bindSearch('audit-search','audit',renderAudit);
-        enableTableTools();
-      }
-      function userForm(u={}){const d=u.driverId?driver(u.driverId):{};const showDriver=u.role==='driver';return `<div class="form-grid"><label>Nombre de usuario *<input name="username" required value="${esc(u.username)}"></label><label>Correo *<input type="email" name="email" required value="${esc(u.email)}"></label><label>${u.id?'Nueva contraseña':'Contraseña *'}<input type="password" name="password" ${u.id?'':'required'} autocomplete="new-password"></label><label>${u.id?'Confirmar nueva contraseña':'Confirmar contraseña *'}<input type="password" name="passwordConfirm" ${u.id?'':'required'} autocomplete="new-password"></label><label>Rol<select name="role" id="user-role-select">${isSuperAdmin()?`<option value="superadmin" ${u.role==='superadmin'?'selected':''}>Super Administrador</option>`:''}<option value="admin" ${u.role==='admin'?'selected':''}>Administrador</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="kitchen" ${u.role==='kitchen'?'selected':''}>Cocina</option><option value="driver" ${(!u.role||u.role==='driver')?'selected':''}>Driver</option>${(state.settings.customRoles||[]).map(r=>`<option value="${r.id}" ${u.role===r.id?'selected':''}>${esc(r.label)}</option>`).join('')}</select>${isSuperAdmin()?'<p class="muted" style="margin-top:4px">Solo puede haber un Super Administrador.</p>':''}</label><label>Nombre completo *<input name="name" required value="${esc(u.name)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Carnet${showDriver?' *':''}<input name="carnet" value="${esc(d.carnet)}" ${showDriver?'required':''}></label><label class="driver-field" ${showDriver?'':'hidden'}>Teléfono<input name="phone" value="${esc(d.phone)}"></label><label class="driver-field" ${showDriver?'':'hidden'}>Ruta asignada<select name="routeId">${options(state.routes,u.routeId,'Ruta abierta')}</select></label><label class="driver-field wide" ${showDriver?'':'hidden'}>Dirección de domicilio<input name="address" value="${esc(d.address)}"></label><p class="muted wide driver-field-hint" ${showDriver?'hidden':''}>Solo el rol Driver necesita ficha de driver y ruta asignada.</p></div>`;}
-      function roleForm(r={}){
-        const pages=r.pages||{};
-        return `<div class="form-grid"><label class="wide">Nombre del rol *<input name="label" required value="${esc(r.label)}" placeholder="Ej.: Supervisor de zona"></label>
-          <div class="wide"><table class="table table-sm align-middle mb-0"><thead><tr><th>Página</th><th>Ver</th><th>Editar</th></tr></thead><tbody>
-          ${ROLE_PAGE_OPTIONS.map(([key,label,editable])=>`<tr><td>${esc(label)}</td><td><input type="checkbox" name="view_${key}" ${pages[key]?.view?'checked':''}></td><td>${editable?`<input type="checkbox" name="edit_${key}" ${pages[key]?.edit?'checked':''}>`:'—'}</td></tr>`).join('')}
-          </tbody></table></div></div>`;
-      }
-      function openRole(id){
-        const isNew=!id;
-        const current=isNew?null:customRole(id);
-        showModal(current?'Editar rol':'Crear rol',roleForm(current||{}),async f=>{
-          const label=f.elements.label.value.trim();
-          if(!label){notice('El nombre del rol no puede estar vacío.',true);return false;}
-          const pages={};
-          ROLE_PAGE_OPTIONS.forEach(([key,,editable])=>{
-            const view=!!f.elements[`view_${key}`]?.checked;
-            const edit=editable?(view&&!!f.elements[`edit_${key}`]?.checked):false;
-            pages[key]={view,edit};
-          });
-          if(current){ current.label=label; current.pages=pages; }
-          else { state.settings.customRoles.push({id:uid('role'),label,pages}); }
-          const saved=await save();
-          if(!saved)return false;
-          renderUsers();
-          notice(isNew?'Rol creado.':'Rol actualizado.');
-          logAudit(isNew?'Rol creado':'Rol editado','role',label,current?.id||'',{});
-        });
-      }
-      async function deleteRole(id){
-        const current=customRole(id);
-        if(!current)return;
-        const inUse=staffUsers.filter(u=>u.role===id);
-        if(inUse.length){notice(`No se puede eliminar: ${inUse.length} usuario(s) todavía tienen el rol "${current.label}". Cámbiales el rol primero.`,true);return;}
-        if(!confirm(`¿Eliminar el rol "${current.label}"?`))return;
-        state.settings.customRoles=state.settings.customRoles.filter(x=>x.id!==id);
-        const saved=await save();
-        renderUsers();
-        notice(saved?'Rol eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved);
-        if(saved) logAudit('Rol eliminado','role',current.label,id,{});
-      }
-      function bindUserFormRoleToggle(){
-        const select=$('#user-role-select'); if(!select) return;
-        select.onchange=()=>{
-          const showDriver=select.value==='driver';
-          $$('.driver-field').forEach(el=>el.hidden=!showDriver);
-          const hint=$('.driver-field-hint'); if(hint) hint.hidden=showDriver;
-          const carnet=$('.driver-field input[name="carnet"]'); if(carnet) carnet.required=showDriver;
-        };
-      }
-      function openUser(id){let u=id?staffUsers.find(x=>x.id===id):null;const isNewUser=!u;showModal(u?'Editar usuario':'Crear usuario',userForm(u||{}),async f=>{
-        const data=Object.fromEntries(new FormData(f));
-        if(staffUsers.some(x=>x.username===data.username&&x.id!==u?.id)){notice('Ese usuario ya existe.',true);return false;}
-        if(staffUsers.some(x=>x.email.toLowerCase()===data.email.toLowerCase()&&x.id!==u?.id)){notice('Ese correo ya está registrado.',true);return false;}
-        if(data.role==='superadmin'){
-          if(!isSuperAdmin()){notice('Solo el Super Administrador puede asignar ese rol.',true);return false;}
-          if(staffUsers.some(x=>x.role==='superadmin'&&x.id!==u?.id)){notice('Ya existe un Super Administrador. Solo puede haber uno.',true);return false;}
-        }
-        if(u?.role==='superadmin'&&data.role!=='superadmin'&&!isSuperAdmin()){notice('Solo el propio Super Administrador puede quitarse ese rol.',true);return false;}
-        if(data.password&&data.password!==data.passwordConfirm){notice('La contraseña y su confirmación no coinciden.',true);return false;}
-        let passwordHash=u?.passwordHash||'';
-        if(data.password){
-          passwordHash=await window.SupabaseDB?.rpc('hash_password',{p_password:data.password});
-          if(!passwordHash){notice('No se pudo generar la contraseña de forma segura. Intenta nuevamente.',true);return false;}
-        } else if(!u){
-          notice('La contraseña es obligatoria para un usuario nuevo.',true);return false;
-        }
-        let driverId=u?.driverId;
-        if(data.role==='driver'){
-          let d=driver(driverId);const parts=data.name.trim().split(/\s+/);
-          const driverData={firstName:parts.shift()||data.name,lastName:parts.join(' ')||'',carnet:data.carnet,phone:data.phone,address:data.address,routeId:data.routeId};
-          if(d)Object.assign(d,driverData);else{d={id:uid('d'),...driverData};state.drivers.push(d);}
-          driverId=d.id;
-        }
-        const userData={username:data.username,email:data.email,passwordHash,name:data.name,role:data.role,routeId:data.role==='driver'?data.routeId:'',driverId:data.role==='driver'?driverId:''};
-        if(u){Object.assign(u,userData);delete u.password;}else{u={id:uid('u'),...userData};staffUsers.push(u);}
-        const saved=await save();if(!saved)return false;
-        renderUsers();
-        notice(data.role==='driver'?'Usuario, acceso y ficha de driver guardados en la base de datos.':'Usuario guardado en la base de datos.');
-        logAudit(isNewUser?'Usuario creado':'Usuario editado','user',`${u.name} (${u.username})`,u.id,{rol:u.role});
-      });bindUserFormRoleToggle();}
       function renderSettings(){
         if(!canAccessPage('settings')) return;
         const dispatchColumns=[['order','Orden'],['name','Cliente'],['route','Ruta'],['driver','Driver'],['plan','Plan'],...menuItems(),['address1','Dirección'],['maps','Google Maps'],['phone1','Teléfono 1'],['phone2','Teléfono 2'],['notes','Observaciones'],['specialDiet','Dieta especial'],['career','Carreras / entrega'],['bags','Bolsas'],['status','Estado'],['remaining','Servicios restantes'],['returnDate','Fecha de retorno'],['id','Acciones']];
@@ -2011,19 +1600,23 @@
       });
       window.addEventListener('beforeunload', e => { if (saveInFlight) { e.preventDefault(); e.returnValue = ''; } });
 
+
       // ===================================================================
-      // Mapa de reparto (OpenStreetMap / Leaflet) — versión ADMIN.
-      // Código propio de index.js: no depende de ningún otro archivo .js de
-      // la app (está duplicado en driver-app.js a propósito, ver nota ahí).
-      // El admin solo ESCUCHA la ubicación en vivo que transmite el driver
-      // (no la transmite él mismo).
+      // Mapa de reparto (OpenStreetMap / Leaflet) — versión DRIVER.
+      // Código propio de driver-app.js: no depende de ningún otro archivo
+      // .js de la app (está duplicado en index.js a propósito, para que
+      // ambas webs sean 100% independientes y no haya que tocar una para
+      // editar la otra). El driver TRANSMITE su ubicación en vivo (GPS del
+      // celular) mientras el diálogo está abierto; no hay selector de ruta
+      // porque el driver solo ve la suya.
       // ===================================================================
       (() => {
         const LOCATION_CHANNEL_NAME = 'catering-driver-location';
+        const BROADCAST_MIN_INTERVAL_MS = 4000;
         const NOMINATIM_DELAY_MS = 1100; // respeta el límite de ~1 solicitud/seg de Nominatim
-        let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null, routeSelectWrap=null;
+        let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null;
         let map=null, markersLayer=null, driverMarker=null;
-        let locationChannel=null, channelBound=false, currentRouteId='';
+        let watchId=null, locationChannel=null, lastBroadcastAt=0;
 
         function ensureStyles(){
           if (document.getElementById('driver-map-style')) return;
@@ -2038,7 +1631,6 @@
             #map-dialog .mmap-status{padding:6px 16px;font-size:12.5px;color:#64748b;border-bottom:1px solid rgba(0,0,0,.06)}
             #map-dialog .mmap-legend{padding:4px 16px;font-size:11.5px;color:#94a3b8}
             #map-dialog .mmap-body{position:relative;width:100%;height:calc(100% - 96px)}
-            #map-dialog select{padding:5px 8px;border-radius:8px;border:1px solid #cbd5e1;font-size:13px}
             .mc-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;background:#0d6efd;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transform:rotate(-45deg);display:flex;align-items:center;justify-content:center}
             .mc-pin span{transform:rotate(45deg);color:#fff;font-weight:700;font-size:12px}
             .mc-driver-icon{width:34px;height:34px;border-radius:50%;background:#f97316;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:16px}
@@ -2051,12 +1643,11 @@
           if (dialog) return;
           dialog=document.createElement('dialog');
           dialog.id='map-dialog';
-          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de reparto</h2><div id="mmap-route-select-wrap" hidden></div><button type="button" class="mmap-close" aria-label="Cerrar">×</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
+          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de tu ruta</h2><button type="button" class="mmap-close" aria-label="Cerrar">×</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
           document.body.appendChild(dialog);
           mapBodyEl=dialog.querySelector('#mmap-body');
           statusEl=dialog.querySelector('#mmap-status');
           legendEl=dialog.querySelector('#mmap-legend');
-          routeSelectWrap=dialog.querySelector('#mmap-route-select-wrap');
           dialog.querySelector('.mmap-close').addEventListener('click', () => dialog.close());
           dialog.addEventListener('close', teardown);
           dialog.addEventListener('cancel', () => dialog.close());
@@ -2100,8 +1691,6 @@
 
         function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-        // Resuelve coordenadas de clientes de reparto reales (mismos objetos
-        // de state.clients: al asignar c.lat/c.lng se guardan con save()).
         async function resolveCoords(list){
           const pending=list.filter(c => c.lat==null || c.lng==null || c.geoSrc!==srcFingerprint(c));
           let done=0, changed=false;
@@ -2151,19 +1740,6 @@
           return locationChannel;
         }
 
-        function startListening(routeId){
-          const channel=ensureLocationChannel();
-          if (!channel) return;
-          if (!channelBound){
-            channel.on('broadcast', { event: 'loc' }, ({ payload }) => {
-              if (!payload || payload.routeId !== currentRouteId) return;
-              drawDriverMarker(payload.lat, payload.lng, payload.name || 'Driver');
-            });
-            channel.subscribe();
-            channelBound=true;
-          }
-        }
-
         function drawDriverMarker(lat,lng,name){
           if (!map || !window.L) return;
           const icon=window.L.divIcon({ className:'', html:'<div class="mc-driver-icon">🚚</div>', iconSize:[34,34], iconAnchor:[17,17] });
@@ -2171,46 +1747,48 @@
           else driverMarker.setLatLng([lat,lng]);
         }
 
+        function startBroadcast(routeId, name){
+          const channel=ensureLocationChannel();
+          if (!channel || !navigator.geolocation) return;
+          channel.subscribe();
+          watchId=navigator.geolocation.watchPosition(pos => {
+            const now=Date.now();
+            drawDriverMarker(pos.coords.latitude, pos.coords.longitude, name || 'Tú');
+            if (now - lastBroadcastAt < BROADCAST_MIN_INTERVAL_MS) return;
+            lastBroadcastAt=now;
+            channel.send({ type:'broadcast', event:'loc', payload:{ routeId, lat:pos.coords.latitude, lng:pos.coords.longitude, name, at:now } });
+          }, err => {
+            setStatus(err.code===1 ? 'Activa el permiso de ubicación para compartir tu posición en vivo.' : 'No se pudo obtener tu ubicación en vivo.');
+          }, { enableHighAccuracy:true, maximumAge:4000, timeout:15000 });
+        }
+
         function teardown(){
+          if (watchId!=null && navigator.geolocation){ navigator.geolocation.clearWatch(watchId); watchId=null; }
           if (map){ map.remove(); map=null; }
           driverMarker=null; markersLayer=null;
         }
 
-        function populateRouteSelector(activeRouteId){
-          routeSelectWrap.hidden=false;
-          routeSelectWrap.innerHTML=`<select id="mmap-route-select">${state.routes.map(r => `<option value="${r.id}" ${r.id===activeRouteId?'selected':''}>${escapeHtml(r.name)}</option>`).join('')}</select>`;
-          routeSelectWrap.querySelector('select').addEventListener('change', e => loadAndRender(e.target.value));
-        }
-
-        function firstRouteWithData(){
-          for (const r of state.routes) if (deliveryListFor(r.id, workDate()).length) return r.id;
-          return state.routes[0]?.id || '';
-        }
-
         async function loadAndRender(routeId){
-          currentRouteId=routeId;
           setStatus('Cargando lista de entregas…');
           const list=deliveryListFor(routeId, workDate());
           if (!list.length){
             if (map){ map.remove(); map=null; }
             mapBodyEl.innerHTML=''; legendEl.textContent='';
-            setStatus('Esta ruta no tiene pedidos activos para hoy.');
+            setStatus('No tienes pedidos activos para hoy.');
             return;
           }
           renderMapView(list);
           await resolveCoords(list);
           renderMapView(list);
-          startListening(routeId);
+          startBroadcast(routeId, activeUser?.name);
         }
 
-        async function open(routeId){
+        async function open(){
           if (!canAccessPage('delivery')) return;
           ensureStyles(); buildDialog();
           dialog.showModal();
           setTimeout(() => map && map.invalidateSize(), 30);
-          const target=routeId || firstRouteWithData();
-          populateRouteSelector(target);
-          await loadAndRender(target);
+          await loadAndRender(activeUser.routeId);
         }
 
         window.DriverMap={ open };
