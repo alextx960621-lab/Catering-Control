@@ -804,6 +804,7 @@
         ];
         $('#delivery-page').innerHTML = pageHead('Despacho', `Tu ruta: ${esc(routeName(activeUser.routeId))} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente. Se actualiza sola cada pocos segundos.`, `${list.length?`<button class="outline" data-action="open-route-map" data-route="${activeUser.routeId||''}">🗺️ Ver mapa</button>`:''}<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
           orderedTable(list, definitions, 'delivery', c=>c.id);
+        enableTableTools(); // la tabla se dibuja después de un await (ver renderDelivery), así que hay que re-engancharla aquí
       }
       function renderDeliveryAdmin(date){
         const groups = state.routes.map(r => ({ route: r, clients: deliveryListFor(r.id, date) })).filter(g => g.clients.length);
