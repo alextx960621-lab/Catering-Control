@@ -16,6 +16,9 @@
        exportar dietas, exportar orden de ruta). Así el panel carga más
        liviano y rápido en el uso normal del día a día. -->
   <link rel="stylesheet" href="./index.css?v=15">
+  <!-- Leaflet: mapa con tiles de OpenStreetMap (gratis, sin API key) para el
+       botón "Ver mapa" de Reparto. Se usa solo cuando se abre el mapa. -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 
   <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#0d6efd">
@@ -84,6 +87,8 @@
   <div class="notice" id="notice"></div>
 
   <script src="./index.js?v=16" defer></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+  <script src="./driver.js?v=1" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous" defer></script>
 <script src="./pwa-register.js?v=3" defer></script>
 </body>

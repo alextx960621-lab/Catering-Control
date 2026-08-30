@@ -796,7 +796,7 @@
               : `<button class="primary" data-action="mark-delivered" data-id="${c.id}">Entregado</button> <button class="outline" data-action="mark-not-delivered" data-id="${c.id}">No entregado</button>`;
           }}
         ];
-        $('#delivery-page').innerHTML = pageHead('Despacho', `Tu ruta: ${esc(routeName(activeUser.routeId))} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente. Se actualiza sola cada pocos segundos.`, `<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
+        $('#delivery-page').innerHTML = pageHead('Despacho', `Tu ruta: ${esc(routeName(activeUser.routeId))} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente. Se actualiza sola cada pocos segundos.`, `${list.length?`<button class="outline" data-action="open-route-map" data-route="${activeUser.routeId||''}">🗺️ Ver mapa</button>`:''}<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
           orderedTable(list, definitions, 'delivery', c=>c.id);
       }
       function renderDeliveryAdmin(date){
@@ -821,7 +821,7 @@
             <ul class="delivery-client-list">${items}</ul>
           </div>`;
         };
-        $('#delivery-page').innerHTML = pageHead('Despacho', `Progreso de entrega por ruta — ${date.split('-').reverse().join('/')}. Verde: entregado · Naranja: siguiente en la lista del driver · Morado: pendientes · Rojo: no entregado. Toca un cliente para ver el detalle. Se actualiza sola cada pocos segundos.`) +
+        $('#delivery-page').innerHTML = pageHead('Despacho', `Progreso de entrega por ruta — ${date.split('-').reverse().join('/')}. Verde: entregado · Naranja: siguiente en la lista del driver · Morado: pendientes · Rojo: no entregado. Toca un cliente para ver el detalle. Se actualiza sola cada pocos segundos.`, groups.length?`<button class="outline" data-action="open-route-map">🗺️ Ver mapa</button>`:'') +
           `<div class="delivery-routes-grid">${groups.length ? groups.map(cardHtml).join('') : '<p class="muted">No hay rutas con pedidos activos para esta fecha.</p>'}</div>`;
       }
       async function renderDispatch(){
@@ -1930,7 +1930,7 @@
           const data={...state,staffUsers,auditLog:auditLog||[],deliveryStatus:deliveryStatus||[],snapshots:snapshots||[]};
           const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download=`catering-respaldo-completo-${today()}.json`;a.click();
           notice('Respaldo completo descargado.');
-        },"import-json":()=>$('#import-file').click()};
+        },"import-json":()=>$('#import-file').click(),"open-route-map":()=>window.DriverMap?.open(e.target.closest('[data-action]')?.dataset.route||'')};
 
         const ACTION_PERMS={
           "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),"quick-status":()=>canEditPage('clients'),
@@ -1945,7 +1945,7 @@
           "add-inventory-link":()=>canEditPage('inventory'),"edit-inventory-link":()=>canEditPage('inventory'),"delete-inventory-link":()=>canEditPage('inventory'),
           "add-user":isAdmin,"edit-user":isAdmin,"delete-user":isAdmin,"add-role":isAdmin,"edit-role":isAdmin,"delete-role":isAdmin,
           "process-day":()=>canEditPage('dispatch'),"unprocess-day":()=>canEditPage('dispatch'),"toggle-day-pause":()=>canEditPage('dispatch'),
-          "mark-delivered":()=>canEditPage('delivery'),"mark-not-delivered":()=>canEditPage('delivery'),"edit-delivery":()=>canEditPage('delivery'),"clear-delivery":()=>canEditPage('delivery'),"view-delivery":()=>canAccessPage('delivery'),
+          "mark-delivered":()=>canEditPage('delivery'),"mark-not-delivered":()=>canEditPage('delivery'),"edit-delivery":()=>canEditPage('delivery'),"clear-delivery":()=>canEditPage('delivery'),"view-delivery":()=>canAccessPage('delivery'),"open-route-map":()=>canAccessPage('delivery'),
           "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin,"refresh-audit":()=>canAccessPage('audit')
         };
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
@@ -2010,4 +2010,31 @@
         if(box) box.innerHTML=presenceCountsHTML();
       });
       window.addEventListener('beforeunload', e => { if (saveInFlight) { e.preventDefault(); e.returnValue = ''; } });
+
+      // --- Puente de solo lo necesario para el mapa de reparto (driver.js) ---
+      // No expone el estado completo ni funciones de guardado genéricas: solo
+      // lecturas ya calculadas y una función de guardado acotada a lat/lng.
+      window.CateringMapBridge = {
+        getActiveUser: () => ({ id: activeUser?.id, role: role(), routeId: activeUser?.routeId, name: activeUser?.name }),
+        isDriverRole,
+        canAccessDelivery: () => canAccessPage('delivery'),
+        getRoutes: () => state.routes.map(r => ({ id: r.id, name: r.name })),
+        // Lista de clientes de reparto ya filtrada/ordenada, igual que la tabla de Despacho.
+        getDeliveryList: (routeId, date) => deliveryListFor(routeId, date || workDate()).map(c => ({
+          id: c.id, name: c.name, order: n(c.order), address1: c.address1 || '', address2: c.address2 || '',
+          maps: c.maps || '', maps2: c.maps2 || '', lat: c.lat ?? null, lng: c.lng ?? null,
+          driverName: driverName(c.driverId)
+        })),
+        getRouteName: id => routeName(id),
+        getDriverForRoute: routeId => { const d = driverForRoute(routeId); return d ? { id: d.id, name: `${d.firstName} ${d.lastName}` } : null; },
+        workDate,
+        // Guarda coordenadas resueltas (link o geocodificación) para no volver a resolverlas.
+        // No dispara notificaciones ni auditoría: es una escritura silenciosa en segundo plano.
+        saveClientCoords: async (id, lat, lng) => {
+          const c = state.clients.find(x => x.id === id);
+          if (!c) return false;
+          c.lat = lat; c.lng = lng;
+          return save();
+        }
+      };
     })();
