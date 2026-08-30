@@ -1,4 +1,5 @@
-const CACHE_NAME = 'catering-control-v1.24'; // 
+
+const CACHE_NAME = 'catering-control-v18';
 
 const PRECACHE_URLS = [
   './login.html',
@@ -10,7 +11,6 @@ const PRECACHE_URLS = [
   './index.css?v=15',
   './index.js?v=16',
   './driver.css?v=2',
-  './driver.js?v=2',
   './cliente.css?v=6',
   './cliente.js?v=4',
   './config.js',
@@ -45,18 +45,6 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Guarda una respuesta en caché de forma segura. Clave del arreglo: quien
-// llama a esta función debe pasar SIEMPRE una copia (res.clone()) sacada
-// en el mismo instante en que llegó la respuesta, nunca una copia hecha
-// más tarde dentro de un .then() -- para entonces el body ya pudo haber
-// empezado a leerse y clone() truena con "Response body is already used".
-function safeCachePut(req, resCopy) {
-  if (!resCopy || resCopy.status !== 200 || resCopy.type === 'opaqueredirect') return;
-  caches.open(CACHE_NAME)
-    .then(cache => cache.put(req, resCopy))
-    .catch(err => console.warn('[SW] No se pudo guardar en caché:', req.url, err));
-}
-
 self.addEventListener('fetch', event => {
   const req = event.request;
   const url = new URL(req.url);
@@ -68,8 +56,7 @@ self.addEventListener('fetch', event => {
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req).then(res => {
-        const resCopy = res.clone(); // clonar YA, antes de devolver res a la página
-        safeCachePut(req, resCopy);
+        caches.open(CACHE_NAME).then(cache => cache.put(req, res.clone()));
         return res;
       }).catch(() => caches.match(req).then(cached => cached || caches.match('./login.html')))
     );
@@ -79,8 +66,9 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(req).then(cached => {
       const network = fetch(req).then(res => {
-        const resCopy = res.clone(); // idem: clonar de inmediato
-        safeCachePut(req, resCopy);
+        if (res && res.status === 200) {
+          caches.open(CACHE_NAME).then(cache => cache.put(req, res.clone()));
+        }
         return res;
       }).catch(() => cached);
       return cached || network;
