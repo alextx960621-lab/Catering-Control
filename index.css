@@ -458,6 +458,19 @@
     .col-drag-handle:hover { color: var(--primary); }
     #dispatch-table thead th.drag-over { background: color-mix(in srgb, var(--primary) 18%, transparent); }
 
+    /* En pantallas táctiles el dedo es mucho menos preciso que un mouse:
+       agrandamos el área real de toque de ambos controles (sin agrandar
+       tanto el dibujo visual) para que agarrarlos sea confiable. */
+    @media (pointer: coarse) {
+      .resize-handle { width: 22px; right: -11px; }
+      .col-drag-handle {
+        font-size: 20px;
+        line-height: 1;
+        padding: 10px 8px;
+        margin: -10px -4px -10px -8px; /* compensa el padding para no correr el layout */
+      }
+    }
+
     .editable-cell input,
     .editable-cell select {
       padding: 4px 5px;
@@ -631,6 +644,7 @@
       width: min(760px, calc(100vw - 24px));
       max-height: calc(100vh - 24px);
       max-height: calc(100dvh - 24px);
+      margin: auto; /* el reset "* { margin:0 }" de arriba anulaba el centrado nativo del <dialog> */
     }
     dialog::backdrop {
       background: rgba(11, 21, 38, .48);
