@@ -2011,30 +2011,208 @@
       });
       window.addEventListener('beforeunload', e => { if (saveInFlight) { e.preventDefault(); e.returnValue = ''; } });
 
-      // --- Puente de solo lo necesario para el mapa de reparto (driver.js) ---
-      // No expone el estado completo ni funciones de guardado genéricas: solo
-      // lecturas ya calculadas y una función de guardado acotada a lat/lng.
-      window.CateringMapBridge = {
-        getActiveUser: () => ({ id: activeUser?.id, role: role(), routeId: activeUser?.routeId, name: activeUser?.name }),
-        isDriverRole,
-        canAccessDelivery: () => canAccessPage('delivery'),
-        getRoutes: () => state.routes.map(r => ({ id: r.id, name: r.name })),
-        // Lista de clientes de reparto ya filtrada/ordenada, igual que la tabla de Despacho.
-        getDeliveryList: (routeId, date) => deliveryListFor(routeId, date || workDate()).map(c => ({
-          id: c.id, name: c.name, order: n(c.order), address1: c.address1 || '', address2: c.address2 || '',
-          maps: c.maps || '', maps2: c.maps2 || '', lat: c.lat ?? null, lng: c.lng ?? null,
-          driverName: driverName(c.driverId)
-        })),
-        getRouteName: id => routeName(id),
-        getDriverForRoute: routeId => { const d = driverForRoute(routeId); return d ? { id: d.id, name: `${d.firstName} ${d.lastName}` } : null; },
-        workDate,
-        // Guarda coordenadas resueltas (link o geocodificación) para no volver a resolverlas.
-        // No dispara notificaciones ni auditoría: es una escritura silenciosa en segundo plano.
-        saveClientCoords: async (id, lat, lng) => {
-          const c = state.clients.find(x => x.id === id);
-          if (!c) return false;
-          c.lat = lat; c.lng = lng;
-          return save();
+      // ===================================================================
+      // Mapa de reparto (OpenStreetMap / Leaflet) — versión ADMIN.
+      // Código propio de index.js: no depende de ningún otro archivo .js de
+      // la app (está duplicado en driver-app.js a propósito, ver nota ahí).
+      // El admin solo ESCUCHA la ubicación en vivo que transmite el driver
+      // (no la transmite él mismo).
+      // ===================================================================
+      (() => {
+        const LOCATION_CHANNEL_NAME = 'catering-driver-location';
+        const NOMINATIM_DELAY_MS = 1100; // respeta el límite de ~1 solicitud/seg de Nominatim
+        let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null, routeSelectWrap=null;
+        let map=null, markersLayer=null, driverMarker=null;
+        let locationChannel=null, channelBound=false, currentRouteId='';
+
+        function ensureStyles(){
+          if (document.getElementById('driver-map-style')) return;
+          const style=document.createElement('style');
+          style.id='driver-map-style';
+          style.textContent=`
+            #map-dialog{border:none;border-radius:14px;padding:0;width:min(920px,96vw);height:min(680px,92vh);max-width:none;max-height:none}
+            #map-dialog::backdrop{background:rgba(15,23,42,.55)}
+            #map-dialog .mmap-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid rgba(0,0,0,.08);flex-wrap:wrap}
+            #map-dialog .mmap-head h2{margin:0;font-size:16px;flex:1 1 auto}
+            #map-dialog .mmap-close{border:none;background:transparent;font-size:20px;cursor:pointer;line-height:1;padding:4px 8px}
+            #map-dialog .mmap-status{padding:6px 16px;font-size:12.5px;color:#64748b;border-bottom:1px solid rgba(0,0,0,.06)}
+            #map-dialog .mmap-legend{padding:4px 16px;font-size:11.5px;color:#94a3b8}
+            #map-dialog .mmap-body{position:relative;width:100%;height:calc(100% - 96px)}
+            #map-dialog select{padding:5px 8px;border-radius:8px;border:1px solid #cbd5e1;font-size:13px}
+            .mc-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;background:#0d6efd;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transform:rotate(-45deg);display:flex;align-items:center;justify-content:center}
+            .mc-pin span{transform:rotate(45deg);color:#fff;font-weight:700;font-size:12px}
+            .mc-driver-icon{width:34px;height:34px;border-radius:50%;background:#f97316;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:16px}
+            @media (max-width:520px){#map-dialog{width:100vw;height:100vh;border-radius:0}}
+          `;
+          document.head.appendChild(style);
         }
-      };
+
+        function buildDialog(){
+          if (dialog) return;
+          dialog=document.createElement('dialog');
+          dialog.id='map-dialog';
+          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de reparto</h2><div id="mmap-route-select-wrap" hidden></div><button type="button" class="mmap-close" aria-label="Cerrar">×</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
+          document.body.appendChild(dialog);
+          mapBodyEl=dialog.querySelector('#mmap-body');
+          statusEl=dialog.querySelector('#mmap-status');
+          legendEl=dialog.querySelector('#mmap-legend');
+          routeSelectWrap=dialog.querySelector('#mmap-route-select-wrap');
+          dialog.querySelector('.mmap-close').addEventListener('click', () => dialog.close());
+          dialog.addEventListener('close', teardown);
+          dialog.addEventListener('cancel', () => dialog.close());
+        }
+
+        function setStatus(text){ if (statusEl) statusEl.textContent=text; }
+
+        // Huella de qué se usó para resolver la coordenada: si el link o la
+        // dirección cambian, la huella cambia y se vuelve a resolver aunque
+        // ya hubiera una coordenada guardada (evita quedarse con datos viejos).
+        function srcFingerprint(c){ return `${c.maps||''}|${c.maps2||''}|${c.address1||''}`; }
+
+        function extractCoords(text){
+          if (!text) return null;
+          const patterns=[
+            /@(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+            /[?&](?:q|ll|daddr)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+            /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,
+            /(-?\d{1,3}\.\d{3,}),\s*(-?\d{1,3}\.\d{3,})/ // fallback: "lat, lng" sueltos (con o sin paréntesis)
+          ];
+          for (const re of patterns){
+            const m=text.match(re);
+            if (m){
+              const lat=parseFloat(m[1]), lng=parseFloat(m[2]);
+              if (Math.abs(lat)<=90 && Math.abs(lng)<=180) return { lat, lng };
+            }
+          }
+          return null;
+        }
+
+        async function geocodeAddress(address){
+          try {
+            const url=`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`;
+            const res=await fetch(url, { headers: { 'Accept-Language': 'es' } });
+            if (!res.ok) return null;
+            const data=await res.json();
+            if (!data.length) return null;
+            return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+          } catch (_) { return null; }
+        }
+
+        function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+        // Resuelve coordenadas de clientes de reparto reales (mismos objetos
+        // de state.clients: al asignar c.lat/c.lng se guardan con save()).
+        async function resolveCoords(list){
+          const pending=list.filter(c => c.lat==null || c.lng==null || c.geoSrc!==srcFingerprint(c));
+          let done=0, changed=false;
+          for (const c of pending){
+            let coords=extractCoords(c.maps) || extractCoords(c.maps2) || extractCoords(c.address1);
+            if (!coords && c.address1){
+              setStatus(`Resolviendo direcciones… ${done+1}/${pending.length}`);
+              coords=await geocodeAddress(c.address1);
+              await sleep(NOMINATIM_DELAY_MS);
+            }
+            if (coords){ c.lat=coords.lat; c.lng=coords.lng; c.geoSrc=srcFingerprint(c); changed=true; }
+            done++;
+          }
+          if (changed) save();
+        }
+
+        function escapeHtml(v){ return String(v ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[ch])); }
+
+        function renderMapView(list){
+          if (!mapBodyEl) return;
+          if (map){ map.remove(); map=null; }
+          mapBodyEl.innerHTML='';
+          if (!window.L){ setStatus('No se pudo cargar el mapa (sin conexión a internet).'); return; }
+          const withCoords=list.filter(c => c.lat!=null && c.lng!=null);
+          const withoutCoords=list.length - withCoords.length;
+          map=window.L.map(mapBodyEl, { zoomControl: true });
+          window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(map);
+          markersLayer=window.L.layerGroup().addTo(map);
+          const sorted=[...withCoords].sort((a,b) => (n(a.order)||9999) - (n(b.order)||9999));
+          const latlngs=[];
+          sorted.forEach(c => {
+            const icon=window.L.divIcon({ className:'', html:`<div class="mc-pin"><span>${n(c.order)||'·'}</span></div>`, iconSize:[26,26], iconAnchor:[13,26] });
+            window.L.marker([c.lat,c.lng], { icon }).addTo(markersLayer).bindPopup(`<b>${escapeHtml(c.name)}</b><br>Orden: ${n(c.order)||'—'}<br>${escapeHtml(c.address1||'')}`);
+            latlngs.push([c.lat,c.lng]);
+          });
+          if (latlngs.length>1) window.L.polyline(latlngs, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(map);
+          if (latlngs.length) map.fitBounds(window.L.latLngBounds(latlngs).pad(0.2)); else map.setView([-16.5,-68.15],12);
+          legendEl.textContent=`Números = orden del cliente. Línea punteada = ruta sugerida en línea recta (no sigue calles).${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
+          setStatus(withCoords.length ? `${withCoords.length}/${list.length} puntos en el mapa.` : 'No se pudo ubicar a ningún cliente en el mapa todavía.');
+          setTimeout(() => map && map.invalidateSize(), 50);
+        }
+
+        function ensureLocationChannel(){
+          const client=window.SupabaseDB?.client;
+          if (!client || locationChannel) return locationChannel;
+          locationChannel=client.channel(LOCATION_CHANNEL_NAME);
+          return locationChannel;
+        }
+
+        function startListening(routeId){
+          const channel=ensureLocationChannel();
+          if (!channel) return;
+          if (!channelBound){
+            channel.on('broadcast', { event: 'loc' }, ({ payload }) => {
+              if (!payload || payload.routeId !== currentRouteId) return;
+              drawDriverMarker(payload.lat, payload.lng, payload.name || 'Driver');
+            });
+            channel.subscribe();
+            channelBound=true;
+          }
+        }
+
+        function drawDriverMarker(lat,lng,name){
+          if (!map || !window.L) return;
+          const icon=window.L.divIcon({ className:'', html:'<div class="mc-driver-icon">🚚</div>', iconSize:[34,34], iconAnchor:[17,17] });
+          if (!driverMarker) driverMarker=window.L.marker([lat,lng], { icon, zIndexOffset:1000 }).addTo(map).bindPopup(escapeHtml(name));
+          else driverMarker.setLatLng([lat,lng]);
+        }
+
+        function teardown(){
+          if (map){ map.remove(); map=null; }
+          driverMarker=null; markersLayer=null;
+        }
+
+        function populateRouteSelector(activeRouteId){
+          routeSelectWrap.hidden=false;
+          routeSelectWrap.innerHTML=`<select id="mmap-route-select">${state.routes.map(r => `<option value="${r.id}" ${r.id===activeRouteId?'selected':''}>${escapeHtml(r.name)}</option>`).join('')}</select>`;
+          routeSelectWrap.querySelector('select').addEventListener('change', e => loadAndRender(e.target.value));
+        }
+
+        function firstRouteWithData(){
+          for (const r of state.routes) if (deliveryListFor(r.id, workDate()).length) return r.id;
+          return state.routes[0]?.id || '';
+        }
+
+        async function loadAndRender(routeId){
+          currentRouteId=routeId;
+          setStatus('Cargando lista de entregas…');
+          const list=deliveryListFor(routeId, workDate());
+          if (!list.length){
+            if (map){ map.remove(); map=null; }
+            mapBodyEl.innerHTML=''; legendEl.textContent='';
+            setStatus('Esta ruta no tiene pedidos activos para hoy.');
+            return;
+          }
+          renderMapView(list);
+          await resolveCoords(list);
+          renderMapView(list);
+          startListening(routeId);
+        }
+
+        async function open(routeId){
+          if (!canAccessPage('delivery')) return;
+          ensureStyles(); buildDialog();
+          dialog.showModal();
+          setTimeout(() => map && map.invalidateSize(), 30);
+          const target=routeId || firstRouteWithData();
+          populateRouteSelector(target);
+          await loadAndRender(target);
+        }
+
+        window.DriverMap={ open };
+      })();
     })();
