@@ -391,8 +391,14 @@
         try {
           const db=window.SupabaseDB;
           if(!db) throw new Error('Supabase no está disponible');
+          // El driver no tiene acceso a Notas ni a Inventario (ver NAV_PERMS), así
+          // que no tiene sentido bajar esos datos en cada apertura/sincronización.
+          const skipExtra = isDriverRole();
           const [clientesData,clientRows,noteRows,personalData,inventarioData]=await Promise.all([
-            db.dbGet('clientes'), db.dbGetClientRows(), db.dbGetNoteRows(), db.dbGet('personal'), db.dbGet('inventario')
+            db.dbGet('clientes'), db.dbGetClientRows(),
+            skipExtra?Promise.resolve(null):db.dbGetNoteRows(),
+            db.dbGet('personal'),
+            skipExtra?Promise.resolve(null):db.dbGet('inventario')
           ]);
           let gotAny=false;
           if (clientesData) {
