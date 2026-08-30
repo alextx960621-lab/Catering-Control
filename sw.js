@@ -1,4 +1,4 @@
-const CACHE_NAME = 'catering-control-v22'; // subido de v21 -> v22 para forzar que todos los dispositivos descarten la caché vieja
+const CACHE_NAME = 'catering-control-v1.22'; // 
 
 const PRECACHE_URLS = [
   './login.html',
