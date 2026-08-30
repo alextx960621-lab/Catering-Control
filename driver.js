@@ -26,6 +26,41 @@
       const COL_PREFS_KEY = `${APP_CONFIG.storagePrefix}-col-prefs-v1`;
       const DRIVER_VIEW_DATE_KEY = `${APP_CONFIG.storagePrefix}-driver-viewdate-v1`;
       const $ = (s, root=document) => root.querySelector(s);
+      // Extrae lat/lng de un link de Google Maps o de un texto "lat,lng" suelto.
+      // Se usa tanto para el mapa interno de despacho como para armar links
+      // "abrir directo en Google Maps" en la página de Clientes.
+      function extractLatLngFromMapsField(text){
+        if (!text) return null;
+        const patterns=[
+          /@(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+          /[?&](?:q|ll|daddr)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+          /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,
+          /(-?\d{1,3}\.\d{3,}),\s*(-?\d{1,3}\.\d{3,})/
+        ];
+        for (const re of patterns){
+          const m=String(text).match(re);
+          if (m){
+            const lat=parseFloat(m[1]), lng=parseFloat(m[2]);
+            if (Math.abs(lat)<=90 && Math.abs(lng)<=180) return { lat, lng };
+          }
+        }
+        return null;
+      }
+      // El campo "maps" del cliente a veces trae un link completo de Google
+      // Maps y a veces solo unas coordenadas sueltas "lat,lng" (útil para el
+      // mapa interno de despacho, que las lee directo). Para que el link de
+      // la página de Clientes SIEMPRE abra Google Maps y pueda trazar ruta,
+      // si ya es una URL la respetamos tal cual; si son coordenadas sueltas,
+      // armamos un link de direcciones con esas coordenadas como destino; y
+      // si es un texto libre (una dirección escrita), lo mandamos a buscar.
+      function googleMapsDirectLink(value){
+        const v=String(value||'').trim();
+        if (!v) return '';
+        if (/^https?:\/\//i.test(v)) return v;
+        const coords=extractLatLngFromMapsField(v);
+        if (coords) return `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}`;
+        return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v)}`;
+      }
       const $$ = (s, root=document) => [...root.querySelectorAll(s)];
       (() => {
         const proto = Element.prototype;
@@ -971,7 +1006,7 @@
       function renderClients(){
         if(!canAccessPage('clients')) return;
         const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c)===activeUser.routeId):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
-        const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(c.maps)}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(c.maps2)}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
+        const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(googleMapsDirectLink(c.maps))}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(googleMapsDirectLink(c.maps2))}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
         const waLink=phone=>{
           const digits=(phone||'').replace(/\D/g,'');
           if(!digits) return '—';
@@ -1668,23 +1703,7 @@
         // ya hubiera una coordenada guardada (evita quedarse con datos viejos).
         function srcFingerprint(c){ return `${c.maps||''}|${c.maps2||''}|${c.address1||''}`; }
 
-        function extractCoords(text){
-          if (!text) return null;
-          const patterns=[
-            /@(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
-            /[?&](?:q|ll|daddr)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
-            /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,
-            /(-?\d{1,3}\.\d{3,}),\s*(-?\d{1,3}\.\d{3,})/ // fallback: "lat, lng" sueltos (con o sin paréntesis)
-          ];
-          for (const re of patterns){
-            const m=text.match(re);
-            if (m){
-              const lat=parseFloat(m[1]), lng=parseFloat(m[2]);
-              if (Math.abs(lat)<=90 && Math.abs(lng)<=180) return { lat, lng };
-            }
-          }
-          return null;
-        }
+        function extractCoords(text){ return extractLatLngFromMapsField(text); }
 
         async function geocodeAddress(address){
           try {

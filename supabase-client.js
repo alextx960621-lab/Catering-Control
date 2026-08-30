@@ -235,7 +235,11 @@
   async function dbInsertAuditBulk(entries) {
     if (!entries || !entries.length) return true;
     try {
-      const { error } = await client.from('db_audit_log').insert(entries);
+      // La columna "id" de db_audit_log es autogenerada (identity) en Supabase
+      // y rechaza cualquier insert que la incluya explícitamente (aunque venga
+      // de un respaldo JSON exportado previamente). La quitamos antes de enviar.
+      const cleanEntries = entries.map(({ id, ...rest }) => rest);
+      const { error } = await client.from('db_audit_log').insert(cleanEntries);
       if (error) { console.error('[supabase] Error restaurando historial:', error.message); return false; }
       return true;
     } catch (err) {

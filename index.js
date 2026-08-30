@@ -26,6 +26,41 @@
       const COL_PREFS_KEY = `${APP_CONFIG.storagePrefix}-col-prefs-v1`;
       const DRIVER_VIEW_DATE_KEY = `${APP_CONFIG.storagePrefix}-driver-viewdate-v1`;
       const $ = (s, root=document) => root.querySelector(s);
+      // Extrae lat/lng de un link de Google Maps o de un texto "lat,lng" suelto.
+      // Se usa tanto para el mapa interno de despacho como para armar links
+      // "abrir directo en Google Maps" en la página de Clientes.
+      function extractLatLngFromMapsField(text){
+        if (!text) return null;
+        const patterns=[
+          /@(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+          /[?&](?:q|ll|daddr)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+          /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,
+          /(-?\d{1,3}\.\d{3,}),\s*(-?\d{1,3}\.\d{3,})/
+        ];
+        for (const re of patterns){
+          const m=String(text).match(re);
+          if (m){
+            const lat=parseFloat(m[1]), lng=parseFloat(m[2]);
+            if (Math.abs(lat)<=90 && Math.abs(lng)<=180) return { lat, lng };
+          }
+        }
+        return null;
+      }
+      // El campo "maps" del cliente a veces trae un link completo de Google
+      // Maps y a veces solo unas coordenadas sueltas "lat,lng" (útil para el
+      // mapa interno de despacho, que las lee directo). Para que el link de
+      // la página de Clientes SIEMPRE abra Google Maps y pueda trazar ruta,
+      // si ya es una URL la respetamos tal cual; si son coordenadas sueltas,
+      // armamos un link de direcciones con esas coordenadas como destino; y
+      // si es un texto libre (una dirección escrita), lo mandamos a buscar.
+      function googleMapsDirectLink(value){
+        const v=String(value||'').trim();
+        if (!v) return '';
+        if (/^https?:\/\//i.test(v)) return v;
+        const coords=extractLatLngFromMapsField(v);
+        if (coords) return `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}`;
+        return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v)}`;
+      }
       const $$ = (s, root=document) => [...root.querySelectorAll(s)];
       (() => {
         const proto = Element.prototype;
@@ -975,7 +1010,7 @@
       function renderClients(){
         if(!canAccessPage('clients')) return;
         const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c)===activeUser.routeId):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
-        const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(c.maps)}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(c.maps2)}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
+        const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(googleMapsDirectLink(c.maps))}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(googleMapsDirectLink(c.maps2))}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
         const waLink=phone=>{
           const digits=(phone||'').replace(/\D/g,'');
           if(!digits) return '—';
@@ -1425,18 +1460,32 @@
           {key:'perms',label:'Permisos',cell:r=>esc(roleSummary(r))},
           {key:'id',label:'Acciones',cell:r=>`<button class="icon-btn" data-action="edit-role" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-role" data-id="${r.id}">×</button>`}
         ];
+        const visibleUsers=isSuperAdmin()?staffUsers:staffUsers.filter(u=>u.role!=='superadmin');
         $('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Roles fijos: Administrador, Editor, Cocina y Driver. También se pueden crear roles a medida.', '<button class="primary" data-action="add-user">+ Crear usuario</button><button class="outline" data-action="add-role">+ Crear rol</button>')
-          +orderedTable(staffUsers,userDefs,'users')
+          +orderedTable(visibleUsers,userDefs,'users')
           +pageHead('Roles personalizados','Qué páginas puede ver y editar cada rol creado a medida. Administrador, Editor, Cocina y Driver son fijos y no aparecen aquí.')
           +orderedTable(state.settings.customRoles||[],roleDefs,'roles',r=>r.id);
       }
       let auditEntries=null;
+      let auditShowingAll=false;
+      async function loadAllAudit(){
+        if(!canAccessPage('audit')) return;
+        $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo.','')+'<p class="muted">Cargando historial completo… esto puede tardar unos segundos.</p>';
+        const rows=await window.SupabaseDB?.dbGetAllAuditLog();
+        if(!rows){ notice('No se pudo cargar el historial completo.',true); auditShowingAll=false; renderAudit(true); return; }
+        auditEntries=rows;
+        auditShowingAll=true;
+        renderAudit(false);
+      }
       async function renderAudit(forceRefresh){
         if(!canAccessPage('audit')) return;
         if(pageNeedsPremium('audit')){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios.')+premiumLockHtml('Auditoría'); return; }
-        const actions='<button class="refresh" data-action="refresh-audit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>';
+        if(forceRefresh) auditShowingAll=false;
+        const actions='<button class="refresh" data-action="refresh-audit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>'
+          +(auditShowingAll?'':' <button class="outline" data-action="load-all-audit">Ver todos los eventos guardados</button>');
+        const subtitle=auditShowingAll?'Historial de cambios: quién hizo qué y cuándo. Mostrando el historial completo guardado.':'Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos (usa "Ver todos" para cargar el historial completo).';
         if(forceRefresh||auditEntries===null){
-          $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+'<p class="muted">Cargando historial…</p>';
+          $('#audit-page').innerHTML=pageHead('Auditoría',subtitle,actions)+'<p class="muted">Cargando historial…</p>';
           const rows=await window.SupabaseDB?.dbGetAuditLog(300);
           auditEntries=rows||[];
           if(!rows){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo.',actions)+'<p class="muted">No se pudo cargar el historial. Verifica que la tabla db_audit_log exista (corre supabase-audit-log-migration.sql) y vuelve a intentar.</p>'; return; }
@@ -1451,7 +1500,7 @@
           {key:'entity_label',label:'Registro',cell:e=>esc(e.entity_label||e.entity_type||'—')},
           {key:'details',label:'Detalle',cell:e=>Object.keys(e.details||{}).length?esc(Object.entries(e.details).map(([k,v])=>`${k}: ${v}`).join(' · ')):'—'}
         ];
-        $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+`<div class="toolbar"><input id="audit-search" class="search" placeholder="Buscar por persona, acción o registro…" value="${esc(ui.search.audit||'')}"><span class="spacer"></span><span class="muted">${list.length} eventos</span></div>`+orderedTable(list,definitions,'audit');
+        $('#audit-page').innerHTML=pageHead('Auditoría',subtitle,actions)+`<div class="toolbar"><input id="audit-search" class="search" placeholder="Buscar por persona, acción o registro…" value="${esc(ui.search.audit||'')}"><span class="spacer"></span><span class="muted">${list.length} eventos${auditShowingAll?' (historial completo)':''}</span></div>`+orderedTable(list,definitions,'audit');
         bindSearch('audit-search','audit',renderAudit);
         enableTableTools();
       }
@@ -1786,10 +1835,24 @@
         const processedIds=activeClients.map(c=>c.id);
         activeClients.forEach(c=>c.consumedDays=n(c.consumedDays)+1);
         applyInventoryForProcessedDay(state.currentDate);
-        d.processed=true;d.processedClientIds=processedIds;delete dispatchHistorialCache[state.currentDate];save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel)…');
+        d.processed=true;d.processedClientIds=processedIds;delete dispatchHistorialCache[state.currentDate];save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel) y respaldo (JSON)…');
         logAudit('Día procesado','day',state.currentDate,state.currentDate,{clientesAtendidos:processedIds.length});
         window.SupabaseDB?.dbUpsertSnapshot(state.currentDate,buildDaySnapshotPayload(state.currentDate,processedIds));
         exportProcessedDaySnapshot(state.currentDate,processedIds);
+        // El navegador solo deja disparar una descarga "de golpe" por gesto de
+        // usuario; si se piden dos casi al mismo tiempo suele bloquear la
+        // segunda. Por eso el respaldo JSON sale con un pequeño retraso.
+        // Incluye state completo (clients, plans, settings.menuItems, etc.)
+        // tal cual esté en ese momento, así que ya recoge cualquier menú nuevo.
+        setTimeout(()=>downloadStateJsonBackup(`dia-procesado-${state.currentDate}`),700);
+      }
+      function downloadStateJsonBackup(filenameBase){
+        const data={...state,staffUsers};
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+        a.download=`catering-respaldo-${filenameBase||today()}.json`;
+        a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href),1000);
       }
       function unprocessDay(){
         if(!canEditPage('dispatch')){notice('No tienes permiso para desprocesar el día.',true);return;}
@@ -1941,7 +2004,7 @@
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
-        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
           const scope=$('#export-scope')?.value||'all';
           if(scope!=='all'){
             const scopes={clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};
@@ -1975,7 +2038,7 @@
           "add-user":isAdmin,"edit-user":isAdmin,"delete-user":isAdmin,"add-role":isAdmin,"edit-role":isAdmin,"delete-role":isAdmin,
           "process-day":()=>canEditPage('dispatch'),"unprocess-day":()=>canEditPage('dispatch'),"toggle-day-pause":()=>canEditPage('dispatch'),
           "mark-delivered":()=>canEditPage('delivery'),"mark-not-delivered":()=>canEditPage('delivery'),"edit-delivery":()=>canEditPage('delivery'),"clear-delivery":()=>canEditPage('delivery'),"view-delivery":()=>canAccessPage('delivery'),"open-route-map":()=>canAccessPage('delivery'),
-          "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin,"refresh-audit":()=>canAccessPage('audit')
+          "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin,"refresh-audit":()=>canAccessPage('audit'),"load-all-audit":()=>canAccessPage('audit')
         };
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
         map[action]?.();});
@@ -2098,23 +2161,7 @@
         // ya hubiera una coordenada guardada (evita quedarse con datos viejos).
         function srcFingerprint(c){ return `${c.maps||''}|${c.maps2||''}|${c.address1||''}`; }
 
-        function extractCoords(text){
-          if (!text) return null;
-          const patterns=[
-            /@(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
-            /[?&](?:q|ll|daddr)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
-            /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,
-            /(-?\d{1,3}\.\d{3,}),\s*(-?\d{1,3}\.\d{3,})/ // fallback: "lat, lng" sueltos (con o sin paréntesis)
-          ];
-          for (const re of patterns){
-            const m=text.match(re);
-            if (m){
-              const lat=parseFloat(m[1]), lng=parseFloat(m[2]);
-              if (Math.abs(lat)<=90 && Math.abs(lng)<=180) return { lat, lng };
-            }
-          }
-          return null;
-        }
+        function extractCoords(text){ return extractLatLngFromMapsField(text); }
 
         async function geocodeAddress(address){
           try {

@@ -645,6 +645,11 @@
       max-height: calc(100vh - 24px);
       max-height: calc(100dvh - 24px);
       margin: auto; /* el reset "* { margin:0 }" de arriba anulaba el centrado nativo del <dialog> */
+      /* El navegador solo fija inset vertical (top/bottom) al mostrar el <dialog>
+         como modal; el horizontal queda en "auto" y por spec eso lo ancla a su
+         posición estática (izquierda), no lo centra. Forzamos los 4 insets a 0
+         para que "margin: auto" centre también en horizontal. */
+      inset: 0;
     }
     dialog::backdrop {
       background: rgba(11, 21, 38, .48);
