@@ -175,7 +175,24 @@
         notes: ['admin','editor','superadmin'],
         settings: ['admin','editor','kitchen','driver','superadmin']
       };
-      const PREMIUM_FEATURES = ['payroll','inventory','audit'];
+      const PREMIUM_LOCKABLE_PAGES = [
+        ['notes','Notas'],
+        ['payroll','Sueldos'],
+        ['inventory','Inventario'],
+        ['audit','Auditoría'],
+        ['delivery','Despacho'],
+        ['returnDate','Fecha de retorno (reactivación automática)'],
+        ['weeklySchedule','Horario semanal (cliente)'],
+        ['exportDiets','Imprimir dietas especiales'],
+        ['clientPortal','Portal web de clientes']
+      ];
+      const PREMIUM_DEFAULT_LOCKED = {notes:true,payroll:true,inventory:true,audit:true,delivery:false,returnDate:true,weeklySchedule:true,exportDiets:true,clientPortal:true};
+      function isPagePremiumLocked(page){
+        const cfg = state.settings.premiumLockedPages;
+        if (!cfg || !(page in cfg)) return !!PREMIUM_DEFAULT_LOCKED[page];
+        return !!cfg[page];
+      }
+      const pageNeedsPremium = page => isPagePremiumLocked(page) && !hasPremiumAccess();
 
       const ROLE_PAGE_OPTIONS = [
         ['dispatch','Día de trabajo',true],
@@ -513,7 +530,7 @@
       function readScheduleRows(f){ return f._getSchedule ? f._getSchedule() : []; }
       function status(c,date=state.currentDate){
         if (!day(date).laborable) return 'No laborable';
-        if (c.returnDate && date>=c.returnDate && hasPremiumAccess()) return 'Activo';
+        if (c.returnDate && date>=c.returnDate && !pageNeedsPremium('returnDate')) return 'Activo';
         if (c.pauseStart && date >= c.pauseStart && (!c.returnDate || date < c.returnDate)) return 'Pausado';
         if (c.pauseDates?.includes(date)) return 'Pausado';
         if (c.startDate && c.startDate > date) return 'Programado';
@@ -522,7 +539,7 @@
       }
       function badge(s){ const cl=({Activo:'active',Pausado:'paused','Retorno pendiente':'pending',Programado:'pending','No laborable':'off'})[s] || 'done'; return `<span class="badge ${cl}">${esc(s)}</span>`; }
       function syncReturnDates(date=state.currentDate){
-        if(!hasPremiumAccess()) return; // reactivación automática: solo Premium
+        if(pageNeedsPremium('returnDate')) return; // reactivación automática
         let changed=false;
         state.clients.forEach(c=>{
           if(c.returnDate && date>=c.returnDate && c.status!=='Activo'){
@@ -764,6 +781,7 @@
       }
       async function renderDelivery(){
         if (!canAccessPage('delivery')) return;
+        if (pageNeedsPremium('delivery')) { $('#delivery-page').innerHTML=pageHead('Despacho','Progreso de entrega por ruta.')+premiumLockHtml('Despacho'); return; }
         stopDeliveryPoll();
         const date = workDate();
         $('#delivery-page').innerHTML = pageHead('Despacho', 'Cargando estado de entregas…');
@@ -873,7 +891,7 @@
           {key:'bags',label:'Bolsas',cell:c=>n(c.bags)},
           {key:'status',label:'Estado',cell:statusCell},
           {key:'remaining',label:'Servicios restantes',cell:c=>n(c.paidDays)?Math.max(0,n(c.paidDays)-n(c.consumedDays)):'—'},
-          {key:'returnDate',label:'Fecha de retorno',cell:c=>hasPremiumAccess()?(canEditPage('dispatch')?editableField(c,'returnDate',c.returnDate||'','date'):esc(c.returnDate||'—')):'<span class="muted" title="Función Premium">🔒 Premium</span>'},
+          {key:'returnDate',label:'Fecha de retorno',cell:c=>!pageNeedsPremium('returnDate')?(canEditPage('dispatch')?editableField(c,'returnDate',c.returnDate||'','date'):esc(c.returnDate||'—')):'<span class="muted" title="Función Premium">🔒 Premium</span>'},
           {key:'id',label:'Acciones',cell:c=>canEditPage('dispatch')?`<button class="icon-btn" data-action="edit-client" data-id="${c.id}">Editar</button>`:'—'}
         ];
         const allKeys=definitions.map(x=>x.key), wanted=userColPrefs().columnOrder.dispatch||[];
@@ -981,7 +999,7 @@
         ];
         $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canEditPage('clients')?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+orderedTable(list,definitions,'clients',c=>c.id); bindSearch('clients-search','clients',renderClients);
       }
-      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label class="wide">Link de Google Maps (Dirección 1)<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps (Dirección 2)<input type="url" name="maps2" value="${esc(c.maps2)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status" id="client-status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno${hasPremiumAccess()?`<input name="returnDate" id="client-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${c.status==='Programado'?esc(c.returnDate):''}" ${c.status==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${hasPremiumAccess()?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
+      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label class="wide">Link de Google Maps (Dirección 1)<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps (Dirección 2)<input type="url" name="maps2" value="${esc(c.maps2)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status" id="client-status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno${!pageNeedsPremium('returnDate')?`<input name="returnDate" id="client-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${c.status==='Programado'?esc(c.returnDate):''}" ${c.status==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${!pageNeedsPremium('weeklySchedule')?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
       function scrollToRow(id){
         requestAnimationFrame(()=>{
           const row=document.querySelector(`tr[data-id="${id}"]`);
@@ -997,9 +1015,9 @@
         showModal(c?'Editar cliente':'Añadir cliente',clientForm(c||{}),async f=>{
           const data=syncClientRouteAndDriver(Object.fromEntries(new FormData(f))); data.items=formItems(f);
           data.schedule=readScheduleRows(f);
-          if(hasPremiumAccess() && data.returnDate) data.status='Programado';
+          if(!pageNeedsPremium('returnDate') && data.returnDate) data.status='Programado';
           if(data.status!=='Programado'){ data.returnDate=''; }
-          else if(hasPremiumAccess()){
+          else if(!pageNeedsPremium('returnDate')){
             if(!data.returnDate){ notice('El estado "Programado" requiere una fecha de retorno.',true); return false; }
             const minDate=nextDay(lastProcessedDate()||state.currentDate);
             if(data.returnDate<minDate){ notice(`La fecha de retorno debe ser posterior al último día procesado (mínimo ${minDate.split('-').reverse().join('/')}).`,true); return false; }
@@ -1034,12 +1052,12 @@
         const c=state.clients.find(x=>x.id===id);if(!c)return;
         const current=c.status||'Activo';
         const statusOptions=['Activo','Pausado','Retorno pendiente','Programado'];
-        const html=`<div class="form-grid"><label class="wide">Estado<select name="status" id="quick-status">${statusOptions.map(s=>`<option value="${s}" ${current===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="wide">Fecha de retorno${hasPremiumAccess()?`<input name="returnDate" id="quick-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${current==='Programado'?esc(c.returnDate):''}" ${current==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label></div>`;
+        const html=`<div class="form-grid"><label class="wide">Estado<select name="status" id="quick-status">${statusOptions.map(s=>`<option value="${s}" ${current===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="wide">Fecha de retorno${!pageNeedsPremium('returnDate')?`<input name="returnDate" id="quick-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${current==='Programado'?esc(c.returnDate):''}" ${current==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label></div>`;
         showModal(`Cambiar estado · ${c.name}`,html,async f=>{
           const data=Object.fromEntries(new FormData(f));
-          if(hasPremiumAccess() && data.returnDate) data.status='Programado';
+          if(!pageNeedsPremium('returnDate') && data.returnDate) data.status='Programado';
           if(data.status!=='Programado'){ data.returnDate=''; }
-          else if(hasPremiumAccess()){
+          else if(!pageNeedsPremium('returnDate')){
             if(!data.returnDate){ notice('El estado "Programado" requiere una fecha de retorno.',true); return false; }
             const minDate=nextDay(lastProcessedDate()||state.currentDate);
             if(data.returnDate<minDate){ notice(`La fecha de retorno debe ser posterior al último día procesado (mínimo ${minDate.split('-').reverse().join('/')}).`,true); return false; }
@@ -1065,7 +1083,7 @@
       }
       function openClientPause(id){
         const c=state.clients.find(x=>x.id===id);if(!c)return;
-        const html=`<div class="form-grid"><div class="wide pause-panel"><label class="pause-option"><input type="checkbox" name="pauseService" checked><span>Pausar servicio desde el día de trabajo actual</span></label><p>La pausa puede quedar abierta.${hasPremiumAccess()?' Si deseas programar el regreso, activa la fecha de retorno.':''}</p>${hasPremiumAccess()?`<label class="pause-option"><input type="checkbox" id="pause-with-return"><span>Agregar fecha de retorno (opcional)</span></label><label id="pause-return-wrap" hidden>Fecha de retorno<input type="date" name="returnDate" min="${state.currentDate}" value=""></label>`:`<p class="muted">🔒 Programar fecha de retorno automática es una función Premium. En el plan Básico, reactiva manualmente con el botón "Activar" cuando corresponda.</p><input type="hidden" name="returnDate" value="">`}</div></div>`;
+        const html=`<div class="form-grid"><div class="wide pause-panel"><label class="pause-option"><input type="checkbox" name="pauseService" checked><span>Pausar servicio desde el día de trabajo actual</span></label><p>La pausa puede quedar abierta.${!pageNeedsPremium('returnDate')?' Si deseas programar el regreso, activa la fecha de retorno.':''}</p>${!pageNeedsPremium('returnDate')?`<label class="pause-option"><input type="checkbox" id="pause-with-return"><span>Agregar fecha de retorno (opcional)</span></label><label id="pause-return-wrap" hidden>Fecha de retorno<input type="date" name="returnDate" min="${state.currentDate}" value=""></label>`:`<p class="muted">🔒 Programar fecha de retorno automática es una función Premium. En el plan Básico, reactiva manualmente con el botón "Activar" cuando corresponda.</p><input type="hidden" name="returnDate" value="">`}</div></div>`;
         showModal(`Pausar a ${c.name}`,html,async f=>{
           if(!f.elements.pauseService.checked)return false;
           const returnDate=f.elements.returnDate.value;
@@ -1090,7 +1108,7 @@
       function notesDueToday(){ return state.notes.filter(nt=>nt.status==='pendiente' && nt.dueDate<=state.currentDate); }
       function updateNotesBadge(){
         const el=$('#notes-badge'); if(!el) return;
-        const count=(canAccessPage('notes')&&hasPremiumAccess())?notesDueToday().length:0;
+        const count=(canAccessPage('notes')&&!pageNeedsPremium('notes'))?notesDueToday().length:0;
         el.textContent=count>99?'99+':String(count);
         el.hidden=count===0;
       }
@@ -1143,7 +1161,7 @@
       }
       function renderNotes(){
         if(!canAccessPage('notes')) return;
-        if(!hasPremiumAccess()){ $('#notes-page').innerHTML=pageHead('Notas','Recordatorios internos y mensajes que dejan los clientes desde su portal.')+premiumLockHtml('Notas'); return; }
+        if(pageNeedsPremium('notes')){ $('#notes-page').innerHTML=pageHead('Notas','Recordatorios internos y mensajes que dejan los clientes desde su portal.')+premiumLockHtml('Notas'); return; }
         let touched=false;
         state.notes.forEach(nt=>{ if(nt.source==='cliente' && !nt.read){ nt.read=true; touched=true; } });
         if(touched) save();
@@ -1336,7 +1354,7 @@
       async function deleteInventoryLink(id){ const link=state.inventory.links.find(x=>x.id===id); if(!link||!confirm('¿Eliminar este vínculo de consumo?'))return; state.inventory.links=state.inventory.links.filter(x=>x.id!==id);const saved=await save();renderInventory();notice(saved?'Vínculo eliminado.':'Se eliminó localmente, pero no se guardó en la base de datos.',!saved); if(saved) logAudit('Vínculo de consumo eliminado','inventory-link',kitchenItem(link.inventoryId)?.name||link.inventoryId,id,{}); }
       function renderInventory(){
         if(!canAccessPage('inventory')) return;
-        if(!hasPremiumAccess()){ $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina.')+premiumLockHtml('Inventario'); return; }
+        if(pageNeedsPremium('inventory')){ $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina.')+premiumLockHtml('Inventario'); return; }
         const itemDefs=[
           {key:'name',label:'Producto',cell:item=>{const low=n(item.stock)<=n(item.minimum);return `<b>${esc(item.name)}</b>${low?' <span class="badge warn">Stock bajo</span>':''}`;}},
           {key:'unit',label:'Unidad',cell:item=>esc(item.unit||'unidades')},
@@ -1385,7 +1403,7 @@
       }
 
       function monthDates(month){const [y,m]=month.split('-').map(Number),end=new Date(y,m,0).getDate();return Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
-      function renderPayroll(){ if(!canAccessPage('payroll')) return; if(!hasPremiumAccess()){ $('#payroll-page').innerHTML=pageHead('Sueldos','Cálculo de tarifas por driver.')+premiumLockHtml('Sueldos'); return; } const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const dayValues=d=>dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const rows=d=>{const values=dayValues(d);const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
+      function renderPayroll(){ if(!canAccessPage('payroll')) return; if(pageNeedsPremium('payroll')){ $('#payroll-page').innerHTML=pageHead('Sueldos','Cálculo de tarifas por driver.')+premiumLockHtml('Sueldos'); return; } const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const dayValues=d=>dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const rows=d=>{const values=dayValues(d);const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
         const dayTotals=dates.map((date,i)=>list.reduce((sum,d)=>sum+n(dayValues(d)[i]),0));
         const grandTotal=dayTotals.reduce((a,v)=>a+v,0);
         const totalsRow=`<tfoot><tr class="table-totals"><td>Total (carreras/día)</td>${dayTotals.map(v=>`<td>${v||'—'}</td>`).join('')}<td>${grandTotal}</td><td>—</td><td>—</td></tr></tfoot>`;
@@ -1415,7 +1433,7 @@
       let auditEntries=null;
       async function renderAudit(forceRefresh){
         if(!canAccessPage('audit')) return;
-        if(!hasPremiumAccess()){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios.')+premiumLockHtml('Auditoría'); return; }
+        if(pageNeedsPremium('audit')){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios.')+premiumLockHtml('Auditoría'); return; }
         const actions='<button class="refresh" data-action="refresh-audit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>';
         if(forceRefresh||auditEntries===null){
           $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos.',actions)+'<p class="muted">Cargando historial…</p>';
@@ -1608,6 +1626,9 @@
             <h3 style="margin-top:10px">WhatsApp para upgrade a Premium</h3>
             <p class="muted">Este es TU número (el proveedor de Catering Control), no el de la empresa. Es el que ve el equipo y los clientes cuando tocan "Contactar por WhatsApp" para pasar a Premium — el número de la empresa de arriba se usa para todo lo demás (soporte a sus clientes).</p>
             <label>Tu WhatsApp<input id="premium-whatsapp" value="${esc(state.settings.premiumWhatsapp)}" placeholder="Ej: 59171234567"></label>
+            <h3 style="margin-top:10px">Qué menús requieren Premium</h3>
+            <p class="muted">Decide qué necesita el plan Premium para verse. Si desmarcas uno, queda disponible para todo el equipo aunque la cuenta esté en plan Básico.</p>
+            <div class="stack" style="gap:6px">${PREMIUM_LOCKABLE_PAGES.map(([key,label])=>`<label style="display:flex;align-items:center;gap:8px;font-weight:400"><input type="checkbox" data-premium-page="${key}" ${isPagePremiumLocked(key)?'checked':''}> ${esc(label)}</label>`).join('')}</div>
           </div>`:''}
         </div>`;
         $('#my-theme').onchange=e=>{saveUserTheme(e.target.value);render();};
@@ -1623,6 +1644,14 @@
         $('#activate-premium-days-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;const days=n($('#premium-days').value);if(days<=0){notice('Ingresa una cantidad de días válida.',true);return;}const base=await serverToday();const until=new Date(base+'T00:00:00Z');until.setUTCDate(until.getUTCDate()+days);const untilStr=until.toISOString().slice(0,10);state.settings.plan='premium';state.settings.premiumUntil=untilStr;const saved=await save();renderSettings();notice(saved?`Plan Premium activado por ${days} días (vence el ${untilStr.split('-').reverse().join('/')}).`:'Se activó localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit(`Plan cambiado a Premium por ${days} días`,'settings','Plan de la cuenta','',{premiumUntil:untilStr});});
         $('#activate-basic-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;if(!confirm('¿Volver al plan Básico? El equipo perderá acceso a las funciones Premium.'))return;state.settings.plan='basico';state.settings.premiumUntil='';const saved=await save();renderSettings();notice(saved?'Plan Básico activado.':'Se cambió localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit('Plan cambiado a Básico','settings','Plan de la cuenta','',{});});
         $('#premium-whatsapp')?.addEventListener('change',async e=>{if(!isSuperAdmin())return;state.settings.premiumWhatsapp=e.target.value.trim().replace(/[^\d]/g,'');e.target.value=state.settings.premiumWhatsapp;const saved=await save();notice(saved?'Tu WhatsApp de upgrade actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);});
+        $$('[data-premium-page]').forEach(cb=>cb.onchange=async()=>{
+          if(!isSuperAdmin())return;
+          state.settings.premiumLockedPages ||= {...PREMIUM_DEFAULT_LOCKED};
+          state.settings.premiumLockedPages[cb.dataset.premiumPage]=cb.checked;
+          const saved=await save();
+          notice(saved?'Configuración de Premium actualizada.':'Se guardó localmente, pero no en la base de datos.',!saved);
+          if(saved)logAudit('Menús Premium actualizados','settings','Qué requiere Premium','',{});
+        });
       }
       function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');
         saveButton.hidden=false;$('#modal-cancel').textContent='Cancelar';
@@ -1784,7 +1813,7 @@
       }
       async function exportDiets(){
         if(isDriverRole()) return exportRouteOrder();
-        if(!hasPremiumAccess()){ notice('Imprimir dietas especiales es una función Premium. Contacta a tu proveedor para activarla.',true); return; }
+        if(pageNeedsPremium('exportDiets')){ notice('Imprimir dietas especiales es una función Premium. Contacta a tu proveedor para activarla.',true); return; }
         const date=state.currentDate;
         const activeClients=state.clients.filter(c=>status(c,date)==='Activo');
         if(!await ensureExcelJS()){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
