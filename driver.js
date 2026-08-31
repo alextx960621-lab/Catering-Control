@@ -26,6 +26,29 @@
       const COL_PREFS_KEY = `${APP_CONFIG.storagePrefix}-col-prefs-v1`;
       const DRIVER_VIEW_DATE_KEY = `${APP_CONFIG.storagePrefix}-driver-viewdate-v1`;
       const $ = (s, root=document) => root.querySelector(s);
+      // Links cortos de Google Maps (maps.app.goo.gl / goo.gl/maps) no se
+      // pueden seguir desde el navegador (CORS). Se resuelven en el servidor
+      // vía una Supabase Edge Function ("resolve-maps-link"), de forma
+      // silenciosa y sin bloquear el guardado del cliente: si la función no
+      // está desplegada o falla, el link igual se guarda tal cual lo pegó el
+      // usuario y el geocoding por texto (Nominatim) sigue de respaldo.
+      function isShortMapsLink(text){ return /(?:maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(text||''); }
+      async function resolveShortMapsLinksForClient(c){
+        const db=window.SupabaseDB;
+        if(!db?.client?.functions) return;
+        let changed=false;
+        for(const addr of (c.addresses||[])){
+          if(!addr?.maps || extractLatLngFromMapsField(addr.maps) || !isShortMapsLink(addr.maps)) continue;
+          try{
+            const { data, error } = await db.client.functions.invoke('resolve-maps-link', { body:{ url: addr.maps } });
+            if(!error && data?.lat!=null && data?.lng!=null){
+              addr.lat=data.lat; addr.lng=data.lng; addr.geoSrc=`${addr.maps}|${addr.address||''}`;
+              changed=true;
+            }
+          } catch(_){ /* silencioso: no bloquea nada si falla */ }
+        }
+        if(changed) save();
+      }
       // Extrae lat/lng de un link de Google Maps o de un texto "lat,lng" suelto.
       // Se usa tanto para el mapa interno de despacho como para armar links
       // "abrir directo en Google Maps" en la página de Clientes.
@@ -312,6 +335,7 @@
         state.clients.forEach(c => {
           c.items ||= {}; c.order ??= ''; c.status ||= 'Activo'; c.returnDate ??= c.estimatedReturn || ''; c.paidDays ??= 0; c.consumedDays ??= 0;
           if (c.status !== 'Programado' && c.returnDate) c.returnDate = '';
+          migrateClientAddresses(c);
         });
         state.notes.forEach(nt => {
           nt.status ||= 'pendiente'; nt.dueDate ||= today(); nt.source ||= 'staff'; nt.text ||= '';
@@ -524,38 +548,128 @@
       }
       const WEEKDAYS=[{v:1,l:'Lun'},{v:2,l:'Mar'},{v:3,l:'Mié'},{v:4,l:'Jue'},{v:5,l:'Vie'},{v:6,l:'Sáb'},{v:0,l:'Dom'}];
       function weekdayOf(date=state.currentDate){ return new Date(date+'T00:00:00').getDay(); }
+      // --- Direcciones múltiples (c.addresses[] + c.activeAddressId) ---
+      // Migra clientes con el formato viejo (address1/maps/address2/maps2) a
+      // la lista c.addresses[] la primera vez que se cargan. Idempotente: si
+      // el cliente ya tiene c.addresses no hace nada. No borra los campos
+      // viejos por si algo falla (quedan sin usarse).
+      function migrateClientAddresses(c){
+        if(!Array.isArray(c.addresses) || !c.addresses.length){
+          if(c.address1){
+            const a1={id:uid('a'),address:c.address1,maps:c.maps||'',lat:c.lat,lng:c.lng,geoSrc:c.geoSrc,routeId:c.routeId||'',driverId:c.driverId||'',order:c.order??''};
+            const list=[a1];
+            if(c.address2){
+              list.push({id:uid('a'),address:c.address2,maps:c.maps2||'',routeId:c.routeId||'',driverId:c.driverId||'',order:c.order??''});
+            }
+            c.addresses=list; c.activeAddressId=a1.id;
+          } else {
+            c.addresses=[]; c.activeAddressId??='';
+          }
+        }
+        c.addressOverrides ||= [];
+        if(Array.isArray(c.schedule)){
+          c.schedule.forEach(e=>{
+            if(e.address && !e.addressId){
+              const idx=e.address==='address2'?1:0;
+              e.addressId=c.addresses[idx]?.id || c.addresses[0]?.id || '';
+              delete e.address;
+            }
+            delete e.routeId; // la ruta de la franja ahora es la de la dirección elegida
+            delete e.driverId;
+          });
+        }
+      }
+      function activeAddress(c){
+        return c.addresses?.find(a=>a.id===c.activeAddressId) || c.addresses?.[0] || null;
+      }
+      function overrideAddressFor(c,date){
+        const ov=(c.addressOverrides||[]).find(o=>o.date===date);
+        return ov ? (c.addresses?.find(a=>a.id===ov.addressId) || null) : null;
+      }
+      function resolvedAddress(c,date=state.currentDate){
+        return overrideAddressFor(c,date) || scheduleAddressFor(c,date) || activeAddress(c);
+      }
+      function scheduleAddressFor(c,date){
+        const e=scheduleEntryFor(c,date);
+        return e?.addressId ? (c.addresses?.find(a=>a.id===e.addressId) || null) : null;
+      }
       function scheduleEntryFor(c,date=state.currentDate){
         const wd=weekdayOf(date);
         return (c.schedule||[]).find(e=>(e.days||[]).includes(wd)) || null;
       }
-      function effectiveRouteId(c,date=state.currentDate){ return scheduleEntryFor(c,date)?.routeId || c.routeId; }
+      function effectiveRouteId(c,date=state.currentDate){ return resolvedAddress(c,date)?.routeId || c.routeId; }
       function effectiveDriverId(c,date=state.currentDate){
-        const entry=scheduleEntryFor(c,date);
-        if(entry?.routeId) return driverForRoute(entry.routeId)?.id || '';
+        const addr=resolvedAddress(c,date);
+        if(addr?.routeId) return driverForRoute(addr.routeId)?.id || addr.driverId || '';
         return c.driverId;
       }
-      function effectiveAddress(c,date=state.currentDate){
-        const e=scheduleEntryFor(c,date), key=(e?.address==='address2')?'address2':'address1';
-        return c[key]||c.address1||'';
-      }
-      function effectiveMaps(c,date=state.currentDate){
-        const e=scheduleEntryFor(c,date), key=(e?.address==='address2')?'address2':'address1';
-        return (key==='address2'?c.maps2:c.maps)||c.maps||'';
-      }
+      function effectiveAddress(c,date=state.currentDate){ return resolvedAddress(c,date)?.address || c.address1 || ''; }
+      function effectiveMaps(c,date=state.currentDate){ return resolvedAddress(c,date)?.maps || c.maps || ''; }
       function scheduleSummary(c){
         if(!c.schedule?.length) return '';
         return c.schedule.map(e=>{
           const days=WEEKDAYS.filter(w=>(e.days||[]).includes(w.v)).map(w=>w.l).join('/')||'—';
-          const r=e.routeId?routeName(e.routeId):'ruta base';
+          const addr=c.addresses?.find(a=>a.id===e.addressId);
+          const r=addr?.routeId?routeName(addr.routeId):'ruta base';
           return `${days}: ${esc(r)}`;
         }).join(' · ');
       }
-      function scheduleRowHtml(e={},idx){
+      // --- Editor de direcciones (filas dinámicas en clientForm) ---
+      function addressRowHtml(a={},idx){
+        const id=a.id||uid('a');
+        return `<div class="client-address-row" data-address-id="${id}" data-idx="${idx}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px">
+          <label style="flex:1 1 200px">Dirección<input class="addr-text" value="${esc(a.address)}" placeholder="Calle, zona, referencia…"></label>
+          <label style="flex:1 1 200px">Link de Google Maps<input type="text" class="addr-maps" value="${esc(a.maps)}" placeholder="https://maps.google.com/… o coordenadas"></label>
+          <label style="width:150px">Ruta<select class="addr-route">${options(state.routes,a.routeId,'Seleccionar ruta')}</select></label>
+          <label style="width:150px">Driver<select class="addr-driver">${options(state.drivers,a.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label>
+          <label style="width:90px">Orden<input type="number" min="0" class="addr-order" value="${n(a.order)}"></label>
+          <button type="button" class="icon-btn delete addr-remove" title="Quitar esta dirección">×</button>
+        </div>`;
+      }
+      function initAddressEditor(form, addresses, activeId){
+        const container=form.querySelector('#client-addresses-rows'), addBtn=form.querySelector('#add-address-row'), activeWrap=form.querySelector('#client-active-address-wrap');
+        if(!container||!addBtn) return;
+        let list=(addresses&&addresses.length?addresses:[{}]).map(a=>({...a,id:a.id||uid('a')}));
+        function renderActiveSelector(){
+          if(!activeWrap) return;
+          const rows=[...container.querySelectorAll('.client-address-row')];
+          if(rows.length<2){ activeWrap.innerHTML=''; return; }
+          const opts=rows.map((row,i)=>({id:row.dataset.addressId,label:row.querySelector('.addr-text').value||`Dirección ${i+1}`}));
+          const currentVal=form.elements.activeAddressId?.value || activeId;
+          activeWrap.innerHTML=`<label class="wide">¿Cuál dirección está activa hoy? *<select name="activeAddressId" id="client-active-address" required><option value="">Seleccionar…</option>${opts.map(o=>`<option value="${esc(o.id)}" ${o.id===currentVal?'selected':''}>${esc(o.label)}</option>`).join('')}</select></label>`;
+        }
+        function bindRowEvents(){
+          container.querySelectorAll('.client-address-row').forEach(row=>{
+            const routeSel=row.querySelector('.addr-route'), driverSel=row.querySelector('.addr-driver'), removeBtn=row.querySelector('.addr-remove');
+            routeSel.onchange=()=>{ driverSel.value=driverForRoute(routeSel.value)?.id||''; };
+            driverSel.onchange=()=>{ const d=driver(driverSel.value); if(d?.routeId) routeSel.value=d.routeId; };
+            removeBtn.style.visibility = container.querySelectorAll('.client-address-row').length<=1 ? 'hidden' : 'visible';
+            removeBtn.onclick=()=>{ if(list.length<=1) return; list.splice(Number(row.dataset.idx),1); render(); };
+            row.querySelector('.addr-text').oninput=()=>{ renderActiveSelector(); form._refreshScheduleOptions?.(); };
+          });
+        }
+        function render(){
+          container.innerHTML=list.map((a,i)=>addressRowHtml(a,i)).join('');
+          bindRowEvents();
+          renderActiveSelector();
+          form._refreshScheduleOptions?.();
+        }
+        render();
+        addBtn.onclick=()=>{ list.push({id:uid('a')}); render(); };
+        form._getAddresses=()=>[...container.querySelectorAll('.client-address-row')].map(row=>({
+          id:row.dataset.addressId,
+          address:row.querySelector('.addr-text').value.trim(),
+          maps:row.querySelector('.addr-maps').value.trim(),
+          routeId:row.querySelector('.addr-route').value,
+          driverId:row.querySelector('.addr-driver').value,
+          order:row.querySelector('.addr-order').value
+        }));
+      }
+      function scheduleRowHtml(e={},idx,addressOptions=[]){
         const days=e.days||[];
         return `<div class="schedule-row" data-idx="${idx}" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px">
           <div style="display:flex;gap:6px;flex-wrap:wrap">${WEEKDAYS.map(w=>`<label style="display:flex;flex-direction:column;align-items:center;font-size:11px;gap:2px"><span>${w.l}</span><input type="checkbox" class="sched-day" value="${w.v}" ${days.includes(w.v)?'checked':''}></label>`).join('')}</div>
-          <select class="sched-route">${options(state.routes,e.routeId,'Ruta base')}</select>
-          <select class="sched-address"><option value="address1" ${(!e.address||e.address==='address1')?'selected':''}>Dirección 1</option><option value="address2" ${e.address==='address2'?'selected':''}>Dirección 2</option></select>
+          <select class="sched-address">${addressOptions.length?addressOptions.map(o=>`<option value="${esc(o.id)}" ${(e.addressId?e.addressId===o.id:o===addressOptions[0])?'selected':''}>${esc(o.label)}</option>`).join(''):'<option value="">Sin direcciones cargadas</option>'}</select>
           <button type="button" class="icon-btn delete sched-remove" title="Quitar franja">×</button>
         </div>`;
       }
@@ -563,19 +677,24 @@
         const container=form.querySelector('#client-schedule-rows'), addBtn=form.querySelector('#add-schedule-row');
         if(!container||!addBtn) return;
         let list=(rows||[]).map(r=>({...r}));
+        function currentAddressOptions(){
+          const rows=[...form.querySelectorAll('#client-addresses-rows .client-address-row')];
+          return rows.map((row,i)=>({id:row.dataset.addressId, label:row.querySelector('.addr-text')?.value || `Dirección ${i+1}`}));
+        }
         const bindRemove=()=>container.querySelectorAll('.schedule-row').forEach(row=>{
           row.querySelector('.sched-remove').onclick=()=>{ list.splice(Number(row.dataset.idx),1); render(); };
         });
         function render(){
-          container.innerHTML=list.length?list.map((e,i)=>scheduleRowHtml(e,i)).join(''):'<p class="muted" style="margin:0 0 8px">Sin franjas: todos los días usa la ruta y dirección base del cliente.</p>';
+          const opts=currentAddressOptions();
+          container.innerHTML=list.length?list.map((e,i)=>scheduleRowHtml(e,i,opts)).join(''):'<p class="muted" style="margin:0 0 8px">Sin franjas: todos los días usa la dirección activa del cliente.</p>';
           bindRemove();
         }
         render();
-        addBtn.onclick=()=>{ list.push({days:[],routeId:'',driverId:'',address:'address1'}); render(); };
+        form._refreshScheduleOptions=render;
+        addBtn.onclick=()=>{ list.push({days:[],addressId:currentAddressOptions()[0]?.id||''}); render(); };
         form._getSchedule=()=>[...container.querySelectorAll('.schedule-row')].map(row=>({
           days:[...row.querySelectorAll('.sched-day:checked')].map(cb=>Number(cb.value)),
-          routeId:row.querySelector('.sched-route').value,
-          address:row.querySelector('.sched-address').value
+          addressId:row.querySelector('.sched-address').value
         })).filter(e=>e.days.length>0);
       }
       function readScheduleRows(f){ return f._getSchedule ? f._getSchedule() : []; }
@@ -783,7 +902,7 @@
           ? `<div class="delivery-detail-actions"><button class="icon-btn" data-action="edit-delivery" data-id="${c.id}" data-kind="${st}">Editar</button><button class="icon-btn delete" data-action="clear-delivery" data-id="${c.id}">Quitar marca</button></div>`
           : `<div class="delivery-detail-actions"><button class="primary" data-action="mark-delivered" data-id="${c.id}">Marcar entregado</button><button class="outline" data-action="mark-not-delivered" data-id="${c.id}">Marcar no entregado</button></div>`;
         const body = `<div class="stack">
-          <p style="margin:0"><b>${esc(c.name)}</b><br><small class="muted">${esc(routeName(effectiveRouteId(c, date)))}${c.address1 ? ` · ${esc(c.address1)}` : ''}</small></p>
+          <p style="margin:0"><b>${esc(c.name)}</b><br><small class="muted">${esc(routeName(effectiveRouteId(c, date)))}${effectiveAddress(c,date) ? ` · ${esc(effectiveAddress(c,date))}` : ''}</small></p>
           <p style="margin:0">${statusBadge}${metaBits.length ? ` <small class="muted">${metaBits.join(' · ')}</small>` : ''}</p>
           ${st === 'no_entregado' && rec?.reason ? `<p style="margin:0"><b>Motivo:</b> ${esc(rec.reason)}</p>` : ''}
           ${rec?.note ? `<p style="margin:0"><b>Observación:</b> ${esc(rec.note)}</p>` : ''}
@@ -848,7 +967,7 @@
         const delivered = list.filter(c => deliveryRecord(date, c.id)?.status === 'entregado').length;
         const definitions = [
           {key:'order',label:'Orden',cell:c=>n(c.order)||''},
-          {key:'name',label:'Cliente',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">${esc(c.address1||'')}</small>`},
+          {key:'name',label:'Cliente',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">${esc(effectiveAddress(c)||'')}</small>`},
           ...(myRoutes.length>1?[{key:'route',label:'Ruta',cell:c=>esc(routeName(effectiveRouteId(c,date)))}]:[]),
           {key:'status',label:'Estado de entrega',cell:c=>{
             const rec=deliveryRecord(date,c.id), st=rec?.status;
@@ -910,7 +1029,7 @@
           if(dispatchHistorialCache[date]){ renderDispatchHistorial(date,dispatchHistorialCache[date]); return; }
         }
         const q=(ui.search.dispatch||'').toLowerCase(), rf=isDriverRole()?'':ui.route, sf=ui.dispatchStatus||'all';
-        const matchesBase=c=>(!rf || effectiveRouteId(c,date)===rf) && (!q || [c.name,c.carnet,c.address1,c.phone1,c.phone2,c.specialDiet,c.notes].join(' ').toLowerCase().includes(q));
+        const matchesBase=c=>(!rf || effectiveRouteId(c,date)===rf) && (!q || [c.name,c.carnet,effectiveAddress(c,date),c.phone1,c.phone2,c.specialDiet,c.notes].join(' ').toLowerCase().includes(q));
         const matchesStatus=c=>sf==='all' || status(c,date)===sf;
         const myRoutes=myRouteIds();
         const routeScoped=isDriverRole()?state.clients.filter(c=>myRoutes.includes(effectiveRouteId(c,date))):state.clients;
@@ -937,8 +1056,8 @@
           {key:'driver',label:'Driver',cell:c=>esc(driverName(effectiveDriverId(c,date)))},
           {key:'plan',label:'Plan',cell:c=>{const p=plan(c.planId);return `${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:18px;height:18px;object-fit:cover;border-radius:4px;vertical-align:-4px;margin-right:4px">`:''}${esc(planName(c.planId))}`;}},
           ...menuItems().map(([key,label])=>({key,label,cell:c=>itemValue(c,key)})),
-          {key:'address1',label:'Dirección',cell:c=>{const addr=effectiveAddress(c,date),other=addr===c.address2?c.address1:c.address2;return `${esc(addr||'—')}<br><small>${esc(other||'')}</small>`;}},
-          {key:'maps',label:'Google Maps',cell:c=>{const link=effectiveMaps(c,date);return `${link?`<a href="${esc(link)}" target="_blank" rel="noopener">Abrir mapa</a>`:'—'}<br>${editableField(c,'maps',c.maps||'')}`;}},
+          {key:'address1',label:'Dirección',cell:c=>{const addr=effectiveAddress(c,date),others=(c.addresses||[]).filter(a=>a.address&&a.address!==addr).map(a=>esc(a.address)).join('<br>');return `${esc(addr||'—')}${others?`<br><small>${others}</small>`:''}`;}},
+          {key:'maps',label:'Google Maps',cell:c=>{const link=effectiveMaps(c,date);return `${link?`<a href="${esc(link)}" target="_blank" rel="noopener">Abrir mapa</a>`:'—'}`;}},
           {key:'phone1',label:'Teléfono 1',cell:c=>editableField(c,'phone1',c.phone1||'')},
           {key:'phone2',label:'Teléfono 2',cell:c=>editableField(c,'phone2',c.phone2||'')},
           {key:'notes',label:'Observaciones',cell:c=>esc(c.notes||'—')},
@@ -1030,8 +1149,8 @@
       }
       function renderClients(){
         if(!canAccessPage('clients')) return;
-        const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>myRouteIds().includes(effectiveRouteId(c))):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
-        const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(googleMapsDirectLink(c.maps))}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(googleMapsDirectLink(c.maps2))}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
+        const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>myRouteIds().includes(effectiveRouteId(c))):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,...(c.addresses||[]).map(a=>a.address),c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
+        const mapsLinks=c=>{const links=(c.addresses||[]).filter(a=>a.maps).map((a,i)=>`<a href="${esc(googleMapsDirectLink(a.maps))}" target="_blank" rel="noopener">${esc(a.address||`Dirección ${i+1}`)}</a>`); return links.length?links.join('<br>'):'—';};
         const waLink=phone=>{
           const digits=(phone||'').replace(/\D/g,'');
           if(!digits) return '—';
@@ -1042,7 +1161,7 @@
           {key:'order',label:'Orden',cell:c=>n(c.order)||''},
           {key:'name',label:'Cliente / carnet',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">CI: ${esc(c.carnet||'—')}</small>`},
           {key:'route',label:'Ruta',cell:c=>`${esc(routeName(c.routeId))}${c.schedule?.length?` <span class="badge off" title="${esc(scheduleSummary(c))}">Variable</span>`:''}`},
-          {key:'address1',label:'Dirección',cell:c=>esc(c.address1||'—')},
+          {key:'address1',label:'Dirección',cell:c=>(c.addresses||[]).map(a=>esc(a.address)).filter(Boolean).join('<br>')||'—'},
           {key:'maps',label:'Google Maps',cell:mapsLinks},
           {key:'phone1',label:'Teléfono',cell:c=>waLink(c.phone1)},
           {key:'plan',label:'Plan',cell:c=>{const p=plan(c.planId);return `${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:20px;height:20px;object-fit:cover;border-radius:5px;vertical-align:-5px;margin-right:4px">`:''}${esc(planName(c.planId))}`;}},
@@ -1055,7 +1174,7 @@
         ];
         $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canEditPage('clients')?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+orderedTable(list,definitions,'clients',c=>c.id); bindSearch('clients-search','clients',renderClients);
       }
-      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><label>Dirección 1 *<input name="address1" required value="${esc(c.address1)}"></label><label class="wide">Link de Google Maps (Dirección 1)<input type="url" name="maps" value="${esc(c.maps)}" placeholder="https://maps.google.com/…"></label><label>Dirección 2<input name="address2" value="${esc(c.address2)}"></label><label class="wide">Link de Google Maps (Dirección 2)<input type="url" name="maps2" value="${esc(c.maps2)}" placeholder="https://maps.google.com/…"></label><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status" id="client-status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno${!pageNeedsPremium('returnDate')?`<input name="returnDate" id="client-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${c.status==='Programado'?esc(c.returnDate):''}" ${c.status==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${!pageNeedsPremium('weeklySchedule')?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente cambia de ruta y/o dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). Los días sin franja usan la ruta y Dirección 1 base de arriba. El cambio entre franjas es automático según el Día de trabajo.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
+      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><label>Ruta *<select name="routeId" required>${options(state.routes,c.routeId,'Seleccionar ruta')}</select></label><label>Driver asignado<select name="driverId">${options(state.drivers,c.driverId,'Sin asignar',d=>`${d.firstName} ${d.lastName}`)}</select></label><div class="wide"><label>Direcciones</label><p class="muted" style="margin:2px 0 8px">Agrega una o varias direcciones de entrega para este cliente. Cada una puede tener su propia ruta y driver.</p><div id="client-addresses-rows"></div><button type="button" class="outline" id="add-address-row">+ Añadir dirección</button><div id="client-active-address-wrap"></div></div><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label><label>Estado del plan<select name="status" id="client-status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno${!pageNeedsPremium('returnDate')?`<input name="returnDate" id="client-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${c.status==='Programado'?esc(c.returnDate):''}" ${c.status==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label>Orden<input name="order" type="number" min="0" value="${esc(c.order)}"></label><label>Observaciones<input name="notes" value="${esc(c.notes)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${!pageNeedsPremium('weeklySchedule')?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días en que este cliente usa una dirección distinta a la activa (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). La ruta de cada franja es la de la dirección elegida. Los días sin franja usan la dirección activa del cliente.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
       function scrollToRow(id){
         requestAnimationFrame(()=>{
           const row=document.querySelector(`tr[data-id="${id}"]`);
@@ -1069,8 +1188,19 @@
         let c=id?state.clients.find(x=>x.id===id):null;
         const isNew=!c;
         showModal(c?'Editar cliente':'Añadir cliente',clientForm(c||{}),async f=>{
+          const addresses=f._getAddresses?f._getAddresses():[];
+          if(!addresses.length || !addresses[0].address){ notice('Agrega al menos una dirección.',true); return false; }
+          let activeAddressId=addresses[0].id;
+          if(addresses.length>=2){
+            activeAddressId=f.elements.activeAddressId?.value||'';
+            if(!activeAddressId){ notice('Selecciona cuál dirección está activa hoy.',true); return false; }
+          }
           const data=syncClientRouteAndDriver(Object.fromEntries(new FormData(f))); data.items=formItems(f);
           data.schedule=readScheduleRows(f);
+          data.addresses=addresses; data.activeAddressId=activeAddressId;
+          const activeAddr=addresses.find(a=>a.id===activeAddressId)||addresses[0];
+          if(activeAddr?.routeId) data.routeId=activeAddr.routeId;
+          if(activeAddr?.driverId) data.driverId=activeAddr.driverId;
           if(!pageNeedsPremium('returnDate') && data.returnDate) data.status='Programado';
           if(data.status!=='Programado'){ data.returnDate=''; }
           else if(!pageNeedsPremium('returnDate')){
@@ -1084,6 +1214,7 @@
           renderPage(ui.page);notice('Cliente guardado en la base de datos.');
           scrollToRow(c.id);
           logAudit(isNew?'Cliente creado':'Cliente editado','client',c.name,c.id,{});
+          resolveShortMapsLinksForClient(c); // silencioso/async, no bloquea el guardado
         });
         const form=$('#modal-form'), routeField=form?.elements.routeId, driverField=form?.elements.driverId, planField=form?.elements.planId;
         if(routeField) routeField.onchange=()=>{ driverField.value=driverForRoute(routeField.value)?.id || ''; };
@@ -1102,6 +1233,7 @@
             if(returnDateField.value) statusField.value='Programado';
           });
         }
+        initAddressEditor(form, c?.addresses||[], c?.activeAddressId||'');
         initScheduleEditor(form, c?.schedule||[]);
       }
       function openQuickStatus(id){
@@ -1301,9 +1433,9 @@
             ruta:rid?routeName(rid):'Sin ruta',
             driver:driverName(c.driverId),
             plan:planName(c.planId),
-            direccion:effectiveAddress(c,date)||c.address1||'',
-            direccion2:c.address2||'',
-            maps:c.maps||'',
+            direccion:effectiveAddress(c,date)||'',
+            direccion2:(c.addresses||[]).map(a=>a.address).filter(a=>a&&a!==effectiveAddress(c,date)).join(' / '),
+            maps:effectiveMaps(c,date)||'',
             telefono1:c.phone1||'',
             telefono2:c.phone2||'',
             bolsas:n(c.bags),
@@ -1735,7 +1867,8 @@
         // Huella de qué se usó para resolver la coordenada: si el link o la
         // dirección cambian, la huella cambia y se vuelve a resolver aunque
         // ya hubiera una coordenada guardada (evita quedarse con datos viejos).
-        function srcFingerprint(c){ return `${c.maps||''}|${c.maps2||''}|${c.address1||''}`; }
+        // Ahora es por dirección (addr), no por cliente completo.
+        function srcFingerprint(addr){ return `${addr?.maps||''}|${addr?.address||''}`; }
 
         function extractCoords(text){ return extractLatLngFromMapsField(text); }
 
@@ -1752,17 +1885,21 @@
 
         function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-        async function resolveCoords(list){
-          const pending=list.filter(c => c.lat==null || c.lng==null || c.geoSrc!==srcFingerprint(c));
+        // Resuelve coordenadas de la dirección "efectiva" de cada cliente para
+        // la fecha dada. Las coordenadas se guardan en el objeto de esa
+        // dirección (c.addresses[i].lat/lng/geoSrc), no a nivel de cliente.
+        async function resolveCoords(list, date){
+          const targets=list.map(c => ({ c, addr: resolvedAddress(c, date) })).filter(t => t.addr);
+          const pending=targets.filter(({addr}) => addr.lat==null || addr.lng==null || addr.geoSrc!==srcFingerprint(addr));
           let done=0, changed=false;
-          for (const c of pending){
-            let coords=extractCoords(c.maps) || extractCoords(c.maps2) || extractCoords(c.address1);
-            if (!coords && c.address1){
+          for (const {addr} of pending){
+            let coords=extractCoords(addr.maps) || extractCoords(addr.address);
+            if (!coords && addr.address){
               setStatus(`Resolviendo direcciones… ${done+1}/${pending.length}`);
-              coords=await geocodeAddress(c.address1);
+              coords=await geocodeAddress(addr.address);
               await sleep(NOMINATIM_DELAY_MS);
             }
-            if (coords){ c.lat=coords.lat; c.lng=coords.lng; c.geoSrc=srcFingerprint(c); changed=true; }
+            if (coords){ addr.lat=coords.lat; addr.lng=coords.lng; addr.geoSrc=srcFingerprint(addr); changed=true; }
             done++;
           }
           if (changed) save();
@@ -1798,22 +1935,23 @@
           }
         }
 
-        function renderMapView(list){
+        function renderMapView(list, date){
           if (!mapBodyEl) return;
           if (map){ map.remove(); map=null; routeLayer=null; }
           mapBodyEl.innerHTML='';
           if (!window.L){ setStatus('No se pudo cargar el mapa (sin conexión a internet).'); return; }
-          const withCoords=list.filter(c => c.lat!=null && c.lng!=null);
+          const withAddr=list.map(c => ({ c, addr: resolvedAddress(c, date) })).filter(t => t.addr);
+          const withCoords=withAddr.filter(({addr}) => addr.lat!=null && addr.lng!=null);
           const withoutCoords=list.length - withCoords.length;
           map=window.L.map(mapBodyEl, { zoomControl: true });
           window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(map);
           markersLayer=window.L.layerGroup().addTo(map);
-          const sorted=[...withCoords].sort((a,b) => (n(a.order)||9999) - (n(b.order)||9999));
+          const sorted=[...withCoords].sort((a,b) => (n(a.c.order)||9999) - (n(b.c.order)||9999));
           const latlngs=[];
-          sorted.forEach(c => {
+          sorted.forEach(({c,addr}) => {
             const icon=window.L.divIcon({ className:'', html:`<div class="mc-pin"><span>${n(c.order)||'·'}</span></div>`, iconSize:[26,26], iconAnchor:[13,26] });
-            window.L.marker([c.lat,c.lng], { icon }).addTo(markersLayer).bindPopup(`<b>${escapeHtml(c.name)}</b><br>Orden: ${n(c.order)||'—'}<br>${escapeHtml(c.address1||'')}`);
-            latlngs.push([c.lat,c.lng]);
+            window.L.marker([addr.lat,addr.lng], { icon }).addTo(markersLayer).bindPopup(`<b>${escapeHtml(c.name)}</b><br>Orden: ${n(c.order)||'—'}<br>${escapeHtml(addr.address||'')}`);
+            latlngs.push([addr.lat,addr.lng]);
           });
           lastClientLatlngs=latlngs;
           drawRouteLine();
@@ -1880,9 +2018,9 @@
             setStatus(fullList.length ? 'Ya marcaste todos los pedidos de hoy (entregados o no entregados).' : 'No tienes pedidos activos para hoy.');
             return;
           }
-          renderMapView(list);
-          await resolveCoords(list);
-          renderMapView(list);
+          renderMapView(list, date);
+          await resolveCoords(list, date);
+          renderMapView(list, date);
           startBroadcast(routeIds, activeUser?.name);
         }
 
