@@ -284,7 +284,7 @@
       function canEditDispatchField(c, field){
         if (field === 'returnDate' && c.status !== 'Programado') return false;
         if (canEditPage('dispatch')) return true;
-        if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && effectiveRouteId(c) === activeUser.routeId;
+        if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && myRouteIds().includes(effectiveRouteId(c));
         return false;
       }
       let ui = { page:'dispatch', search:{}, sort:{}, route:'', month:today().slice(0,7), forceLiveDispatch:false };
@@ -499,7 +499,16 @@
       function routeName(id){ return route(id)?.name || 'Sin ruta'; }
       function planName(id){ return plan(id)?.name || 'Sin plan'; }
       function driverName(id){ const d=driver(id); return d ? `${d.firstName} ${d.lastName}` : 'Sin asignar'; }
-      function driverForRoute(routeId){ return state.drivers.find(d=>d.routeId===routeId); }
+      function driverForRoute(routeId){ return state.drivers.find(d=>d.routeId===routeId||(d.extraRouteIds||[]).includes(routeId)); }
+      function driverRouteIds(d){ return d?[d.routeId,...(d.extraRouteIds||[])].filter(Boolean):[]; }
+      // Evita que una misma ruta quede asignada a dos drivers a la vez (eso duplicaba
+      // las entregas contabilizadas). Devuelve el driver que YA tiene esa ruta (como
+      // principal o adicional), sin contar al propio driver que se está editando.
+      function driverRouteConflict(routeId,excludeDriverId){ return routeId?state.drivers.find(d=>d.id!==excludeDriverId&&driverRouteIds(d).includes(routeId)):null; }
+      // Rutas del driver que inició sesión (normalmente 1, o 2 si está cubriendo un
+      // reemplazo). Se lee del registro del driver (no solo de la sesión) para que
+      // un cambio hecho por un admin se refleje sin tener que volver a iniciar sesión.
+      function myRouteIds(){ return isDriverRole() ? (driverRouteIds(driver(activeUser.driverId)).length?driverRouteIds(driver(activeUser.driverId)):[activeUser.routeId].filter(Boolean)) : []; }
       function syncClientRouteAndDriver(data){
         const selectedDriver=driver(data.driverId);
         if(selectedDriver?.routeId) data.routeId=selectedDriver.routeId;
@@ -811,7 +820,8 @@
         notice(ok ? 'Marca de entrega eliminada.' : 'Se quitó localmente, pero no se guardó en la base de datos.', !ok);
       }
       function deliveryListFor(routeId, date){
-        const list = state.clients.filter(c => effectiveRouteId(c, date) === routeId && status(c, date) === 'Activo');
+        const ids = Array.isArray(routeId) ? routeId : [routeId];
+        const list = state.clients.filter(c => ids.includes(effectiveRouteId(c, date)) && status(c, date) === 'Activo');
         return list.sort((a, b) => (n(a.order) || 9999) - (n(b.order) || 9999) || String(a.name).localeCompare(String(b.name)));
       }
       async function renderDelivery(){
@@ -826,11 +836,13 @@
         startDeliveryPoll(date);
       }
       function renderDeliveryDriver(date){
-        const list = deliveryListFor(activeUser.routeId, date);
+        const myRoutes = myRouteIds();
+        const list = deliveryListFor(myRoutes, date);
         const delivered = list.filter(c => deliveryRecord(date, c.id)?.status === 'entregado').length;
         const definitions = [
           {key:'order',label:'Orden',cell:c=>n(c.order)||''},
           {key:'name',label:'Cliente',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">${esc(c.address1||'')}</small>`},
+          ...(myRoutes.length>1?[{key:'route',label:'Ruta',cell:c=>esc(routeName(effectiveRouteId(c,date)))}]:[]),
           {key:'status',label:'Estado de entrega',cell:c=>{
             const rec=deliveryRecord(date,c.id), st=rec?.status;
             const statusBadge = st === 'entregado' ? '<span class="badge active">Entregado</span>' : st === 'no_entregado' ? '<span class="badge danger">No entregado</span>' : '<span class="badge off">Pendiente</span>';
@@ -849,7 +861,7 @@
               : `<button class="primary" data-action="mark-delivered" data-id="${c.id}">Entregado</button> <button class="outline" data-action="mark-not-delivered" data-id="${c.id}">No entregado</button>`;
           }}
         ];
-        $('#delivery-page').innerHTML = pageHead('Despacho', `Tu ruta: ${esc(routeName(activeUser.routeId))} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente. Se actualiza sola cada pocos segundos.`, `${list.length?`<button class="outline" data-action="open-route-map" data-route="${activeUser.routeId||''}">🗺️ Ver mapa</button>`:''}<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
+        $('#delivery-page').innerHTML = pageHead('Despacho', `${myRoutes.length>1?'Tus rutas':'Tu ruta'}: ${esc(myRoutes.map(routeName).join(' + ')||'Sin ruta')} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente. Se actualiza sola cada pocos segundos.`, `${list.length?`<button class="outline" data-action="open-route-map" data-route="${myRoutes.join(',')}">🗺️ Ver mapa</button>`:''}<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
           orderedTable(list, definitions, 'delivery', c=>c.id);
       }
       function renderDeliveryAdmin(date){
@@ -889,10 +901,11 @@
           }
           if(dispatchHistorialCache[date]){ renderDispatchHistorial(date,dispatchHistorialCache[date]); return; }
         }
-        const q=(ui.search.dispatch||'').toLowerCase(), rf=isDriverRole()?activeUser.routeId:ui.route, sf=ui.dispatchStatus||'all';
+        const q=(ui.search.dispatch||'').toLowerCase(), rf=isDriverRole()?'':ui.route, sf=ui.dispatchStatus||'all';
         const matchesBase=c=>(!rf || effectiveRouteId(c,date)===rf) && (!q || [c.name,c.carnet,c.address1,c.phone1,c.phone2,c.specialDiet,c.notes].join(' ').toLowerCase().includes(q));
         const matchesStatus=c=>sf==='all' || status(c,date)===sf;
-        const routeScoped=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c,date)===activeUser.routeId):state.clients;
+        const myRoutes=myRouteIds();
+        const routeScoped=isDriverRole()?state.clients.filter(c=>myRoutes.includes(effectiveRouteId(c,date))):state.clients;
         const activeOrders=routeScoped.filter(c=>status(c,date)==='Activo');
         let list=routeScoped.filter(c=>matchesBase(c) && matchesStatus(c));
         list=sort(list,'order','dispatch');
@@ -947,7 +960,7 @@
         const printButtons=isDriverRole()
           ?`<button class="outline" data-action="export-diets">Imprimir orden de ruta</button>`
           :`<button class="outline" data-action="export-diets">Imprimir dietas especiales</button><button class="outline" data-action="export-route-order">Imprimir orden de ruta</button>`;
-        const routeField=isDriverRole()?`<label class="field">Ruta<div class="field-locked" aria-disabled="true">${esc(routeName(activeUser.routeId))}</div></label>`:`<label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label>`;
+        const routeField=isDriverRole()?`<label class="field">Ruta<div class="field-locked" aria-disabled="true">${esc(myRoutes.map(routeName).join(' + ')||'Sin ruta')}</div></label>`:`<label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label>`;
         const dateField=isDriverRole()
           ?`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div><button type="button" class="outline" id="work-date-today" style="margin-top:6px" title="Volver a ver el día actual, sin procesar">Ver hoy</button>`
           :`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`;
@@ -1009,7 +1022,7 @@
       }
       function renderClients(){
         if(!canAccessPage('clients')) return;
-        const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c)===activeUser.routeId):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
+        const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>myRouteIds().includes(effectiveRouteId(c))):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
         const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(googleMapsDirectLink(c.maps))}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(googleMapsDirectLink(c.maps2))}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
         const waLink=phone=>{
           const digits=(phone||'').replace(/\D/g,'');
@@ -1249,18 +1262,30 @@
           {key:'carnet',label:'Carnet',cell:d=>esc(d.carnet||'—')},
           {key:'phone',label:'Teléfono',cell:d=>esc(d.phone||'—')},
           {key:'address',label:'Dirección domicilio',cell:d=>esc(d.address||'—')},
-          {key:'route',label:'Ruta',cell:d=>esc(routeName(d.routeId))},
+          {key:'route',label:'Ruta',cell:d=>`${esc(routeName(d.routeId))}${(d.extraRouteIds||[]).length?` <span class="badge warn" title="Rutas de reemplazo">+ ${d.extraRouteIds.map(routeName).map(esc).join(', ')}</span>`:''}`},
           {key:'id',label:'Acciones',cell:d=>canEditPage('drivers')?`<button class="icon-btn" data-action="edit-driver" data-id="${d.id}">Editar</button><button class="icon-btn delete" data-action="delete-driver" data-id="${d.id}">×</button>`:'—'}
         ];
         $('#drivers-page').innerHTML=pageHead('Drivers','Personal de entrega registrado.',canEditPage('drivers')?'<button class="primary" data-action="add-driver">+ Añadir driver</button>':'')+`<div class="toolbar"><input id="drivers-search" class="search" placeholder="Buscar driver…" value="${esc(ui.search.drivers||'')}"></div>`+orderedTable(list,definitions,'drivers');
         bindSearch('drivers-search','drivers',renderDrivers);
       }
-      function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="outline" data-action="remove-driver-photo" data-id="${d.id}">Quitar foto</button>`:''}</div></label></div>`;}
+      function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label class="wide">Rutas adicionales (solo para cubrir un reemplazo temporal)<select name="extraRouteIds" multiple size="4">${state.routes.map(r=>`<option value="${esc(r.id)}" ${(d.extraRouteIds||[]).includes(r.id)?'selected':''}>${esc(r.name)}</option>`).join('')}</select><small class="muted">Ctrl/Cmd + clic para elegir varias. Una ruta no puede estar a la vez en dos drivers (ni como principal ni como adicional) — si necesitas moverla, quítala primero del otro driver.</small></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="outline" data-action="remove-driver-photo" data-id="${d.id}">Quitar foto</button>`:''}</div></label></div>`;}
       async function removeDriverPhoto(id){const d=driver(id);if(!d)return;d.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openDriver(id);}
-      function openDriver(id){const isNew=!id;const d0=id?driver(id):null;showModal(d0?'Editar driver':'Añadir driver',driverForm(d0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}let d=d0;if(d){Object.assign(d,data);state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);
+      function openDriver(id){const isNew=!id;const d0=id?driver(id):null;showModal(d0?'Editar driver':'Añadir driver',driverForm(d0||{}),async f=>{
+        const data=Object.fromEntries(new FormData(f));
+        const extraRouteIds=[...f.elements['extraRouteIds'].selectedOptions].map(o=>o.value).filter(Boolean);
+        delete data.extraRouteIds;
+        const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;
+        if(extraRouteIds.includes(data.routeId)){notice('La ruta principal no puede repetirse también como ruta adicional.',true);return false;}
+        for(const rid of [data.routeId,...extraRouteIds]){
+          const conflict=driverRouteConflict(rid,d0?.id);
+          if(conflict){notice(`La ruta "${routeName(rid)}" ya está asignada a ${conflict.firstName} ${conflict.lastName}. Quítasela primero (o usa "Rutas adicionales" solo para reemplazos puntuales).`,true);return false;}
+        }
+        if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}
+        let d=d0;
+        if(d){Object.assign(d,data,{extraRouteIds});state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);
         const linkedUser=staffUsers.find(u=>u.driverId===d.id);
         if(linkedUser) linkedUser.routeId=d.routeId;
-      }else{d={id:uid('d'),...data};state.drivers.push(d);}const saved=await save();if(!saved)return false;renderDrivers();notice('Driver guardado.');logAudit(isNew?'Driver creado':'Driver editado','driver',`${d.firstName||''} ${d.lastName||''}`.trim(),d.id,{});});}
+      }else{d={id:uid('d'),...data,extraRouteIds};state.drivers.push(d);}const saved=await save();if(!saved)return false;renderDrivers();notice('Driver guardado.');logAudit(isNew?'Driver creado':'Driver editado','driver',`${d.firstName||''} ${d.lastName||''}`.trim(),d.id,{});});}
       const ROUTE_TYPES={short:['Corta','done'],long:['Larga','pending'],verylong:['Muy larga','warn']};
       function routeTypeBadge(r){const [label,cl]=ROUTE_TYPES[r.type]||ROUTE_TYPES.short;return `<span class="badge ${cl}">${label}</span>`;}
       function renderRoutes(){
@@ -1573,6 +1598,8 @@
         }
         let driverId=u?.driverId;
         if(data.role==='driver'){
+          const conflict=driverRouteConflict(data.routeId,driverId);
+          if(conflict){notice(`La ruta "${routeName(data.routeId)}" ya está asignada a ${conflict.firstName} ${conflict.lastName}. Elige otra o quítasela primero a ese driver (edítalo desde "Drivers" para usar "Rutas adicionales" si es un reemplazo puntual).`,true);return false;}
           let d=driver(driverId);const parts=data.name.trim().split(/\s+/);
           const driverData={firstName:parts.shift()||data.name,lastName:parts.join(' ')||'',carnet:data.carnet,phone:data.phone,address:data.address,routeId:data.routeId};
           if(d)Object.assign(d,driverData);else{d={id:uid('d'),...driverData};state.drivers.push(d);}
@@ -1954,10 +1981,10 @@
       }
       async function exportRouteOrder(){
         const date=state.currentDate;
-        const routeId=isDriverRole()?activeUser.routeId:ui.route;
-        if(!routeId){ notice('Selecciona una ruta en el filtro "Ruta" antes de imprimir el orden de ruta.',true); return; }
-        const r=route(routeId);
-        let activeClients=state.clients.filter(c=>effectiveRouteId(c,date)===routeId && status(c,date)==='Activo');
+        const routeIds=isDriverRole()?myRouteIds():[ui.route].filter(Boolean);
+        if(!routeIds.length){ notice('Selecciona una ruta en el filtro "Ruta" antes de imprimir el orden de ruta.',true); return; }
+        const r=route(routeIds[0]);
+        let activeClients=state.clients.filter(c=>routeIds.includes(effectiveRouteId(c,date)) && status(c,date)==='Activo');
         activeClients=[...activeClients].sort((a,b)=>(n(a.order)||9999)-(n(b.order)||9999));
         if(!await ensureExcelJS()){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
         if(!activeClients.length){ notice('No hay clientes activos en esa ruta para exportar hoy.',true); return; }
@@ -2009,7 +2036,7 @@
         const buffer=await wb.xlsx.writeBuffer();
         const a=document.createElement('a');
         a.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-        a.download=`orden-de-ruta-${(r?.name||'ruta').toLowerCase().replace(/\s+/g,'-')}-${date}.xlsx`;
+        a.download=`orden-de-ruta-${(routeIds.map(id=>route(id)?.name).filter(Boolean).join('-')||'ruta').toLowerCase().replace(/\s+/g,'-')}-${date}.xlsx`;
         a.click();
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');

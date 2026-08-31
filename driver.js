@@ -273,7 +273,7 @@
       function canEditDispatchField(c, field){
         if (field === 'returnDate' && c.status !== 'Programado') return false;
         if (canEditPage('dispatch')) return true;
-        if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && effectiveRouteId(c) === activeUser.routeId;
+        if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && myRouteIds().includes(effectiveRouteId(c));
         return false;
       }
       let ui = { page:'dispatch', search:{}, sort:{}, route:'', month:today().slice(0,7), forceLiveDispatch:false };
@@ -494,7 +494,11 @@
       function routeName(id){ return route(id)?.name || 'Sin ruta'; }
       function planName(id){ return plan(id)?.name || 'Sin plan'; }
       function driverName(id){ const d=driver(id); return d ? `${d.firstName} ${d.lastName}` : 'Sin asignar'; }
-      function driverForRoute(routeId){ return state.drivers.find(d=>d.routeId===routeId); }
+      function driverForRoute(routeId){ return state.drivers.find(d=>d.routeId===routeId||(d.extraRouteIds||[]).includes(routeId)); }
+      function driverRouteIds(d){ return d?[d.routeId,...(d.extraRouteIds||[])].filter(Boolean):[]; }
+      // Rutas del driver logueado (normalmente 1, o 2 si está cubriendo un reemplazo
+      // asignado desde el panel de Drivers). Igual que en index.js.
+      function myRouteIds(){ return driverRouteIds(driver(activeUser.driverId)).length?driverRouteIds(driver(activeUser.driverId)):[activeUser.routeId].filter(Boolean); }
       function syncClientRouteAndDriver(data){
         const selectedDriver=driver(data.driverId);
         if(selectedDriver?.routeId) data.routeId=selectedDriver.routeId;
@@ -806,7 +810,8 @@
         notice(ok ? 'Marca de entrega eliminada.' : 'Se quitó localmente, pero no se guardó en la base de datos.', !ok);
       }
       function deliveryListFor(routeId, date){
-        const list = state.clients.filter(c => effectiveRouteId(c, date) === routeId && status(c, date) === 'Activo');
+        const ids = Array.isArray(routeId) ? routeId : [routeId];
+        const list = state.clients.filter(c => ids.includes(effectiveRouteId(c, date)) && status(c, date) === 'Activo');
         return list.sort((a, b) => (n(a.order) || 9999) - (n(b.order) || 9999) || String(a.name).localeCompare(String(b.name)));
       }
       async function renderDelivery(){
