@@ -1828,8 +1828,19 @@
       function processDay(){
         if(!canEditPage('dispatch')){notice('No tienes permiso para procesar el día.',true);return;}
         const d=day();
-        if(!d.laborable){notice('Un día no laborable no procesa pedidos ni descuenta inventario.',true);return;}
         if(d.processed){notice('Este día ya fue procesado.',true);return;}
+        if(!d.laborable){
+          // Un día no laborable no reparte nada ni descuenta inventario, pero
+          // igual hay que "cerrarlo" (marcarlo processed) para que no se
+          // quede colgado/abierto — si no, lastProcessedDate() nunca avanza
+          // y cosas como la fecha de retorno mínima quedan pegadas en el
+          // último día laborable antes del feriado.
+          if(!confirm(`¿Cerrar el día ${state.currentDate.split('-').reverse().join('/')} como no laborable? No se procesan pedidos ni se descuenta inventario.`))return;
+          d.processed=true;d.processedClientIds=[];delete dispatchHistorialCache[state.currentDate];save();renderDispatch();
+          notice('Día no laborable cerrado.');
+          logAudit('Día cerrado (no laborable)','day',state.currentDate,state.currentDate,{});
+          return;
+        }
         if(!confirm(`¿Procesar el día ${state.currentDate.split('-').reverse().join('/')}?`))return;
         const activeClients=state.clients.filter(c=>status(c)==='Activo');
         const processedIds=activeClients.map(c=>c.id);
@@ -2254,7 +2265,11 @@
 
         function populateRouteSelector(activeRouteId){
           routeSelectWrap.hidden=false;
-          routeSelectWrap.innerHTML=`<select id="mmap-route-select">${state.routes.map(r => `<option value="${r.id}" ${r.id===activeRouteId?'selected':''}>${escapeHtml(r.name)}</option>`).join('')}</select>`;
+          const date=workDate();
+          routeSelectWrap.innerHTML=`<select id="mmap-route-select">${state.routes.map(r => {
+            const hasClients=deliveryListFor(r.id, date).length>0;
+            return `<option value="${r.id}" ${r.id===activeRouteId?'selected':''} ${hasClients?'':'disabled'}>${escapeHtml(r.name)}${hasClients?'':' (sin clientes hoy)'}</option>`;
+          }).join('')}</select>`;
           routeSelectWrap.querySelector('select').addEventListener('change', e => loadAndRender(e.target.value));
         }
 
@@ -2266,11 +2281,17 @@
         async function loadAndRender(routeId){
           currentRouteId=routeId;
           setStatus('Cargando lista de entregas…');
-          const list=deliveryListFor(routeId, workDate());
+          const date=workDate();
+          await ensureDeliveryLoaded(date);
+          const fullList=deliveryListFor(routeId, date);
+          // Solo se muestran en el mapa los pedidos aún pendientes: en cuanto
+          // se marca "entregado" o "no entregado", el número desaparece del
+          // mapa para que solo queden los que faltan por entregar.
+          const list=fullList.filter(c => (deliveryRecord(date, c.id)?.status || 'pendiente') === 'pendiente');
           if (!list.length){
             if (map){ map.remove(); map=null; }
             mapBodyEl.innerHTML=''; legendEl.textContent='';
-            setStatus('Esta ruta no tiene pedidos activos para hoy.');
+            setStatus(fullList.length ? 'Ya se marcaron todos los pedidos de esta ruta (entregados o no entregados).' : 'Esta ruta no tiene pedidos activos para hoy.');
             return;
           }
           renderMapView(list);

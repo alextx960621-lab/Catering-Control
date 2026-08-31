@@ -26,12 +26,34 @@
       const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));let data,session,client;
       let branding={};try{branding=JSON.parse(localStorage.getItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`))||{};}catch(_){branding={};}
       async function syncBranding(){try{const settings=await window.SupabaseDB?.rpc('get_branding',{});if(settings){branding={companyName:settings.companyName,logoUrl:settings.logoUrl,itemIcons:settings.itemIcons||{},whatsappNumber:settings.whatsappNumber,instagramUrl:settings.instagramUrl,instagramHandle:settings.instagramHandle,adImageUrl:settings.adImageUrl,renewalWarningDays:settings.renewalWarningDays,menuItems:(settings.menuItems||[]).map(m=>[m.key,m.label])};localStorage.setItem(`${APP_CONFIG.storagePrefix}-client-branding-v1`,JSON.stringify(branding));}}catch(_){}}
-      async function fetchIsPremium(){try{const info=await window.SupabaseDB?.rpc('get_plan_status',{});return info?.plan==='premium';}catch(_){return false;}}
+      // Antes esto solo miraba el plan (Básico/Premium) para bloquear el
+      // portal. Ahora también respeta el candado individual "Portal web de
+      // clientes" que el superadmin prende/apaga en Configuración > Planes.
+      // Si get_plan_status() ya devuelve ese candado (clientPortalLocked, o
+      // premiumLockedPages.clientPortal) lo usamos; si tu función SQL
+      // todavía no lo manda, por seguridad se asume bloqueado igual que
+      // antes (mismo comportamiento previo, no se rompe nada).
+      async function fetchIsPremium(){
+        try{
+          const info=await window.SupabaseDB?.rpc('get_plan_status',{});
+          const isPremiumPlan=info?.plan==='premium';
+          if(!info) return false;
+          const locked='clientPortalLocked' in info
+            ? !!info.clientPortalLocked
+            : (info.premiumLockedPages && 'clientPortal' in info.premiumLockedPages
+                ? !!info.premiumLockedPages.clientPortal
+                : true);
+          return isPremiumPlan || !locked;
+        }catch(_){return false;}
+      }
       function renderLocked(){
         document.documentElement.dataset.bsTheme='light';document.documentElement.dataset.theme='light';
         const wa=whatsappNumber()?`https://wa.me/${whatsappNumber()}?text=${encodeURIComponent('Hola, quiero activar el plan Premium para acceder al portal de clientes.')}`:'';
+        // Mismo bloque "función Premium" (ícono, texto y botón) que usa el
+        // panel de operaciones en Notas/Sueldos/etc. — clases .premium-lock
+        // y .btn-premium definidas en cliente.css.
         $('#portal').innerHTML=`<button class="client-logout-btn" id="logout" title="Cerrar sesión">${LOGOUT_ICON}<span>Salir</span></button><header class="navbar bg-body rounded-4 shadow-sm px-3 mb-3"><a class="navbar-brand d-flex align-items-center gap-2 m-0" href="#"><img loading="lazy" decoding="async" class="brand-image rounded-3" src="${esc(branding.logoUrl||APP_CONFIG.logoUrl)}" alt="${esc(branding.companyName||APP_CONFIG.companyName)}" onerror="this.style.display='none'"><span><b class="d-block fs-6">${esc(branding.companyName||APP_CONFIG.companyName)}</b><small class="text-secondary">Mi portal de cliente</small></span></a></header>
-        <article class="card shadow-sm border-0"><div class="card-body p-4 p-md-5 text-center"><div class="fs-1 mb-2">🔒</div><h2 class="h5">El portal de clientes es una función Premium</h2><p class="text-secondary">Esta cuenta todavía está en el plan Básico. Contacta a tu proveedor para activar el plan Premium y acceder a tu plan, pausas y reactivaciones desde aquí.</p>${wa?`<a class="btn btn-success" href="${wa}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div></article>`;
+        <div class="premium-lock"><div class="premium-lock-icon">🔒</div><h2>Portal de clientes es una función Premium</h2><p>Esta cuenta está en el plan Básico. Contacta a tu proveedor para activar el plan Premium y desbloquear esta función.</p>${wa?`<a class="btn-premium" href="${wa}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div>`;
         $('#logout').onclick=()=>{sessionStorage.removeItem(CLIENT_SESSION_KEY);location.href='./login.html';};
       }
       async function syncFromServer(){

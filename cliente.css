@@ -50,3 +50,12 @@
     .portal .btn-primary:hover{box-shadow:0 8px 22px rgba(13,110,253,.4)}
     .portal .btn-success{background:linear-gradient(135deg,#28b16b,#198754);border-color:transparent;box-shadow:0 4px 14px rgba(25,135,84,.32)}
     .portal .btn-success:hover{box-shadow:0 8px 22px rgba(25,135,84,.38)}
+    /* Mismo look que la pantalla de "función Premium" del panel de
+       operaciones (Notas, Sueldos, etc.) — para que el candado del portal
+       de clientes se vea igual que en el resto de la app. */
+    .premium-lock{max-width:460px;margin:40px auto;padding:28px 24px;text-align:center;border-radius:1rem;color:#fff;background:linear-gradient(120deg,#e4002b,#ff4b3e);box-shadow:0 10px 30px rgba(228,0,43,.25)}
+    .premium-lock .premium-lock-icon{font-size:32px;margin-bottom:8px}
+    .premium-lock h2{font-size:18px;margin:0 0 8px}
+    .premium-lock p{margin:0 0 16px;opacity:.95;font-size:14px}
+    .btn-premium{display:inline-block;background:#fff;color:#e4002b;font-weight:700;padding:10px 18px;border-radius:999px;text-decoration:none}
+    .btn-premium:hover{filter:brightness(.95)}
