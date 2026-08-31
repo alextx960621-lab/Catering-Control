@@ -302,6 +302,7 @@
       function normalize(refDate) {
         state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.notes ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
         state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.premiumWhatsapp ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3; state.settings.plan = (state.settings.plan==='premium')?'premium':'basico'; state.settings.premiumUntil ??= '';
+        backfillMissedDays(refDate);
         if (state.settings.plan === 'premium' && state.settings.premiumUntil && state.settings.premiumUntil < (refDate || cachedServerDate)) {
           state.settings.plan = 'basico'; state.settings.premiumUntil = '';
         }
@@ -484,6 +485,22 @@
       function lastProcessedDate(){
         const dates=Object.keys(state.days).filter(d=>state.days[d]?.processed);
         return dates.length?dates.sort().at(-1):null;
+      }
+      // Ver el mismo comentario en index.js: cierra automáticamente (sin
+      // tocar inventario ni días consumidos) los días entre el último
+      // procesado y hoy que se hayan saltado sin abrir la app o sin
+      // procesarlos, para que lastProcessedDate() no se quede pegado.
+      function backfillMissedDays(refDate){
+        if(!refDate) return;
+        const last=lastProcessedDate();
+        if(!last) return;
+        let d=nextDay(last), changed=false;
+        while(d<refDate){
+          const rec=state.days[d];
+          if(!rec || !rec.processed){ const rd=day(d); rd.processed=true; rd.processedClientIds=[]; changed=true; }
+          d=nextDay(d);
+        }
+        if(changed) save();
       }
       function nextDay(dateStr){
         const d=new Date(dateStr+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+1); return d.toISOString().slice(0,10);
@@ -826,11 +843,13 @@
         startDeliveryPoll(date);
       }
       function renderDeliveryDriver(date){
-        const list = deliveryListFor(activeUser.routeId, date);
+        const myRoutes = myRouteIds();
+        const list = deliveryListFor(myRoutes, date);
         const delivered = list.filter(c => deliveryRecord(date, c.id)?.status === 'entregado').length;
         const definitions = [
           {key:'order',label:'Orden',cell:c=>n(c.order)||''},
           {key:'name',label:'Cliente',cell:c=>`<b>${esc(c.name)}</b><br><small class="muted">${esc(c.address1||'')}</small>`},
+          ...(myRoutes.length>1?[{key:'route',label:'Ruta',cell:c=>esc(routeName(effectiveRouteId(c,date)))}]:[]),
           {key:'status',label:'Estado de entrega',cell:c=>{
             const rec=deliveryRecord(date,c.id), st=rec?.status;
             const statusBadge = st === 'entregado' ? '<span class="badge active">Entregado</span>' : st === 'no_entregado' ? '<span class="badge danger">No entregado</span>' : '<span class="badge off">Pendiente</span>';
@@ -849,7 +868,7 @@
               : `<button class="primary" data-action="mark-delivered" data-id="${c.id}">Entregado</button> <button class="outline" data-action="mark-not-delivered" data-id="${c.id}">No entregado</button>`;
           }}
         ];
-        $('#delivery-page').innerHTML = pageHead('Despacho', `Tu ruta: ${esc(routeName(activeUser.routeId))} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente. Se actualiza sola cada pocos segundos.`, `${list.length?`<button class="outline" data-action="open-route-map" data-route="${activeUser.routeId||''}">🗺️ Ver mapa</button>`:''}<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
+        $('#delivery-page').innerHTML = pageHead('Despacho', `${myRoutes.length>1?'Tus rutas':'Tu ruta'}: ${esc(myRoutes.map(routeName).join(' + ')||'Sin ruta')} — ${date.split('-').reverse().join('/')}. Lista ordenada automáticamente. Se actualiza sola cada pocos segundos.`, `${list.length?`<button class="outline" data-action="open-route-map" data-route="${myRoutes.join(',')}">🗺️ Ver mapa</button>`:''}<span class="badge active" style="font-size:14px">${delivered}/${list.length} entregados</span>`) +
           orderedTable(list, definitions, 'delivery', c=>c.id);
         enableTableTools(); // la tabla se dibuja después de un await (ver renderDelivery), así que hay que re-engancharla aquí
       }
@@ -890,10 +909,11 @@
           }
           if(dispatchHistorialCache[date]){ renderDispatchHistorial(date,dispatchHistorialCache[date]); return; }
         }
-        const q=(ui.search.dispatch||'').toLowerCase(), rf=isDriverRole()?activeUser.routeId:ui.route, sf=ui.dispatchStatus||'all';
+        const q=(ui.search.dispatch||'').toLowerCase(), rf=isDriverRole()?'':ui.route, sf=ui.dispatchStatus||'all';
         const matchesBase=c=>(!rf || effectiveRouteId(c,date)===rf) && (!q || [c.name,c.carnet,c.address1,c.phone1,c.phone2,c.specialDiet,c.notes].join(' ').toLowerCase().includes(q));
         const matchesStatus=c=>sf==='all' || status(c,date)===sf;
-        const routeScoped=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c,date)===activeUser.routeId):state.clients;
+        const myRoutes=myRouteIds();
+        const routeScoped=isDriverRole()?state.clients.filter(c=>myRoutes.includes(effectiveRouteId(c,date))):state.clients;
         const activeOrders=routeScoped.filter(c=>status(c,date)==='Activo');
         let list=routeScoped.filter(c=>matchesBase(c) && matchesStatus(c));
         list=sort(list,'order','dispatch');
@@ -948,7 +968,7 @@
         const printButtons=isDriverRole()
           ?`<button class="outline" data-action="export-diets">Imprimir orden de ruta</button>`
           :`<button class="outline" data-action="export-diets">Imprimir dietas especiales</button><button class="outline" data-action="export-route-order">Imprimir orden de ruta</button>`;
-        const routeField=isDriverRole()?`<label class="field">Ruta<div class="field-locked" aria-disabled="true">${esc(routeName(activeUser.routeId))}</div></label>`:`<label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label>`;
+        const routeField=isDriverRole()?`<label class="field">Ruta<div class="field-locked" aria-disabled="true">${esc(myRoutes.map(routeName).join(' + ')||'Sin ruta')}</div></label>`:`<label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label>`;
         const dateField=isDriverRole()
           ?`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div><button type="button" class="outline" id="work-date-today" style="margin-top:6px" title="Volver a ver el día actual, sin procesar">Ver hoy</button>`
           :`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`;
@@ -1010,7 +1030,7 @@
       }
       function renderClients(){
         if(!canAccessPage('clients')) return;
-        const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>effectiveRouteId(c)===activeUser.routeId):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
+        const q=(ui.search.clients||'').toLowerCase(); const scope=isDriverRole()?state.clients.filter(c=>myRouteIds().includes(effectiveRouteId(c))):state.clients; let list=scope.filter(c=>!q||[c.name,c.carnet,c.address1,c.phone1,routeName(c.routeId),planName(c.planId)].join(' ').toLowerCase().includes(q)); list=sort(list,'order','clients');
         const mapsLinks=c=>{const links=[c.maps?`<a href="${esc(googleMapsDirectLink(c.maps))}" target="_blank" rel="noopener">Dirección 1</a>`:'',c.maps2?`<a href="${esc(googleMapsDirectLink(c.maps2))}" target="_blank" rel="noopener">Dirección 2</a>`:''].filter(Boolean); return links.length?links.join('<br>'):'—';};
         const waLink=phone=>{
           const digits=(phone||'').replace(/\D/g,'');
@@ -1497,10 +1517,9 @@
       }
       async function exportRouteOrder(){
         const date=state.currentDate;
-        const routeId=isDriverRole()?activeUser.routeId:ui.route;
-        if(!routeId){ notice('Selecciona una ruta en el filtro "Ruta" antes de imprimir el orden de ruta.',true); return; }
-        const r=route(routeId);
-        let activeClients=state.clients.filter(c=>effectiveRouteId(c,date)===routeId && status(c,date)==='Activo');
+        const routeIds=isDriverRole()?myRouteIds():[ui.route].filter(Boolean);
+        if(!routeIds.length){ notice('Selecciona una ruta en el filtro "Ruta" antes de imprimir el orden de ruta.',true); return; }
+        let activeClients=state.clients.filter(c=>routeIds.includes(effectiveRouteId(c,date)) && status(c,date)==='Activo');
         activeClients=[...activeClients].sort((a,b)=>(n(a.order)||9999)-(n(b.order)||9999));
         if(!await ensureExcelJS()){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
         if(!activeClients.length){ notice('No hay clientes activos en esa ruta para exportar hoy.',true); return; }
@@ -1552,7 +1571,7 @@
         const buffer=await wb.xlsx.writeBuffer();
         const a=document.createElement('a');
         a.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-        a.download=`orden-de-ruta-${(r?.name||'ruta').toLowerCase().replace(/\s+/g,'-')}-${date}.xlsx`;
+        a.download=`orden-de-ruta-${(routeIds.map(id=>route(id)?.name).filter(Boolean).join('-')||'ruta').toLowerCase().replace(/\s+/g,'-')}-${date}.xlsx`;
         a.click();
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
         notice('Archivo Excel generado.');
@@ -1672,7 +1691,7 @@
         const BROADCAST_MIN_INTERVAL_MS = 4000;
         const NOMINATIM_DELAY_MS = 1100; // respeta el límite de ~1 solicitud/seg de Nominatim
         let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null;
-        let map=null, markersLayer=null, driverMarker=null;
+        let map=null, markersLayer=null, driverMarker=null, routeLayer=null, driverPos=null, lastClientLatlngs=[];
         let watchId=null, locationChannel=null, lastBroadcastAt=0;
 
         function ensureStyles(){
@@ -1680,17 +1699,18 @@
           const style=document.createElement('style');
           style.id='driver-map-style';
           style.textContent=`
-            #map-dialog{border:none;border-radius:14px;padding:0;width:min(920px,96vw);height:min(680px,92vh);max-width:none;max-height:none}
+            #map-dialog{border:none;border-radius:14px;padding:0;width:min(920px,96vw);height:min(680px,92vh);max-width:none;max-height:none;background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
             #map-dialog::backdrop{background:rgba(15,23,42,.55)}
-            #map-dialog .mmap-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid rgba(0,0,0,.08);flex-wrap:wrap}
-            #map-dialog .mmap-head h2{margin:0;font-size:16px;flex:1 1 auto}
-            #map-dialog .mmap-close{border:none;background:transparent;font-size:20px;cursor:pointer;line-height:1;padding:4px 8px}
-            #map-dialog .mmap-status{padding:6px 16px;font-size:12.5px;color:#64748b;border-bottom:1px solid rgba(0,0,0,.06)}
-            #map-dialog .mmap-legend{padding:4px 16px;font-size:11.5px;color:#94a3b8}
+            #map-dialog .mmap-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+            #map-dialog .mmap-head h2{margin:0;font-size:16px;flex:1 1 auto;color:var(--text)}
+            #map-dialog .mmap-close{padding:8px 16px;font-size:13px;min-height:auto;flex:0 0 auto}
+            #map-dialog .mmap-status{padding:6px 16px;font-size:12.5px;color:var(--text);opacity:.7;border-bottom:1px solid var(--line)}
+            #map-dialog .mmap-legend{padding:4px 16px;font-size:11.5px;color:var(--text);opacity:.6}
             #map-dialog .mmap-body{position:relative;width:100%;height:calc(100% - 96px)}
             .mc-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;background:#0d6efd;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transform:rotate(-45deg);display:flex;align-items:center;justify-content:center}
             .mc-pin span{transform:rotate(45deg);color:#fff;font-weight:700;font-size:12px}
             .mc-driver-icon{width:34px;height:34px;border-radius:50%;background:#f97316;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:16px}
+            .mc-arrow{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:11px solid #0d6efd;opacity:.85;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
             @media (max-width:520px){#map-dialog{width:100vw;height:100vh;border-radius:0}}
           `;
           document.head.appendChild(style);
@@ -1700,7 +1720,7 @@
           if (dialog) return;
           dialog=document.createElement('dialog');
           dialog.id='map-dialog';
-          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de tu ruta</h2><button type="button" class="mmap-close" aria-label="Cerrar">×</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
+          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de tu ruta</h2><button type="button" class="mmap-close danger" aria-label="Cerrar">Cerrar</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
           document.body.appendChild(dialog);
           mapBodyEl=dialog.querySelector('#mmap-body');
           statusEl=dialog.querySelector('#mmap-status');
@@ -1750,9 +1770,37 @@
 
         function escapeHtml(v){ return String(v ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[ch])); }
 
+        // Ángulo (bearing) en grados de la línea entre dos puntos, medido
+        // desde el norte en sentido horario — lo que espera CSS rotate().
+        function bearingDeg(lat1,lng1,lat2,lng2){
+          const toRad=d=>d*Math.PI/180, toDeg=r=>r*180/Math.PI;
+          const y=Math.sin(toRad(lng2-lng1))*Math.cos(toRad(lat2));
+          const x=Math.cos(toRad(lat1))*Math.sin(toRad(lat2))-Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lng2-lng1));
+          return (toDeg(Math.atan2(y,x))+360)%360;
+        }
+
+        // Dibuja (o redibuja) la polilínea de la ruta con flechas de
+        // dirección. Si ya se conoce la posición GPS del driver, la línea
+        // arranca ahí; si no, arranca en la primera parada. Se llama tanto
+        // al cargar la lista como cada vez que llega una nueva posición GPS.
+        function drawRouteLine(){
+          if (routeLayer){ routeLayer.remove(); routeLayer=null; }
+          if (!map || !window.L) return;
+          const pts = driverPos ? [[driverPos.lat,driverPos.lng], ...lastClientLatlngs] : lastClientLatlngs;
+          if (pts.length<2) return;
+          routeLayer=window.L.layerGroup().addTo(map);
+          window.L.polyline(pts, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(routeLayer);
+          for (let i=0;i<pts.length-1;i++){
+            const [lat1,lng1]=pts[i], [lat2,lng2]=pts[i+1];
+            const brng=bearingDeg(lat1,lng1,lat2,lng2);
+            const icon=window.L.divIcon({ className:'', html:`<div class="mc-arrow" style="transform:rotate(${brng}deg)"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
+            window.L.marker([(lat1+lat2)/2, (lng1+lng2)/2], { icon, interactive:false }).addTo(routeLayer);
+          }
+        }
+
         function renderMapView(list){
           if (!mapBodyEl) return;
-          if (map){ map.remove(); map=null; }
+          if (map){ map.remove(); map=null; routeLayer=null; }
           mapBodyEl.innerHTML='';
           if (!window.L){ setStatus('No se pudo cargar el mapa (sin conexión a internet).'); return; }
           const withCoords=list.filter(c => c.lat!=null && c.lng!=null);
@@ -1767,7 +1815,9 @@
             window.L.marker([c.lat,c.lng], { icon }).addTo(markersLayer).bindPopup(`<b>${escapeHtml(c.name)}</b><br>Orden: ${n(c.order)||'—'}<br>${escapeHtml(c.address1||'')}`);
             latlngs.push([c.lat,c.lng]);
           });
-          if (latlngs.length>1) window.L.polyline(latlngs, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(map);
+          lastClientLatlngs=latlngs;
+          drawRouteLine();
+          if (driverMarker) map.addLayer(driverMarker); // sobrevive al recreado del mapa si ya existía
           if (latlngs.length) map.fitBounds(window.L.latLngBounds(latlngs).pad(0.2)); else map.setView([-16.5,-68.15],12);
           legendEl.textContent=`Números = orden del cliente. Línea punteada = ruta sugerida en línea recta (no sigue calles).${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
           setStatus(withCoords.length ? `${withCoords.length}/${list.length} puntos en el mapa.` : 'No se pudo ubicar a ningún cliente en el mapa todavía.');
@@ -1783,12 +1833,14 @@
 
         function drawDriverMarker(lat,lng,name){
           if (!map || !window.L) return;
+          driverPos={lat,lng};
           const icon=window.L.divIcon({ className:'', html:'<div class="mc-driver-icon">🚚</div>', iconSize:[34,34], iconAnchor:[17,17] });
           if (!driverMarker) driverMarker=window.L.marker([lat,lng], { icon, zIndexOffset:1000 }).addTo(map).bindPopup(escapeHtml(name));
           else driverMarker.setLatLng([lat,lng]);
+          drawRouteLine();
         }
 
-        function startBroadcast(routeId, name){
+        function startBroadcast(routeIds, name){
           const channel=ensureLocationChannel();
           if (!channel || !navigator.geolocation) return;
           channel.subscribe();
@@ -1797,7 +1849,11 @@
             drawDriverMarker(pos.coords.latitude, pos.coords.longitude, name || 'Tú');
             if (now - lastBroadcastAt < BROADCAST_MIN_INTERVAL_MS) return;
             lastBroadcastAt=now;
-            channel.send({ type:'broadcast', event:'loc', payload:{ routeId, lat:pos.coords.latitude, lng:pos.coords.longitude, name, at:now } });
+            // routeIds (plural) para que el mapa del admin reconozca la
+            // transmisión sin importar cuál de las rutas del driver esté
+            // viendo; se manda también routeId (la primera) por si algún
+            // lado viejo todavía compara con el campo singular.
+            channel.send({ type:'broadcast', event:'loc', payload:{ routeId:routeIds[0], routeIds, lat:pos.coords.latitude, lng:pos.coords.longitude, name, at:now } });
           }, err => {
             setStatus(err.code===1 ? 'Activa el permiso de ubicación para compartir tu posición en vivo.' : 'No se pudo obtener tu ubicación en vivo.');
           }, { enableHighAccuracy:true, maximumAge:4000, timeout:15000 });
@@ -1806,14 +1862,14 @@
         function teardown(){
           if (watchId!=null && navigator.geolocation){ navigator.geolocation.clearWatch(watchId); watchId=null; }
           if (map){ map.remove(); map=null; }
-          driverMarker=null; markersLayer=null;
+          driverMarker=null; markersLayer=null; routeLayer=null; driverPos=null; lastClientLatlngs=[];
         }
 
-        async function loadAndRender(routeId){
+        async function loadAndRender(routeIds){
           setStatus('Cargando lista de entregas…');
           const date=workDate();
           await ensureDeliveryLoaded(date);
-          const fullList=deliveryListFor(routeId, date);
+          const fullList=deliveryListFor(routeIds, date);
           // Solo se muestran en el mapa los pedidos aún pendientes: en cuanto
           // el driver marca "entregado" o "no entregado", el número desaparece
           // del mapa para que solo queden los que faltan por entregar.
@@ -1827,15 +1883,16 @@
           renderMapView(list);
           await resolveCoords(list);
           renderMapView(list);
-          startBroadcast(routeId, activeUser?.name);
+          startBroadcast(routeIds, activeUser?.name);
         }
 
-        async function open(){
+        async function open(routeIdsParam){
           if (!canAccessPage('delivery')) return;
           ensureStyles(); buildDialog();
           dialog.showModal();
           setTimeout(() => map && map.invalidateSize(), 30);
-          await loadAndRender(activeUser.routeId);
+          const routeIds=(routeIdsParam?String(routeIdsParam).split(',').filter(Boolean):null) || myRouteIds();
+          await loadAndRender(routeIds);
         }
 
         window.DriverMap={ open };

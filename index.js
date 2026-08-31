@@ -313,6 +313,7 @@
       function normalize(refDate) {
         state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.notes ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
         state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.premiumWhatsapp ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3; state.settings.plan = (state.settings.plan==='premium')?'premium':'basico'; state.settings.premiumUntil ??= '';
+        backfillMissedDays(refDate);
         if (state.settings.plan === 'premium' && state.settings.premiumUntil && state.settings.premiumUntil < (refDate || cachedServerDate)) {
           state.settings.plan = 'basico'; state.settings.premiumUntil = '';
         }
@@ -489,6 +490,27 @@
       function lastProcessedDate(){
         const dates=Object.keys(state.days).filter(d=>state.days[d]?.processed);
         return dates.length?dates.sort().at(-1):null;
+      }
+      // Si el negocio se salta días sin abrir la app (o sin procesarlos), esos
+      // días quedaban sin `processed` para siempre y lastProcessedDate() no
+      // avanzaba (afectando, por ejemplo, la fecha mínima de retorno). Al
+      // conocer la fecha real de hoy (refDate, viene del servidor) se cierran
+      // automáticamente como "sin actividad" todos los días entre el último
+      // procesado y hoy — sin tocar inventario ni días consumidos, igual que
+      // al cerrar manualmente un día no laborable. Si nunca se procesó nada
+      // todavía (cuenta nueva), no hay nada que rellenar: el primer día que
+      // se procese manualmente ya queda con su propio estado explícito.
+      function backfillMissedDays(refDate){
+        if(!refDate) return;
+        const last=lastProcessedDate();
+        if(!last) return;
+        let d=nextDay(last), changed=false;
+        while(d<refDate){
+          const rec=state.days[d];
+          if(!rec || !rec.processed){ const rd=day(d); rd.processed=true; rd.processedClientIds=[]; changed=true; }
+          d=nextDay(d);
+        }
+        if(changed) save();
       }
       function nextDay(dateStr){
         const d=new Date(dateStr+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+1); return d.toISOString().slice(0,10);
@@ -2152,7 +2174,7 @@
         const LOCATION_CHANNEL_NAME = 'catering-driver-location';
         const NOMINATIM_DELAY_MS = 1100; // respeta el límite de ~1 solicitud/seg de Nominatim
         let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null, routeSelectWrap=null;
-        let map=null, markersLayer=null, driverMarker=null;
+        let map=null, markersLayer=null, driverMarker=null, routeLayer=null, driverPos=null, lastClientLatlngs=[];
         let locationChannel=null, channelBound=false, currentRouteId='';
 
         function ensureStyles(){
@@ -2160,18 +2182,19 @@
           const style=document.createElement('style');
           style.id='driver-map-style';
           style.textContent=`
-            #map-dialog{border:none;border-radius:14px;padding:0;width:min(920px,96vw);height:min(680px,92vh);max-width:none;max-height:none}
+            #map-dialog{border:none;border-radius:14px;padding:0;width:min(920px,96vw);height:min(680px,92vh);max-width:none;max-height:none;background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
             #map-dialog::backdrop{background:rgba(15,23,42,.55)}
-            #map-dialog .mmap-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid rgba(0,0,0,.08);flex-wrap:wrap}
-            #map-dialog .mmap-head h2{margin:0;font-size:16px;flex:1 1 auto}
-            #map-dialog .mmap-close{border:none;background:transparent;font-size:20px;cursor:pointer;line-height:1;padding:4px 8px}
-            #map-dialog .mmap-status{padding:6px 16px;font-size:12.5px;color:#64748b;border-bottom:1px solid rgba(0,0,0,.06)}
-            #map-dialog .mmap-legend{padding:4px 16px;font-size:11.5px;color:#94a3b8}
+            #map-dialog .mmap-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+            #map-dialog .mmap-head h2{margin:0;font-size:16px;flex:1 1 auto;color:var(--text)}
+            #map-dialog .mmap-close{padding:8px 16px;font-size:13px;min-height:auto;flex:0 0 auto}
+            #map-dialog .mmap-status{padding:6px 16px;font-size:12.5px;color:var(--text);opacity:.7;border-bottom:1px solid var(--line)}
+            #map-dialog .mmap-legend{padding:4px 16px;font-size:11.5px;color:var(--text);opacity:.6}
             #map-dialog .mmap-body{position:relative;width:100%;height:calc(100% - 96px)}
-            #map-dialog select{padding:5px 8px;border-radius:8px;border:1px solid #cbd5e1;font-size:13px}
+            #map-dialog select{padding:5px 8px;border-radius:8px;border:1px solid var(--line);font-size:13px;background:var(--surface);color:var(--text)}
             .mc-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;background:#0d6efd;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transform:rotate(-45deg);display:flex;align-items:center;justify-content:center}
             .mc-pin span{transform:rotate(45deg);color:#fff;font-weight:700;font-size:12px}
             .mc-driver-icon{width:34px;height:34px;border-radius:50%;background:#f97316;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:16px}
+            .mc-arrow{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:11px solid #0d6efd;opacity:.85;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
             @media (max-width:520px){#map-dialog{width:100vw;height:100vh;border-radius:0}}
           `;
           document.head.appendChild(style);
@@ -2181,7 +2204,7 @@
           if (dialog) return;
           dialog=document.createElement('dialog');
           dialog.id='map-dialog';
-          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de reparto</h2><div id="mmap-route-select-wrap" hidden></div><button type="button" class="mmap-close" aria-label="Cerrar">×</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
+          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de reparto</h2><div id="mmap-route-select-wrap" hidden></div><button type="button" class="mmap-close danger" aria-label="Cerrar">Cerrar</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
           document.body.appendChild(dialog);
           mapBodyEl=dialog.querySelector('#mmap-body');
           statusEl=dialog.querySelector('#mmap-status');
@@ -2234,9 +2257,37 @@
 
         function escapeHtml(v){ return String(v ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[ch])); }
 
+        // Ángulo (bearing) en grados entre dos puntos, medido desde el norte
+        // en sentido horario — lo que espera CSS rotate().
+        function bearingDeg(lat1,lng1,lat2,lng2){
+          const toRad=d=>d*Math.PI/180, toDeg=r=>r*180/Math.PI;
+          const y=Math.sin(toRad(lng2-lng1))*Math.cos(toRad(lat2));
+          const x=Math.cos(toRad(lat1))*Math.sin(toRad(lat2))-Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lng2-lng1));
+          return (toDeg(Math.atan2(y,x))+360)%360;
+        }
+
+        // Dibuja (o redibuja) la polilínea de la ruta con flechas de
+        // dirección. Si ya llegó la posición del driver por broadcast, la
+        // línea arranca ahí; si no, arranca en la primera parada (se vuelve
+        // a llamar cuando llega el primer broadcast, ver drawDriverMarker).
+        function drawRouteLine(){
+          if (routeLayer){ routeLayer.remove(); routeLayer=null; }
+          if (!map || !window.L) return;
+          const pts = driverPos ? [[driverPos.lat,driverPos.lng], ...lastClientLatlngs] : lastClientLatlngs;
+          if (pts.length<2) return;
+          routeLayer=window.L.layerGroup().addTo(map);
+          window.L.polyline(pts, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(routeLayer);
+          for (let i=0;i<pts.length-1;i++){
+            const [lat1,lng1]=pts[i], [lat2,lng2]=pts[i+1];
+            const brng=bearingDeg(lat1,lng1,lat2,lng2);
+            const icon=window.L.divIcon({ className:'', html:`<div class="mc-arrow" style="transform:rotate(${brng}deg)"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
+            window.L.marker([(lat1+lat2)/2, (lng1+lng2)/2], { icon, interactive:false }).addTo(routeLayer);
+          }
+        }
+
         function renderMapView(list){
           if (!mapBodyEl) return;
-          if (map){ map.remove(); map=null; }
+          if (map){ map.remove(); map=null; routeLayer=null; }
           mapBodyEl.innerHTML='';
           if (!window.L){ setStatus('No se pudo cargar el mapa (sin conexión a internet).'); return; }
           const withCoords=list.filter(c => c.lat!=null && c.lng!=null);
@@ -2251,7 +2302,8 @@
             window.L.marker([c.lat,c.lng], { icon }).addTo(markersLayer).bindPopup(`<b>${escapeHtml(c.name)}</b><br>Orden: ${n(c.order)||'—'}<br>${escapeHtml(c.address1||'')}`);
             latlngs.push([c.lat,c.lng]);
           });
-          if (latlngs.length>1) window.L.polyline(latlngs, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(map);
+          lastClientLatlngs=latlngs;
+          drawRouteLine();
           if (latlngs.length) map.fitBounds(window.L.latLngBounds(latlngs).pad(0.2)); else map.setView([-16.5,-68.15],12);
           legendEl.textContent=`Números = orden del cliente. Línea punteada = ruta sugerida en línea recta (no sigue calles).${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
           setStatus(withCoords.length ? `${withCoords.length}/${list.length} puntos en el mapa.` : 'No se pudo ubicar a ningún cliente en el mapa todavía.');
@@ -2270,7 +2322,9 @@
           if (!channel) return;
           if (!channelBound){
             channel.on('broadcast', { event: 'loc' }, ({ payload }) => {
-              if (!payload || payload.routeId !== currentRouteId) return;
+              if (!payload) return;
+              const matches = Array.isArray(payload.routeIds) ? payload.routeIds.includes(currentRouteId) : payload.routeId === currentRouteId;
+              if (!matches) return;
               drawDriverMarker(payload.lat, payload.lng, payload.name || 'Driver');
             });
             channel.subscribe();
@@ -2280,14 +2334,16 @@
 
         function drawDriverMarker(lat,lng,name){
           if (!map || !window.L) return;
+          driverPos={lat,lng};
           const icon=window.L.divIcon({ className:'', html:'<div class="mc-driver-icon">🚚</div>', iconSize:[34,34], iconAnchor:[17,17] });
           if (!driverMarker) driverMarker=window.L.marker([lat,lng], { icon, zIndexOffset:1000 }).addTo(map).bindPopup(escapeHtml(name));
           else driverMarker.setLatLng([lat,lng]);
+          drawRouteLine();
         }
 
         function teardown(){
           if (map){ map.remove(); map=null; }
-          driverMarker=null; markersLayer=null;
+          driverMarker=null; markersLayer=null; routeLayer=null; driverPos=null; lastClientLatlngs=[];
         }
 
         function populateRouteSelector(activeRouteId){
@@ -2297,12 +2353,15 @@
             const hasClients=deliveryListFor(r.id, date).length>0;
             return `<option value="${r.id}" ${r.id===activeRouteId?'selected':''} ${hasClients?'':'disabled'}>${escapeHtml(r.name)}${hasClients?'':' (sin clientes hoy)'}</option>`;
           }).join('')}</select>`;
-          routeSelectWrap.querySelector('select').addEventListener('change', e => loadAndRender(e.target.value));
+          routeSelectWrap.querySelector('select').addEventListener('change', e => {
+            if (e.target.selectedOptions[0]?.disabled) return; // por si el navegador deja seleccionar una opción disabled
+            loadAndRender(e.target.value);
+          });
         }
 
         function firstRouteWithData(){
           for (const r of state.routes) if (deliveryListFor(r.id, workDate()).length) return r.id;
-          return state.routes[0]?.id || '';
+          return '';
         }
 
         async function loadAndRender(routeId){
