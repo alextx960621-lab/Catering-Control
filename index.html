@@ -15,7 +15,7 @@
        bajo demanda solo cuando el usuario exporta un Excel (procesar día,
        exportar dietas, exportar orden de ruta). Así el panel carga más
        liviano y rápido en el uso normal del día a día. -->
-  <link rel="stylesheet" href="./index.css?v=16">
+  <link rel="stylesheet" href="./index.css?v=17">
   <!-- Leaflet: mapa con tiles de OpenStreetMap (gratis, sin API key) para el
        botón "Ver mapa" de Reparto. Se usa solo cuando se abre el mapa. -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
@@ -40,6 +40,7 @@
       </div>
       <nav id="nav">
         <button data-page="dispatch" data-roles="admin,editor,kitchen,driver" class="active"><span class="nav-icon">📅</span><span class="nav-label">Día de trabajo</span></button>
+        <button data-page="metrics" data-roles="admin,editor"><span class="nav-icon">📈</span><span class="nav-label">Métricas</span></button>
         <button data-page="notes" data-roles="admin,editor"><span class="nav-icon">🔔<span class="nav-badge" id="notes-badge" hidden>0</span></span><span class="nav-label">Notas</span></button>
         <button data-page="clients" data-roles="admin,editor,driver"><span class="nav-icon">👥</span><span class="nav-label">Clientes</span></button>
         <button data-page="drivers" data-roles="admin,editor"><span class="nav-icon">🛵</span><span class="nav-label">Drivers</span></button>
@@ -68,6 +69,7 @@
     </aside>
     <main>
       <section class="page active" id="dispatch-page"></section>
+      <section class="page" id="metrics-page"></section>
       <section class="page" id="clients-page"></section>
       <section class="page" id="drivers-page"></section>
       <section class="page" id="routes-page"></section>
@@ -86,7 +88,7 @@
   <input id="import-file" type="file" accept="application/json" hidden>
   <div class="notice" id="notice"></div>
 
-  <script src="./index.js?v=17" defer></script>
+  <script src="./index.js?v=19" defer></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous" defer></script>
 <script src="./pwa-register.js?v=3" defer></script>

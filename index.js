@@ -227,6 +227,7 @@
         routes: ['admin','editor','superadmin'],
         plans: ['admin','editor','superadmin'],
         payroll: ['admin','editor','driver','superadmin'],
+        metrics: ['admin','editor','superadmin'],
         inventory: ['admin','editor','kitchen','superadmin'],
         users: ['admin','superadmin'],
         audit: ['admin','superadmin'],
@@ -261,6 +262,7 @@
         ['plans','Planes',true],
         ['payroll','Sueldos',true],
         ['inventory','Inventario',true],
+        ['metrics','Métricas',false],
         ['notes','Notas',true],
         ['audit','Auditoría',false],
         ['settings','Configuración',false]
@@ -310,7 +312,7 @@
         if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && myRouteIds().includes(effectiveRouteId(c));
         return false;
       }
-      let ui = { page:'dispatch', search:{}, sort:{}, route:'', month:today().slice(0,7), forceLiveDispatch:false };
+      let ui = { page:'dispatch', search:{}, sort:{}, route:'', month:today().slice(0,7), forceLiveDispatch:false, metrics:{ preset:'month', start:today().slice(0,8)+'01', end:today(), routeId:'', driverId:'', compare:{ enabled:false, start:'', end:'' } } };
       let state;
 
       const seed = () => ({
@@ -335,7 +337,7 @@
       }
       function normalize(refDate) {
         state ||= seed(); state.days ||= {}; state.routes ||= []; state.plans ||= []; state.drivers ||= []; state.clients ||= []; state.notes ||= []; state.inventory ||= {}; state.inventory.items ||= []; state.inventory.links ||= []; state.inventory.movements ||= []; state.settings ||= {};
-        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.premiumWhatsapp ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3; state.settings.plan = (state.settings.plan==='premium')?'premium':'basico'; state.settings.premiumUntil ??= '';
+        state.currentDate ||= today(); state.settings.theme ||= 'light'; state.settings.hiddenColumns ||= []; state.settings.dispatchColumnOrder ||= []; state.settings.columnWidths ||= {}; state.settings.companyName ??= ''; state.settings.logoUrl ??= ''; state.settings.itemIcons ??= {}; state.settings.whatsappNumber ??= ''; state.settings.premiumWhatsapp ??= ''; state.settings.instagramUrl ??= ''; state.settings.instagramHandle ??= ''; state.settings.adImageUrl ??= ''; state.settings.renewalWarningDays ??= 3; state.settings.plan = (state.settings.plan==='premium')?'premium':'basico'; state.settings.premiumUntil ??= ''; state.settings.costPerKm ??= 0;
         backfillMissedDays(refDate);
         if (state.settings.plan === 'premium' && state.settings.premiumUntil && state.settings.premiumUntil < (refDate || cachedServerDate)) {
           state.settings.plan = 'basico'; state.settings.premiumUntil = '';
@@ -765,7 +767,7 @@
       }
       function activate(name){ if(!canAccessPage(name)) name='dispatch'; if(name!=='delivery') stopDeliveryPoll(); ui.page=name; $$('.page').forEach(p=>p.classList.toggle('active',p.id===`${name}-page`)); $$('#nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); renderPage(name); $('#nav').classList.remove('open'); updateNotesBadge(); window.scrollTo(0,0); }
       function render(){ document.documentElement.dataset.theme=userTheme(); $('#current-name').textContent=activeUser.name || roleLabel(role()); $('#current-role').textContent=roleLabel(role()); $('#avatar').textContent=(activeUser.name||'O').slice(0,1).toUpperCase(); $$('#nav [data-page]').forEach(b=>b.hidden=!canAccessPage(b.dataset.page)); if(!canAccessPage(ui.page)) ui.page='dispatch'; renderPage(ui.page); updateNotesBadge(); }
-      function renderPage(name){ const fn={dispatch:renderDispatch,delivery:renderDelivery,clients:renderClients,notes:renderNotes,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
+      function renderPage(name){ const fn={dispatch:renderDispatch,delivery:renderDelivery,clients:renderClients,notes:renderNotes,drivers:renderDrivers,routes:renderRoutes,plans:renderPlans,payroll:renderPayroll,inventory:renderInventory,metrics:renderMetrics,users:renderUsers,audit:renderAudit,settings:renderSettings}[name]; if(fn) { try{ fn(); }catch(err){ console.error(`[render:${name}]`,err); } enableTableTools(); } }
       function enableTableTools(){
       function syncTableWidth(tbl,cols){
         cols=cols||$$('colgroup col',tbl);
@@ -1617,6 +1619,335 @@
       }
 
       function monthDates(month){const [y,m]=month.split('-').map(Number),end=new Date(y,m,0).getDate();return Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
+      // ===================== MÉTRICAS =====================
+      // Panel de estadísticas de reparto. Se calcula en el navegador a
+      // partir de los datos ya disponibles: registros de entrega
+      // (deliveryRecord: status/at por cliente y día), clientes/rutas/
+      // drivers y las coordenadas de dirección que ya usa el mapa de
+      // despacho (DriverMap). No hay una tabla de "logs" separada: cada
+      // marca de entregado/no-entregado ya trae su timestamp ("at").
+      //
+      // Limitaciones honestas (se muestran en el panel, no se inventan
+      // datos): los kilómetros son una ESTIMACIÓN en línea recta entre
+      // las direcciones de los clientes en el orden de la ruta (no sigue
+      // calles reales); no hay todavía un registro histórico de la
+      // posición GPS real del driver (solo se transmite en vivo mientras
+      // el mapa de despacho está abierto, y no se guarda); y no existe un
+      // portal web de clientes con analítica de accesos en esta versión,
+      // así que esas métricas se muestran como "No disponible".
+      function dateRangeArray(start,end){
+        const out=[]; let d=new Date(start+'T00:00:00'); const last=new Date(end+'T00:00:00');
+        if(isNaN(d)||isNaN(last)||d>last) return out;
+        while(d<=last){ out.push(d.toISOString().slice(0,10)); d.setDate(d.getDate()+1); if(out.length>370) break; }
+        return out;
+      }
+      function haversineKm(lat1,lng1,lat2,lng2){
+        const toRad=x=>x*Math.PI/180, R=6371;
+        const dLat=toRad(lat2-lat1), dLng=toRad(lng2-lng1);
+        const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+        return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+      }
+      function metricsPresetRange(preset){
+        const t=today();
+        if(preset==='week'){ const dt=new Date(t+'T00:00:00'); const wd=(dt.getDay()+6)%7; const start=new Date(dt); start.setDate(dt.getDate()-wd); return {start:start.toISOString().slice(0,10), end:t}; }
+        if(preset==='last30'){ const dt=new Date(t+'T00:00:00'); dt.setDate(dt.getDate()-29); return {start:dt.toISOString().slice(0,10), end:t}; }
+        if(preset==='last90'){ const dt=new Date(t+'T00:00:00'); dt.setDate(dt.getDate()-89); return {start:dt.toISOString().slice(0,10), end:t}; }
+        return {start:t.slice(0,8)+'01', end:t}; // 'month' (por defecto)
+      }
+      // Rango "equivalente anterior": mismo número de días, justo antes del
+      // periodo actual. Se usa como valor por defecto al activar
+      // "Comparar periodos" (ej.: si el periodo actual es una semana, el de
+      // comparación es la semana inmediatamente anterior).
+      function shiftedPreviousRange(start,end){
+        const s=new Date(start+'T00:00:00'), e=new Date(end+'T00:00:00');
+        const days=Math.max(1, Math.round((e-s)/86400000)+1);
+        const prevEnd=new Date(s); prevEnd.setDate(s.getDate()-1);
+        const prevStart=new Date(prevEnd); prevStart.setDate(prevEnd.getDate()-(days-1));
+        return { start: prevStart.toISOString().slice(0,10), end: prevEnd.toISOString().slice(0,10) };
+      }
+      async function computeMetrics(start,end,routeFilter,driverFilter){
+        const dates=dateRangeArray(start,end);
+        await Promise.all(dates.map(d=>ensureDeliveryLoaded(d)));
+        const routeStats={}, driverStats={};
+        const activeDriversByDate={};
+        const dailyDelivered={};
+        const routeDurations=[]; const gapMinutes=[];
+        let totalScheduled=0, totalCompleted=0, totalFailed=0;
+        for(const date of dates){
+          dailyDelivered[date]=0;
+          for(const r of state.routes){
+            if(routeFilter && r.id!==routeFilter) continue;
+            const fullList=deliveryListFor(r.id,date);
+            if(!fullList.length) continue;
+            const list=driverFilter ? fullList.filter(c=>effectiveDriverId(c,date)===driverFilter) : fullList;
+            if(!list.length) continue;
+            routeStats[r.id] ||= {name:r.name, completed:0, failed:0, scheduled:0, km:0, kmDays:0, durations:[], clientsPerDay:[]};
+            const rs=routeStats[r.id];
+            rs.scheduled+=list.length; totalScheduled+=list.length; rs.clientsPerDay.push(list.length);
+            const marks=[]; const driversInvolved=new Set();
+            list.forEach(c=>{
+              const did=effectiveDriverId(c,date); if(did) driversInvolved.add(did);
+              const rec=deliveryRecord(date,c.id);
+              if(!rec || (rec.status!=='entregado' && rec.status!=='no_entregado')) return;
+              if(rec.status==='entregado'){ rs.completed++; totalCompleted++; dailyDelivered[date]++; }
+              else { rs.failed++; totalFailed++; }
+              if(rec.at) marks.push({at:new Date(rec.at)});
+              if(did){
+                driverStats[did] ||= {completed:0, failed:0, routesWorked:new Set(), km:0, durations:[]};
+                driverStats[did][rec.status==='entregado'?'completed':'failed']++;
+                driverStats[did].routesWorked.add(date+'|'+r.id);
+              }
+            });
+            driversInvolved.forEach(did=>(activeDriversByDate[date] ||= new Set()).add(did));
+            if(marks.length>=2){
+              marks.sort((a,b)=>a.at-b.at);
+              const minutes=(marks[marks.length-1].at-marks[0].at)/60000;
+              if(minutes>0 && minutes<20*60){
+                rs.durations.push(minutes);
+                routeDurations.push({date, routeId:r.id, routeName:r.name, minutes});
+                driversInvolved.forEach(did=>driverStats[did]?.durations.push(minutes));
+              }
+              for(let i=1;i<marks.length;i++){ const gap=(marks[i].at-marks[i-1].at)/60000; if(gap>0 && gap<6*60) gapMinutes.push(gap); }
+            }
+            const withCoords=list
+              .map(c=>({c, addr:resolvedAddress(c,date)}))
+              .filter(t=>t.addr && t.addr.lat!=null && t.addr.lng!=null)
+              .sort((a,b)=>(n(a.c.order)||9999)-(n(b.c.order)||9999));
+            if(withCoords.length>=2){
+              let km=0;
+              for(let i=1;i<withCoords.length;i++) km+=haversineKm(withCoords[i-1].addr.lat,withCoords[i-1].addr.lng,withCoords[i].addr.lat,withCoords[i].addr.lng);
+              rs.km+=km; rs.kmDays++;
+              driversInvolved.forEach(did=>{ if(driverStats[did]) driverStats[did].km+=km/driversInvolved.size; });
+            }
+          }
+        }
+        const avg=arr=>arr.length?arr.reduce((a,v)=>a+v,0)/arr.length:0;
+        const totalKm=Object.values(routeStats).reduce((a,r)=>a+r.km,0);
+        const totalKmDays=Object.values(routeStats).reduce((a,r)=>a+r.kmDays,0);
+        const costPerKm=n(state.settings.costPerKm);
+        const activeDays=Object.keys(activeDriversByDate);
+        const driverRanking=Object.entries(driverStats).map(([id,d])=>({
+          id, name:driverName(id), completed:d.completed, failed:d.failed,
+          successRate:(d.completed+d.failed)?d.completed/(d.completed+d.failed):0,
+          avgMinutes:avg(d.durations), km:d.km, routesWorked:d.routesWorked.size
+        })).sort((a,b)=>b.completed-a.completed);
+        const routeRanking=Object.entries(routeStats).map(([id,r])=>({
+          id, name:r.name, completed:r.completed, failed:r.failed, scheduled:r.scheduled,
+          successRate:(r.completed+r.failed)?r.completed/(r.completed+r.failed):0,
+          avgMinutes:avg(r.durations), avgKm:r.kmDays?r.km/r.kmDays:0, avgClients:avg(r.clientsPerDay)
+        })).sort((a,b)=>b.completed-a.completed);
+        const bySpeed=driverRanking.filter(d=>d.avgMinutes>0).sort((a,b)=>a.avgMinutes-b.avgMinutes);
+        const weeks=[];
+        dates.forEach((date,i)=>{ const wi=Math.floor(i/7); weeks[wi] ||= {label:`Semana ${wi+1}`, count:0, start:date}; weeks[wi].count+=dailyDelivered[date]||0; });
+        return {
+          dates, totalScheduled, totalCompleted, totalFailed,
+          successRate: (totalCompleted+totalFailed)?totalCompleted/(totalCompleted+totalFailed):0,
+          pendingRate: totalScheduled?Math.max(0,totalScheduled-totalCompleted-totalFailed)/totalScheduled:0,
+          avgRouteMinutes: avg(routeDurations.map(x=>x.minutes)),
+          minRoute: routeDurations.length?routeDurations.reduce((a,b)=>a.minutes<b.minutes?a:b):null,
+          maxRoute: routeDurations.length?routeDurations.reduce((a,b)=>a.minutes>b.minutes?a:b):null,
+          avgGapMinutes: avg(gapMinutes),
+          avgClientsPerRoute: avg(Object.values(routeStats).flatMap(r=>r.clientsPerDay)),
+          totalKm, avgKmPerRouteDay: totalKmDays?totalKm/totalKmDays:0, costPerKm, estCost: totalKm*costPerKm,
+          avgCostPerRoute: totalKmDays?(totalKm/totalKmDays)*costPerKm:0,
+          avgActiveDriversPerDay: avg(activeDays.map(d=>activeDriversByDate[d].size)),
+          driverRanking, routeRanking,
+          fastestDriver: bySpeed[0]||null, slowestDriver: bySpeed.length?bySpeed[bySpeed.length-1]:null,
+          weeklyTrend: weeks
+        };
+      }
+      function metricsFilterBar(m){
+        const preset=ui.metrics.preset;
+        return `<div class="toolbar" style="flex-wrap:wrap">
+          <label class="field">Periodo<select id="metrics-preset">
+            <option value="week" ${preset==='week'?'selected':''}>Esta semana</option>
+            <option value="month" ${preset==='month'?'selected':''}>Este mes</option>
+            <option value="last30" ${preset==='last30'?'selected':''}>Últimos 30 días</option>
+            <option value="last90" ${preset==='last90'?'selected':''}>Últimos 90 días</option>
+            <option value="custom" ${preset==='custom'?'selected':''}>Rango personalizado</option>
+          </select></label>
+          <label class="field" ${preset==='custom'?'':'hidden'} id="metrics-start-wrap">Desde<div class="date-input-wrap"><input type="date" id="metrics-start" value="${ui.metrics.start}"></div></label>
+          <label class="field" ${preset==='custom'?'':'hidden'} id="metrics-end-wrap">Hasta<div class="date-input-wrap"><input type="date" id="metrics-end" value="${ui.metrics.end}"></div></label>
+          <label class="field">Ruta<select id="metrics-route">${options(state.routes,ui.metrics.routeId,'Todas las rutas')}</select></label>
+          <label class="field">Driver<select id="metrics-driver">${options(state.drivers,ui.metrics.driverId,'Todos los drivers')}</select></label>
+          <label class="field" style="width:150px">Costo por km (Bs)${isAdmin()?`<input type="number" min="0" step="0.01" id="metrics-cost-km" value="${n(state.settings.costPerKm)}">`:`<div class="field-locked">${n(state.settings.costPerKm).toFixed(2)}</div>`}</label>
+          <span class="spacer"></span>
+          <button class="outline" data-action="export-metrics">Exportar Excel</button>
+        </div>
+        <div class="toolbar" style="flex-wrap:wrap">
+          <label class="field" style="display:flex;align-items:center;gap:6px;width:auto;flex-direction:row"><input type="checkbox" id="metrics-compare-toggle" ${ui.metrics.compare.enabled?'checked':''}> <span>Comparar con otro periodo</span></label>
+          ${ui.metrics.compare.enabled?`<label class="field">Comparar desde<div class="date-input-wrap"><input type="date" id="metrics-compare-start" value="${ui.metrics.compare.start}"></div></label><label class="field">Comparar hasta<div class="date-input-wrap"><input type="date" id="metrics-compare-end" value="${ui.metrics.compare.end}"></div></label><span class="muted" style="align-self:center;font-size:12px">Puedes comparar cualquier día, semana o mes contra otro (ej.: esta semana vs. la anterior, este mes vs. el mismo mes del año pasado).</span>`:''}
+        </div>`;
+      }
+      function metricsKpiCards(m){
+        const pct=x=>`${(x*100).toFixed(0)}%`;
+        const mins=x=>x?`${Math.floor(x/60)}h ${Math.round(x%60)}m`:'—';
+        const items=[
+          ['Rutas/día con datos', m.routeRanking.length, ''],
+          ['Entregas completadas', m.totalCompleted, `de ${m.totalScheduled} programadas`],
+          ['% Entregas fallidas', pct(m.totalScheduled?m.totalFailed/m.totalScheduled:0), ''],
+          ['Ratio completadas vs pendientes', pct(m.successRate), `pendientes ${pct(m.pendingRate)}`],
+          ['Tiempo promedio por ruta', mins(m.avgRouteMinutes), 'inicio → última entrega'],
+          ['Tiempo de espera entre paradas', m.avgGapMinutes?`${Math.round(m.avgGapMinutes)} min`:'—', 'promedio'],
+          ['Clientes promedio por ruta', m.avgClientsPerRoute.toFixed(1), ''],
+          ['Km estimados (total periodo)', m.totalKm.toFixed(1), 'línea recta entre direcciones'],
+          ['Km promedio por ruta/día', m.avgKmPerRouteDay.toFixed(1), ''],
+          ['Costo estimado del periodo', m.costPerKm?`Bs ${m.estCost.toFixed(2)}`:'—', m.costPerKm?`Bs ${m.costPerKm}/km`:'define el costo por km arriba'],
+          ['Costo promedio por ruta', m.costPerKm?`Bs ${m.avgCostPerRoute.toFixed(2)}`:'—', ''],
+          ['Drivers activos promedio/día', m.avgActiveDriversPerDay.toFixed(1), '']
+        ];
+        return `<div class="summary-grid" style="grid-template-columns:repeat(4,minmax(150px,1fr))">${items.map(([label,val,sub])=>`<div class="card metric"><div class="muted" style="font-size:11px">${esc(label)}</div><strong>${val}</strong>${sub?`<small class="muted" style="display:block">${esc(sub)}</small>`:''}</div>`).join('')}</div>`;
+      }
+      function metricsTrendChart(m){
+        const max=Math.max(1,...m.weeklyTrend.map(w=>w.count));
+        const bars=m.weeklyTrend.map(w=>`<div class="metrics-bar-col"><div class="metrics-bar" style="height:${Math.round((w.count/max)*100)}%" title="${w.label}: ${w.count} entregas"></div><small class="muted">${w.label.replace('Semana ','S')}</small><b style="font-size:11px">${w.count}</b></div>`).join('');
+        return `<div class="card card-pad"><h3 style="margin:0 0 10px;font-size:15px">Tendencia de entregas por semana</h3><div class="metrics-bar-row">${bars||'<p class="muted">Sin datos en el periodo.</p>'}</div></div>`;
+      }
+      function metricsExtremesCard(m){
+        const fmt=r=>r?`${esc(r.routeName)} — ${r.date.split('-').reverse().join('/')} (${Math.floor(r.minutes/60)}h ${Math.round(r.minutes%60)}m)`:'—';
+        return `<div class="card card-pad">
+          <h3 style="margin:0 0 10px;font-size:15px">Ranking de drivers y extremos de ruta</h3>
+          <p style="margin:2px 0"><b>Driver más rápido:</b> ${m.fastestDriver?`${esc(m.fastestDriver.name)} (${Math.round(m.fastestDriver.avgMinutes)} min/ruta prom.)`:'—'}</p>
+          <p style="margin:2px 0"><b>Driver más lento:</b> ${m.slowestDriver?`${esc(m.slowestDriver.name)} (${Math.round(m.slowestDriver.avgMinutes)} min/ruta prom.)`:'—'}</p>
+          <p style="margin:2px 0"><b>Ruta más rápida registrada:</b> ${fmt(m.minRoute)}</p>
+          <p style="margin:2px 0"><b>Ruta más lenta registrada:</b> ${fmt(m.maxRoute)}</p>
+        </div>`;
+      }
+      function heatColor(rate){
+        // Verde = buena tasa de éxito, rojo = mala. Solo cambia el fondo de la celda (mini "mapa de calor" tabular).
+        if(rate>=0.9) return 'background:#dff7ed';
+        if(rate>=0.7) return 'background:#fff2d9';
+        return 'background:#ffe1e6';
+      }
+      function metricsDriverTable(m){
+        const rows=m.driverRanking.map(d=>`<tr><td><b>${esc(d.name)}</b></td><td>${d.completed}</td><td>${d.failed}</td><td style="${heatColor(d.successRate)}">${(d.successRate*100).toFixed(0)}%</td><td>${d.avgMinutes?Math.round(d.avgMinutes)+' min':'—'}</td><td>${d.km?d.km.toFixed(1):'—'}</td><td>${d.routesWorked}</td></tr>`).join('');
+        return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Driver</th><th>Completadas</th><th>Fallidas</th><th>% éxito</th><th>Tiempo prom./ruta</th><th>Km estimados</th><th>Rutas trabajadas</th></tr></thead><tbody>${rows||'<tr><td class="empty" colspan="7">Sin datos en el periodo.</td></tr>'}</tbody></table></div>`;
+      }
+      function metricsRouteTable(m){
+        const rows=m.routeRanking.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td>${r.scheduled}</td><td>${r.completed}</td><td>${r.failed}</td><td style="${heatColor(r.successRate)}">${(r.successRate*100).toFixed(0)}%</td><td>${r.avgMinutes?Math.round(r.avgMinutes)+' min':'—'}</td><td>${r.avgKm?r.avgKm.toFixed(1):'—'}</td><td>${r.avgClients.toFixed(1)}</td></tr>`).join('');
+        return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Ruta</th><th>Programados</th><th>Completados</th><th>Fallidos</th><th>% éxito</th><th>Tiempo prom.</th><th>Km prom./día</th><th>Clientes prom./día</th></tr></thead><tbody>${rows||'<tr><td class="empty" colspan="8">Sin datos en el periodo.</td></tr>'}</tbody></table></div>`;
+      }
+      function metricsComparisonCard(a,b){
+        const pct=x=>`${(x*100).toFixed(0)}%`;
+        const rows=[
+          ['Entregas completadas', a.totalCompleted, b.totalCompleted],
+          ['% éxito', pct(a.successRate), pct(b.successRate), a.successRate, b.successRate],
+          ['Tiempo prom. por ruta (min)', Math.round(a.avgRouteMinutes), Math.round(b.avgRouteMinutes)],
+          ['Km estimados (total)', a.totalKm.toFixed(1), b.totalKm.toFixed(1)],
+          ['Costo estimado (Bs)', a.estCost.toFixed(2), b.estCost.toFixed(2)],
+          ['Clientes prom. por ruta', a.avgClientsPerRoute.toFixed(1), b.avgClientsPerRoute.toFixed(1)]
+        ];
+        const delta=(av,bv,rawA,rawB)=>{
+          const x=rawA!=null?rawA:Number(av), y=rawB!=null?rawB:Number(bv);
+          if(isNaN(x)||isNaN(y)||!y) return '<span class="muted">—</span>';
+          const d=((x-y)/y*100);
+          if(Math.abs(d)<1) return '<span class="muted">≈ igual</span>';
+          return d>0?`<span style="color:#087354">▲ ${d.toFixed(0)}%</span>`:`<span style="color:#a3123a">▼ ${Math.abs(d).toFixed(0)}%</span>`;
+        };
+        const trs=rows.map(([label,av,bv,rawA,rawB])=>`<tr><td>${esc(label)}</td><td>${av}</td><td>${bv}</td><td>${delta(av,bv,rawA,rawB)}</td></tr>`).join('');
+        return `<div class="card card-pad" style="margin-bottom:16px"><h3 style="margin:0 0 6px;font-size:15px">Comparación de periodos</h3><p class="muted" style="margin:0 0 10px;font-size:12px">Actual: ${ui.metrics.start.split('-').reverse().join('/')} a ${ui.metrics.end.split('-').reverse().join('/')} · Comparado: ${ui.metrics.compare.start.split('-').reverse().join('/')} a ${ui.metrics.compare.end.split('-').reverse().join('/')}</p><div class="sheet table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>KPI</th><th>Periodo actual</th><th>Periodo comparado</th><th>Variación</th></tr></thead><tbody>${trs}</tbody></table></div></div>`;
+      }
+      let metricsLastCompare=null;
+      async function renderMetrics(){
+        if(!canAccessPage('metrics')) return;
+        const el=$('#metrics-page');
+        el.innerHTML=pageHead('Métricas','Estadísticas de reparto: tiempos, cumplimiento, kilómetros estimados y desempeño de drivers y rutas.')+metricsFilterBar()+'<p class="muted">Calculando…</p>';
+        bindMetricsFilters();
+        const {start,end,routeId,driverId,compare}=ui.metrics;
+        const [m,mB]=await Promise.all([
+          computeMetrics(start,end,routeId,driverId),
+          compare.enabled && compare.start && compare.end ? computeMetrics(compare.start,compare.end,routeId,driverId) : Promise.resolve(null)
+        ]);
+        metricsLastComputed=m; metricsLastCompare=mB;
+        if(ui.page!=='metrics') return; // el usuario navegó a otra página mientras calculaba
+        el.innerHTML=pageHead('Métricas','Estadísticas de reparto: tiempos, cumplimiento, kilómetros estimados y desempeño de drivers y rutas.')+metricsFilterBar()
+          +metricsKpiCards(m)
+          +(mB?metricsComparisonCard(m,mB):'')
+          +`<div class="two-col" style="display:grid;grid-template-columns:1.3fr .7fr;gap:16px;margin-bottom:16px">${metricsTrendChart(m)}${metricsExtremesCard(m)}</div>`
+          +`<h3 style="font-size:15px;margin:6px 0 8px">Desempeño por driver</h3>`+metricsDriverTable(m)
+          +`<h3 style="font-size:15px;margin:16px 0 8px">Desempeño por ruta</h3>`+metricsRouteTable(m)
+          +`<p class="muted" style="margin-top:14px;font-size:12px">Los kilómetros son una estimación en línea recta entre las direcciones de los clientes (no siguen calles reales). Métricas de accesos al portal web de clientes y uso de links de WhatsApp/Maps no están disponibles todavía: requieren un módulo de analítica del portal que esta versión no incluye.</p>`;
+        bindMetricsFilters();
+      }
+      function bindMetricsFilters(){
+        const presetSel=$('#metrics-preset');
+        if(presetSel) presetSel.onchange=e=>{
+          ui.metrics.preset=e.target.value;
+          if(e.target.value!=='custom'){ const r=metricsPresetRange(e.target.value); ui.metrics.start=r.start; ui.metrics.end=r.end; }
+          renderMetrics();
+        };
+        const startI=$('#metrics-start'), endI=$('#metrics-end');
+        if(startI) startI.onchange=e=>{ ui.metrics.start=e.target.value; renderMetrics(); };
+        if(endI) endI.onchange=e=>{ ui.metrics.end=e.target.value; renderMetrics(); };
+        const routeSel=$('#metrics-route'); if(routeSel) routeSel.onchange=e=>{ ui.metrics.routeId=e.target.value; renderMetrics(); };
+        const driverSel=$('#metrics-driver'); if(driverSel) driverSel.onchange=e=>{ ui.metrics.driverId=e.target.value; renderMetrics(); };
+        const costI=$('#metrics-cost-km'); if(costI) costI.onchange=async e=>{ state.settings.costPerKm=n(e.target.value); const saved=await save(); renderMetrics(); notice(saved?'Costo por km actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved); };
+        const cmpToggle=$('#metrics-compare-toggle');
+        if(cmpToggle) cmpToggle.onchange=e=>{
+          ui.metrics.compare.enabled=e.target.checked;
+          if(e.target.checked && (!ui.metrics.compare.start || !ui.metrics.compare.end)){
+            const r=shiftedPreviousRange(ui.metrics.start, ui.metrics.end);
+            ui.metrics.compare.start=r.start; ui.metrics.compare.end=r.end;
+          }
+          renderMetrics();
+        };
+        const cmpStart=$('#metrics-compare-start'); if(cmpStart) cmpStart.onchange=e=>{ ui.metrics.compare.start=e.target.value; renderMetrics(); };
+        const cmpEnd=$('#metrics-compare-end'); if(cmpEnd) cmpEnd.onchange=e=>{ ui.metrics.compare.end=e.target.value; renderMetrics(); };
+      }
+      async function exportMetrics(){
+        const m=metricsLastComputed; if(!m){ notice('Espera a que se calculen las métricas.',true); return; }
+        if(!await ensureExcelJS()){ notice('No se pudo cargar el generador de Excel. Revisa tu conexión e intenta de nuevo.',true); return; }
+        const wb=new ExcelJS.Workbook();
+        wb.creator=state.settings.companyName||APP_CONFIG.companyName;
+        const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
+        const headerFill=(ws)=>ws.getRow(1).eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        const zebra=(ws)=>ws.eachRow((row,i)=>{ if(i===1) return; row.eachCell(cell=>{cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:i%2===0?'FFF3F6FB':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});});
+        const ws1=wb.addWorksheet('Resumen');
+        ws1.columns=[{header:'KPI',key:'k',width:36},{header:'Valor',key:'v',width:24}];
+        [['Periodo',`${ui.metrics.start} a ${ui.metrics.end}`],['Programadas',m.totalScheduled],['Completadas',m.totalCompleted],['Fallidas',m.totalFailed],
+         ['% éxito',(m.successRate*100).toFixed(1)+'%'],['Tiempo promedio por ruta (min)',Math.round(m.avgRouteMinutes)],
+         ['Tiempo de espera entre paradas (min)',Math.round(m.avgGapMinutes)],['Clientes promedio por ruta',m.avgClientsPerRoute.toFixed(1)],
+         ['Km estimados totales',m.totalKm.toFixed(1)],['Km promedio por ruta/día',m.avgKmPerRouteDay.toFixed(1)],
+         ['Costo por km (Bs)',m.costPerKm],['Costo estimado del periodo (Bs)',m.estCost.toFixed(2)],
+         ['Drivers activos promedio/día',m.avgActiveDriversPerDay.toFixed(1)],
+         ['Driver más rápido',m.fastestDriver?`${m.fastestDriver.name} (${Math.round(m.fastestDriver.avgMinutes)} min)`:'—'],
+         ['Driver más lento',m.slowestDriver?`${m.slowestDriver.name} (${Math.round(m.slowestDriver.avgMinutes)} min)`:'—']
+        ].forEach(([k,v])=>ws1.addRow({k,v}));
+        headerFill(ws1); zebra(ws1);
+        const ws2=wb.addWorksheet('Por driver');
+        ws2.columns=[{header:'Driver',key:'name',width:26},{header:'Completadas',key:'completed',width:14},{header:'Fallidas',key:'failed',width:12},{header:'% éxito',key:'rate',width:12},{header:'Tiempo prom. (min)',key:'avg',width:16},{header:'Km estimados',key:'km',width:14},{header:'Rutas trabajadas',key:'routes',width:16}];
+        m.driverRanking.forEach(d=>ws2.addRow({name:d.name,completed:d.completed,failed:d.failed,rate:(d.successRate*100).toFixed(0)+'%',avg:d.avgMinutes?Math.round(d.avgMinutes):'',km:d.km?d.km.toFixed(1):'',routes:d.routesWorked}));
+        headerFill(ws2); zebra(ws2);
+        const ws3=wb.addWorksheet('Por ruta');
+        ws3.columns=[{header:'Ruta',key:'name',width:26},{header:'Programados',key:'scheduled',width:14},{header:'Completados',key:'completed',width:14},{header:'Fallidos',key:'failed',width:12},{header:'% éxito',key:'rate',width:12},{header:'Tiempo prom. (min)',key:'avg',width:16},{header:'Km prom./día',key:'km',width:14},{header:'Clientes prom./día',key:'clients',width:16}];
+        m.routeRanking.forEach(r=>ws3.addRow({name:r.name,scheduled:r.scheduled,completed:r.completed,failed:r.failed,rate:(r.successRate*100).toFixed(0)+'%',avg:r.avgMinutes?Math.round(r.avgMinutes):'',km:r.avgKm?r.avgKm.toFixed(1):'',clients:r.avgClients.toFixed(1)}));
+        headerFill(ws3); zebra(ws3);
+        const ws4=wb.addWorksheet('Tendencia semanal');
+        ws4.columns=[{header:'Semana',key:'label',width:16},{header:'Desde',key:'start',width:14},{header:'Entregas completadas',key:'count',width:20}];
+        m.weeklyTrend.forEach(w=>ws4.addRow(w));
+        headerFill(ws4); zebra(ws4);
+        if(metricsLastCompare){
+          const ws5=wb.addWorksheet('Comparación de periodos');
+          ws5.columns=[{header:'KPI',key:'k',width:30},{header:'Periodo actual',key:'a',width:20},{header:'Periodo comparado',key:'b',width:20}];
+          const mb=metricsLastCompare;
+          [['Rango',`${ui.metrics.start} a ${ui.metrics.end}`,`${ui.metrics.compare.start} a ${ui.metrics.compare.end}`],
+           ['Entregas completadas',m.totalCompleted,mb.totalCompleted],
+           ['% éxito',(m.successRate*100).toFixed(1)+'%',(mb.successRate*100).toFixed(1)+'%'],
+           ['Tiempo prom. por ruta (min)',Math.round(m.avgRouteMinutes),Math.round(mb.avgRouteMinutes)],
+           ['Km estimados',m.totalKm.toFixed(1),mb.totalKm.toFixed(1)],
+           ['Costo estimado (Bs)',m.estCost.toFixed(2),mb.estCost.toFixed(2)],
+           ['Clientes prom. por ruta',m.avgClientsPerRoute.toFixed(1),mb.avgClientsPerRoute.toFixed(1)]
+          ].forEach(([k,a,b])=>ws5.addRow({k,a,b}));
+          headerFill(ws5); zebra(ws5);
+        }
+        const buffer=await wb.xlsx.writeBuffer();
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+        a.download=`metricas-${ui.metrics.start}-a-${ui.metrics.end}.xlsx`; a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+      }
+      // ===================== FIN MÉTRICAS =====================
+
       function renderPayroll(){ if(!canAccessPage('payroll')) return; if(pageNeedsPremium('payroll')){ $('#payroll-page').innerHTML=pageHead('Sueldos','Cálculo de tarifas por driver.')+premiumLockHtml('Sueldos'); return; } const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const dayValues=d=>dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const rows=d=>{const values=dayValues(d);const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
         const dayTotals=dates.map((date,i)=>list.reduce((sum,d)=>sum+n(dayValues(d)[i]),0));
         const grandTotal=dayTotals.reduce((a,v)=>a+v,0);
@@ -2196,7 +2527,7 @@
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
-        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"export-metrics":exportMetrics,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
           const scope=$('#export-scope')?.value||'all';
           if(scope!=='all'){
             const scopes={clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};
@@ -2230,7 +2561,7 @@
           "add-user":isAdmin,"edit-user":isAdmin,"delete-user":isAdmin,"add-role":isAdmin,"edit-role":isAdmin,"delete-role":isAdmin,
           "process-day":()=>canEditPage('dispatch'),"unprocess-day":()=>canEditPage('dispatch'),"toggle-day-pause":()=>canEditPage('dispatch'),
           "mark-delivered":()=>canEditPage('delivery'),"mark-not-delivered":()=>canEditPage('delivery'),"edit-delivery":()=>canEditPage('delivery'),"clear-delivery":()=>canEditPage('delivery'),"view-delivery":()=>canAccessPage('delivery'),"open-route-map":()=>canAccessPage('delivery'),
-          "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin,"refresh-audit":()=>canAccessPage('audit'),"load-all-audit":()=>canAccessPage('audit')
+          "remove-logo":isAdmin,"remove-ad-image":isAdmin,"remove-item-icon":isAdmin,"export-json":isAdmin,"import-json":isAdmin,"refresh-audit":()=>canAccessPage('audit'),"load-all-audit":()=>canAccessPage('audit'),"export-metrics":()=>canAccessPage('metrics')
         };
         if(ACTION_PERMS[action] && !ACTION_PERMS[action]()){ notice('No tienes permiso para hacer esto.',true); return; }
         map[action]?.();});
@@ -2305,9 +2636,72 @@
       (() => {
         const LOCATION_CHANNEL_NAME = 'catering-driver-location';
         const NOMINATIM_DELAY_MS = 1100; // respeta el límite de ~1 solicitud/seg de Nominatim
-        let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null, routeSelectWrap=null;
+        let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null, routeSelectWrap=null, refreshRouteBtn=null;
         let map=null, markersLayer=null, driverMarker=null, routeLayer=null, driverPos=null, lastClientLatlngs=[];
         let locationChannel=null, channelBound=false, currentRouteId='';
+
+        // -----------------------------------------------------------------
+        // Ruta real por calles (OSRM, servidor público y gratuito de
+        // demostración: router.project-osrm.org). Es gratis y no pide API
+        // key, pero según sus propios términos está pensado para pruebas,
+        // no para tráfico de producción pesado — por eso el diseño de abajo
+        // llama a la API lo menos posible:
+        //  1) La ruta por calles se calcula UNA sola vez por las paradas de
+        //     la ruta (no cambia aunque el driver se mueva), y se guarda en
+        //     caché en localStorage. Como las rutas de reparto casi siempre
+        //     repiten las mismas direcciones día a día, la mayoría de las
+        //     veces la respuesta sale de la caché y no se llama a la API.
+        //  2) La posición en vivo del driver NO recalcula la ruta completa:
+        //     solo se dibuja un conector recto (barato, sin API) desde su
+        //     punto actual hasta la siguiente parada pendiente.
+        //  3) Hay un botón "↻ Ruta" para forzar recalcular ignorando la
+        //     caché (por si una calle cambió).
+        // Si el uso crece mucho, lo más sano a futuro es un servidor OSRM
+        // propio (también gratis y de código abierto, se puede correr en
+        // un VPS barato) en vez de depender del demo público. Mapbox/Google
+        // Directions son la alternativa de pago si se necesita más
+        // capacidad o mejores tiempos estimados de tráfico.
+        const ROAD_ROUTE_CACHE_KEY = `${APP_CONFIG.storagePrefix}-road-route-cache-v1`;
+        const ROAD_ROUTE_CACHE_MAX = 300;
+        function loadRoadRouteCache(){ try{ return JSON.parse(localStorage.getItem(ROAD_ROUTE_CACHE_KEY)) || {}; } catch(_){ return {}; } }
+        function saveRoadRouteCache(cache){
+          const keys=Object.keys(cache);
+          if (keys.length>ROAD_ROUTE_CACHE_MAX){
+            keys.sort((a,b) => (cache[a].cachedAt||0) - (cache[b].cachedAt||0));
+            keys.slice(0, keys.length-ROAD_ROUTE_CACHE_MAX).forEach(k => delete cache[k]);
+          }
+          try{ localStorage.setItem(ROAD_ROUTE_CACHE_KEY, JSON.stringify(cache)); } catch(_){}
+        }
+        function roadRouteKey(pts){ return pts.map(p => `${p[0].toFixed(5)},${p[1].toFixed(5)}`).join('|'); }
+        async function fetchRoadRoute(pts, force){
+          if (pts.length<2) return null;
+          const key=roadRouteKey(pts);
+          const cache=loadRoadRouteCache();
+          if (!force && cache[key]) return cache[key];
+          try {
+            const coordsParam=pts.map(p => `${p[1]},${p[0]}`).join(';'); // OSRM espera lng,lat
+            const url=`https://router.project-osrm.org/route/v1/driving/${coordsParam}?overview=full&geometries=geojson`;
+            const res=await fetch(url);
+            if (!res.ok) return null;
+            const data=await res.json();
+            const route=data?.routes?.[0];
+            if (!route) return null;
+            const latlngs=route.geometry.coordinates.map(([lng,lat]) => [lat,lng]);
+            const result={ latlngs, km: route.distance/1000, minutes: route.duration/60, cachedAt: Date.now() };
+            cache[key]=result; saveRoadRouteCache(cache);
+            return result;
+          } catch(_){ return null; }
+        }
+        let lastRoadKey=null, lastRoadResult=null;
+        async function computeStopsRoute(force){
+          if (lastClientLatlngs.length<2) return null;
+          const key=roadRouteKey(lastClientLatlngs);
+          if (!force && lastRoadKey===key && lastRoadResult) return lastRoadResult;
+          const result=await fetchRoadRoute(lastClientLatlngs, force);
+          lastRoadKey=key; lastRoadResult=result;
+          return result;
+        }
+        // -----------------------------------------------------------------
 
         function ensureStyles(){
           if (document.getElementById('driver-map-style')) return;
@@ -2319,6 +2713,7 @@
             #map-dialog .mmap-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
             #map-dialog .mmap-head h2{margin:0;font-size:16px;flex:1 1 auto;color:var(--text)}
             #map-dialog .mmap-close{padding:8px 16px;font-size:13px;min-height:auto;flex:0 0 auto}
+            #map-dialog .mmap-refresh-route{padding:8px 12px;font-size:12.5px;min-height:auto;flex:0 0 auto}
             #map-dialog .mmap-status{padding:6px 16px;font-size:12.5px;color:var(--text);opacity:.7;border-bottom:1px solid var(--line)}
             #map-dialog .mmap-legend{padding:4px 16px;font-size:11.5px;color:var(--text);opacity:.6}
             #map-dialog .mmap-body{position:relative;width:100%;height:calc(100% - 96px)}
@@ -2336,12 +2731,14 @@
           if (dialog) return;
           dialog=document.createElement('dialog');
           dialog.id='map-dialog';
-          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de reparto</h2><div id="mmap-route-select-wrap" hidden></div><button type="button" class="mmap-close danger" aria-label="Cerrar">Cerrar</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
+          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de reparto</h2><div id="mmap-route-select-wrap" hidden></div><button type="button" class="mmap-refresh-route outline" title="Recalcular la ruta por calles ignorando la caché guardada">↻ Ruta</button><button type="button" class="mmap-close danger" aria-label="Cerrar">Cerrar</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
           document.body.appendChild(dialog);
           mapBodyEl=dialog.querySelector('#mmap-body');
           statusEl=dialog.querySelector('#mmap-status');
           legendEl=dialog.querySelector('#mmap-legend');
           routeSelectWrap=dialog.querySelector('#mmap-route-select-wrap');
+          refreshRouteBtn=dialog.querySelector('.mmap-refresh-route');
+          refreshRouteBtn.addEventListener('click', () => drawRouteLine(true));
           dialog.querySelector('.mmap-close').addEventListener('click', () => dialog.close());
           dialog.addEventListener('close', teardown);
           dialog.addEventListener('cancel', () => dialog.close());
@@ -2402,22 +2799,43 @@
           return (toDeg(Math.atan2(y,x))+360)%360;
         }
 
-        // Dibuja (o redibuja) la polilínea de la ruta con flechas de
-        // dirección. Si ya llegó la posición del driver por broadcast, la
-        // línea arranca ahí; si no, arranca en la primera parada (se vuelve
-        // a llamar cuando llega el primer broadcast, ver drawDriverMarker).
-        function drawRouteLine(){
+        // Dibuja (o redibuja) la ruta. Prioriza la ruta REAL por calles
+        // (OSRM, ver caché arriba); si no se pudo calcular (sin conexión,
+        // servicio caído, etc.) cae de vuelta a la línea recta de
+        // referencia con flechas, como antes. La posición en vivo del
+        // driver se dibuja aparte como un conector recto y barato hasta la
+        // siguiente parada — no dispara un recálculo de ruta por calles.
+        let routeRequestToken=0;
+        async function drawRouteLine(force){
+          const myToken=++routeRequestToken;
           if (routeLayer){ routeLayer.remove(); routeLayer=null; }
           if (!map || !window.L) return;
-          const pts = driverPos ? [[driverPos.lat,driverPos.lng], ...lastClientLatlngs] : lastClientLatlngs;
-          if (pts.length<2) return;
+          if (lastClientLatlngs.length<2){
+            if (driverPos && lastClientLatlngs.length===1){
+              routeLayer=window.L.layerGroup().addTo(map);
+              window.L.polyline([[driverPos.lat,driverPos.lng], lastClientLatlngs[0]], { color:'#f97316', weight:3, opacity:.8, dashArray:'4,6' }).addTo(routeLayer);
+            }
+            return;
+          }
           routeLayer=window.L.layerGroup().addTo(map);
-          window.L.polyline(pts, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(routeLayer);
-          for (let i=0;i<pts.length-1;i++){
-            const [lat1,lng1]=pts[i], [lat2,lng2]=pts[i+1];
-            const brng=bearingDeg(lat1,lng1,lat2,lng2);
-            const icon=window.L.divIcon({ className:'', html:`<div class="mc-arrow" style="transform:rotate(${brng}deg)"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
-            window.L.marker([(lat1+lat2)/2, (lng1+lng2)/2], { icon, interactive:false }).addTo(routeLayer);
+          const road=await computeStopsRoute(force);
+          if (myToken!==routeRequestToken) return; // se pidió otra ruta mientras esperábamos esta
+          if (!routeLayer || !map) return; // el mapa se cerró mientras esperábamos
+          if (road && road.latlngs?.length){
+            window.L.polyline(road.latlngs, { color:'#0d6efd', weight:5, opacity:.75 }).addTo(routeLayer);
+            legendEl.textContent=`Números = orden del cliente. Línea azul = ruta sugerida por calles (${road.km.toFixed(1)} km, ~${Math.round(road.minutes)} min · OpenStreetMap/OSRM, puede diferir del recorrido real).`;
+          } else {
+            window.L.polyline(lastClientLatlngs, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(routeLayer);
+            for (let i=0;i<lastClientLatlngs.length-1;i++){
+              const [lat1,lng1]=lastClientLatlngs[i], [lat2,lng2]=lastClientLatlngs[i+1];
+              const brng=bearingDeg(lat1,lng1,lat2,lng2);
+              const icon=window.L.divIcon({ className:'', html:`<div class="mc-arrow" style="transform:rotate(${brng}deg)"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
+              window.L.marker([(lat1+lat2)/2, (lng1+lng2)/2], { icon, interactive:false }).addTo(routeLayer);
+            }
+            legendEl.textContent='Números = orden del cliente. No se pudo calcular la ruta por calles (sin conexión al servicio de rutas); se muestra una línea recta de referencia.';
+          }
+          if (driverPos && lastClientLatlngs.length){
+            window.L.polyline([[driverPos.lat,driverPos.lng], lastClientLatlngs[0]], { color:'#f97316', weight:3, opacity:.8, dashArray:'4,6' }).addTo(routeLayer);
           }
         }
 
@@ -2440,9 +2858,9 @@
             latlngs.push([addr.lat,addr.lng]);
           });
           lastClientLatlngs=latlngs;
+          legendEl.textContent=`Números = orden del cliente. Calculando ruta por calles…${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
           drawRouteLine();
           if (latlngs.length) map.fitBounds(window.L.latLngBounds(latlngs).pad(0.2)); else map.setView([-16.5,-68.15],12);
-          legendEl.textContent=`Números = orden del cliente. Línea punteada = ruta sugerida en línea recta (no sigue calles).${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
           setStatus(withCoords.length ? `${withCoords.length}/${list.length} puntos en el mapa.` : 'No se pudo ubicar a ningún cliente en el mapa todavía.');
           setTimeout(() => map && map.invalidateSize(), 50);
         }
@@ -2481,6 +2899,7 @@
         function teardown(){
           if (map){ map.remove(); map=null; }
           driverMarker=null; markersLayer=null; routeLayer=null; driverPos=null; lastClientLatlngs=[];
+          lastRoadKey=null; lastRoadResult=null;
         }
 
         function populateRouteSelector(activeRouteId){
