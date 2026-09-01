@@ -1847,7 +1847,7 @@
         const trs=rows.map(([label,av,bv,rawA,rawB])=>`<tr><td>${esc(label)}</td><td>${av}</td><td>${bv}</td><td>${delta(av,bv,rawA,rawB)}</td></tr>`).join('');
         return `<div class="card card-pad" style="margin-bottom:16px"><h3 style="margin:0 0 6px;font-size:15px">Comparación de periodos</h3><p class="muted" style="margin:0 0 10px;font-size:12px">Actual: ${ui.metrics.start.split('-').reverse().join('/')} a ${ui.metrics.end.split('-').reverse().join('/')} · Comparado: ${ui.metrics.compare.start.split('-').reverse().join('/')} a ${ui.metrics.compare.end.split('-').reverse().join('/')}</p><div class="sheet table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>KPI</th><th>Periodo actual</th><th>Periodo comparado</th><th>Variación</th></tr></thead><tbody>${trs}</tbody></table></div></div>`;
       }
-      let metricsLastCompare=null;
+      let metricsLastComputed=null, metricsLastCompare=null;
       async function renderMetrics(){
         if(!canAccessPage('metrics')) return;
         const el=$('#metrics-page');
