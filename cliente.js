@@ -102,6 +102,7 @@
         </div>
         <div id="return-date-wrap" class="mb-3" hidden><label class="form-label" for="return-date">¿Qué día quieres reactivarla?</label><input class="form-control" type="date" id="return-date" min="${next}" value="" disabled></div>
         <button class="btn btn-primary" id="pause">Confirmar pausa</button><div class="alert alert-${error?'danger':'warning'} mt-3 mb-0 ${message?'':'d-none'}" id="message">${esc(message)}${showSupport&&whatsappNumber()?` <a class="alert-link" href="${wa(`Hola, soy ${client.name}. Necesito solicitar una pausa de mi servicio.`)}" target="_blank" rel="noopener">Contactar por WhatsApp</a>`:''}</div></div></article>`}</div>
+        ${(client.addresses||[]).length>=2?`<div class="col-12"><article class="card shadow-sm border-0"><div class="card-body p-4"><h2 class="h5 mb-1">📍 Dirección de mañana</h2><p class="text-secondary">Elige a qué dirección quieres que te llegue el pedido de mañana (${next.split('-').reverse().join('/')}). Puedes confirmarlo hasta las <b>22:00</b> de hoy.</p><div class="row g-2 align-items-end"><div class="col-sm-8"><label class="form-label" for="tomorrow-address">Dirección para mañana</label><select class="form-select" id="tomorrow-address">${(client.addresses||[]).map(a=>`<option value="${esc(a.id)}" ${(currentAddressOverrideId(next)||client.activeAddressId)===a.id?'selected':''}>${esc(a.address||'Sin nombre')}</option>`).join('')}</select></div><div class="col-sm-4"><button class="btn btn-primary w-100" id="save-tomorrow-address">Guardar para mañana</button></div></div>${currentAddressOverrideId(next)?`<p class="text-secondary small mt-2 mb-0">Ya elegiste una dirección distinta para mañana. Si no cambias nada, se usará esa.</p>`:''}<div class="alert mt-3 mb-0 d-none" id="address-feedback"></div></div></article></div>`:''}
         <div class="col-12"><article class="card shadow-sm border-0"><div class="card-body p-4"><h2 class="h5">Déjanos un mensaje</h2><p class="text-secondary">¿Prefieres no escribir por WhatsApp? Cuéntanos qué necesitas (ej.: "Llámenme mañana para cambiar de plan") y el equipo te contacta.</p><textarea class="form-control mb-3" id="client-note-text" rows="2" placeholder="Escribe tu mensaje…"></textarea><button class="btn btn-primary" id="send-note">Enviar mensaje</button><div class="alert mt-3 mb-0 d-none" id="note-feedback"></div></div></article></div>
         ${(branding.instagramUrl||APP_CONFIG.instagramUrl)?`<div class="col-12"><a class="instagram d-flex align-items-center gap-3 rounded-4 p-3 shadow-sm" href="${esc(branding.instagramUrl||APP_CONFIG.instagramUrl)}" target="_blank" rel="noopener"><span class="fs-3">◎</span><span><b class="d-block">Seguinos en Instagram</b><small>${esc(branding.instagramHandle||APP_CONFIG.instagramHandle)} · novedades, menús y bienestar</small></span></a></div>`:''}</section>`;
         $('#theme').value=theme;$('#theme').onchange=e=>{saveClientTheme(e.target.value);render();};$('#logout').onclick=()=>{sessionStorage.removeItem(CLIENT_SESSION_KEY);location.href='./login.html';};
@@ -116,6 +117,30 @@
         $('#pause')?.addEventListener('click',requestPause);
         $('#resume')?.addEventListener('click',requestResume);
         $('#send-note')?.addEventListener('click',sendClientNote);
+        $('#save-tomorrow-address')?.addEventListener('click',requestAddressOverride);
+      }
+      // Dirección elegida por el cliente para una fecha puntual (si la hay),
+      // guardada en client.addressOverrides=[{date,addressId}] por la RPC
+      // set_client_address_override. No pisa client.activeAddressId (la
+      // dirección "de siempre" que administra el panel de operaciones) ni el
+      // horario semanal fijo que arma el admin — es solo un cambio puntual.
+      function currentAddressOverrideId(date){
+        return (client.addressOverrides||[]).find(o=>o.date===date)?.addressId||'';
+      }
+      async function requestAddressOverride(){
+        const fb=$('#address-feedback'),btn=$('#save-tomorrow-address'),sel=$('#tomorrow-address');
+        if(!sel||!sel.value){return;}
+        const now=new Date();
+        if(now.getHours()>=22){render('Ya pasó el horario para cambiar la dirección de mañana. Ponte en contacto con Atención al Cliente.',true,true);return;}
+        const next=nextWorkDay(workDate());
+        btn.disabled=true;
+        const result=await window.SupabaseDB?.rpc('set_client_address_override',{p_client_id:client.id,p_address_id:sel.value,p_date:next});
+        btn.disabled=false;
+        if(!result){fb.className='alert alert-danger mt-3 mb-0';fb.classList.remove('d-none');fb.textContent='No se pudo guardar. Intenta nuevamente o contáctanos por WhatsApp.';return;}
+        client.addressOverrides=Array.isArray(result)?result:(client.addressOverrides||[]).filter(o=>o.date!==next).concat([{date:next,addressId:sel.value}]);
+        localStorage.setItem(CLIENT_ROW_KEY,JSON.stringify(client));
+        window.SupabaseDB?.dbInsertAudit({actor_id:client.id,actor_name:client.name,actor_role:'cliente',action:'Cliente cambió su dirección de entrega (autoservicio)',entity_type:'client',entity_label:client.name,entity_id:client.id,details:{fecha:next,addressId:sel.value}});
+        render(); // el aviso "Ya elegiste una dirección distinta para mañana" confirma el cambio
       }
       async function sendClientNote(){
         const textEl=$('#client-note-text'),fb=$('#note-feedback'),btn=$('#send-note'),text=textEl.value.trim();

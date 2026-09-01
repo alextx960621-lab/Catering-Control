@@ -1822,9 +1822,70 @@
         const LOCATION_CHANNEL_NAME = 'catering-driver-location';
         const BROADCAST_MIN_INTERVAL_MS = 4000;
         const NOMINATIM_DELAY_MS = 1100; // respeta el límite de ~1 solicitud/seg de Nominatim
-        let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null;
+        let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null, refreshRouteBtn=null;
         let map=null, markersLayer=null, driverMarker=null, routeLayer=null, driverPos=null, lastClientLatlngs=[];
         let watchId=null, locationChannel=null, lastBroadcastAt=0;
+
+        // -----------------------------------------------------------------
+        // Ruta real por calles (OSRM, servidor público y gratuito de
+        // demostración: router.project-osrm.org). Es gratis y no pide API
+        // key, pero según sus propios términos está pensado para pruebas,
+        // no para tráfico de producción pesado — por eso el diseño de abajo
+        // llama a la API lo menos posible:
+        //  1) La ruta por calles se calcula UNA sola vez por las paradas de
+        //     la ruta (no cambia aunque el driver se mueva), y se guarda en
+        //     caché en localStorage. Como la ruta del driver casi siempre
+        //     repite las mismas direcciones día a día, la mayoría de las
+        //     veces la respuesta sale de la caché y no se llama a la API.
+        //  2) La posición GPS en vivo del driver NO recalcula la ruta
+        //     completa: solo se dibuja un conector recto (barato, sin API)
+        //     desde su punto actual hasta la siguiente parada pendiente.
+        //  3) Hay un botón "↻ Ruta" para forzar recalcular ignorando la
+        //     caché (por si una calle cambió).
+        // Nota: este mismo bloque está duplicado en index.js a propósito
+        // (ver la nota al inicio de este módulo) — si se ajusta acá,
+        // conviene replicarlo allá también.
+        const ROAD_ROUTE_CACHE_KEY = `${APP_CONFIG.storagePrefix}-road-route-cache-v1`;
+        const ROAD_ROUTE_CACHE_MAX = 300;
+        function loadRoadRouteCache(){ try{ return JSON.parse(localStorage.getItem(ROAD_ROUTE_CACHE_KEY)) || {}; } catch(_){ return {}; } }
+        function saveRoadRouteCache(cache){
+          const keys=Object.keys(cache);
+          if (keys.length>ROAD_ROUTE_CACHE_MAX){
+            keys.sort((a,b) => (cache[a].cachedAt||0) - (cache[b].cachedAt||0));
+            keys.slice(0, keys.length-ROAD_ROUTE_CACHE_MAX).forEach(k => delete cache[k]);
+          }
+          try{ localStorage.setItem(ROAD_ROUTE_CACHE_KEY, JSON.stringify(cache)); } catch(_){}
+        }
+        function roadRouteKey(pts){ return pts.map(p => `${p[0].toFixed(5)},${p[1].toFixed(5)}`).join('|'); }
+        async function fetchRoadRoute(pts, force){
+          if (pts.length<2) return null;
+          const key=roadRouteKey(pts);
+          const cache=loadRoadRouteCache();
+          if (!force && cache[key]) return cache[key];
+          try {
+            const coordsParam=pts.map(p => `${p[1]},${p[0]}`).join(';'); // OSRM espera lng,lat
+            const url=`https://router.project-osrm.org/route/v1/driving/${coordsParam}?overview=full&geometries=geojson`;
+            const res=await fetch(url);
+            if (!res.ok) return null;
+            const data=await res.json();
+            const route=data?.routes?.[0];
+            if (!route) return null;
+            const latlngs=route.geometry.coordinates.map(([lng,lat]) => [lat,lng]);
+            const result={ latlngs, km: route.distance/1000, minutes: route.duration/60, cachedAt: Date.now() };
+            cache[key]=result; saveRoadRouteCache(cache);
+            return result;
+          } catch(_){ return null; }
+        }
+        let lastRoadKey=null, lastRoadResult=null;
+        async function computeStopsRoute(force){
+          if (lastClientLatlngs.length<2) return null;
+          const key=roadRouteKey(lastClientLatlngs);
+          if (!force && lastRoadKey===key && lastRoadResult) return lastRoadResult;
+          const result=await fetchRoadRoute(lastClientLatlngs, force);
+          lastRoadKey=key; lastRoadResult=result;
+          return result;
+        }
+        // -----------------------------------------------------------------
 
         function ensureStyles(){
           if (document.getElementById('driver-map-style')) return;
@@ -1836,6 +1897,7 @@
             #map-dialog .mmap-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
             #map-dialog .mmap-head h2{margin:0;font-size:16px;flex:1 1 auto;color:var(--text)}
             #map-dialog .mmap-close{padding:8px 16px;font-size:13px;min-height:auto;flex:0 0 auto}
+            #map-dialog .mmap-refresh-route{padding:8px 12px;font-size:12.5px;min-height:auto;flex:0 0 auto}
             #map-dialog .mmap-status{padding:6px 16px;font-size:12.5px;color:var(--text);opacity:.7;border-bottom:1px solid var(--line)}
             #map-dialog .mmap-legend{padding:4px 16px;font-size:11.5px;color:var(--text);opacity:.6}
             #map-dialog .mmap-body{position:relative;width:100%;height:calc(100% - 96px)}
@@ -1852,11 +1914,13 @@
           if (dialog) return;
           dialog=document.createElement('dialog');
           dialog.id='map-dialog';
-          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de tu ruta</h2><button type="button" class="mmap-close danger" aria-label="Cerrar">Cerrar</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
+          dialog.innerHTML=`<div class="mmap-head"><h2>🗺️ Mapa de tu ruta</h2><button type="button" class="mmap-refresh-route outline" title="Recalcular la ruta por calles ignorando la caché guardada">↻ Ruta</button><button type="button" class="mmap-close danger" aria-label="Cerrar">Cerrar</button></div><div class="mmap-status" id="mmap-status">Cargando…</div><div class="mmap-legend" id="mmap-legend"></div><div class="mmap-body" id="mmap-body"></div>`;
           document.body.appendChild(dialog);
           mapBodyEl=dialog.querySelector('#mmap-body');
           statusEl=dialog.querySelector('#mmap-status');
           legendEl=dialog.querySelector('#mmap-legend');
+          refreshRouteBtn=dialog.querySelector('.mmap-refresh-route');
+          refreshRouteBtn.addEventListener('click', () => drawRouteLine(true));
           dialog.querySelector('.mmap-close').addEventListener('click', () => dialog.close());
           dialog.addEventListener('close', teardown);
           dialog.addEventListener('cancel', () => dialog.close());
@@ -1916,22 +1980,43 @@
           return (toDeg(Math.atan2(y,x))+360)%360;
         }
 
-        // Dibuja (o redibuja) la polilínea de la ruta con flechas de
-        // dirección. Si ya se conoce la posición GPS del driver, la línea
-        // arranca ahí; si no, arranca en la primera parada. Se llama tanto
-        // al cargar la lista como cada vez que llega una nueva posición GPS.
-        function drawRouteLine(){
+        // Dibuja (o redibuja) la ruta. Prioriza la ruta REAL por calles
+        // (OSRM, ver caché arriba); si no se pudo calcular (sin conexión,
+        // servicio caído, etc.) cae de vuelta a la línea recta de
+        // referencia con flechas, como antes. La posición GPS en vivo del
+        // driver se dibuja aparte como un conector recto y barato hasta la
+        // siguiente parada — no dispara un recálculo de ruta por calles.
+        let routeRequestToken=0;
+        async function drawRouteLine(force){
+          const myToken=++routeRequestToken;
           if (routeLayer){ routeLayer.remove(); routeLayer=null; }
           if (!map || !window.L) return;
-          const pts = driverPos ? [[driverPos.lat,driverPos.lng], ...lastClientLatlngs] : lastClientLatlngs;
-          if (pts.length<2) return;
+          if (lastClientLatlngs.length<2){
+            if (driverPos && lastClientLatlngs.length===1){
+              routeLayer=window.L.layerGroup().addTo(map);
+              window.L.polyline([[driverPos.lat,driverPos.lng], lastClientLatlngs[0]], { color:'#f97316', weight:3, opacity:.8, dashArray:'4,6' }).addTo(routeLayer);
+            }
+            return;
+          }
           routeLayer=window.L.layerGroup().addTo(map);
-          window.L.polyline(pts, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(routeLayer);
-          for (let i=0;i<pts.length-1;i++){
-            const [lat1,lng1]=pts[i], [lat2,lng2]=pts[i+1];
-            const brng=bearingDeg(lat1,lng1,lat2,lng2);
-            const icon=window.L.divIcon({ className:'', html:`<div class="mc-arrow" style="transform:rotate(${brng}deg)"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
-            window.L.marker([(lat1+lat2)/2, (lng1+lng2)/2], { icon, interactive:false }).addTo(routeLayer);
+          const road=await computeStopsRoute(force);
+          if (myToken!==routeRequestToken) return; // se pidió otra ruta mientras esperábamos esta
+          if (!routeLayer || !map) return; // el mapa se cerró mientras esperábamos
+          if (road && road.latlngs?.length){
+            window.L.polyline(road.latlngs, { color:'#0d6efd', weight:5, opacity:.75 }).addTo(routeLayer);
+            legendEl.textContent=`Números = orden del cliente. Línea azul = ruta sugerida por calles (${road.km.toFixed(1)} km, ~${Math.round(road.minutes)} min · OpenStreetMap/OSRM, puede diferir del recorrido real).`;
+          } else {
+            window.L.polyline(lastClientLatlngs, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(routeLayer);
+            for (let i=0;i<lastClientLatlngs.length-1;i++){
+              const [lat1,lng1]=lastClientLatlngs[i], [lat2,lng2]=lastClientLatlngs[i+1];
+              const brng=bearingDeg(lat1,lng1,lat2,lng2);
+              const icon=window.L.divIcon({ className:'', html:`<div class="mc-arrow" style="transform:rotate(${brng}deg)"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
+              window.L.marker([(lat1+lat2)/2, (lng1+lng2)/2], { icon, interactive:false }).addTo(routeLayer);
+            }
+            legendEl.textContent='Números = orden del cliente. No se pudo calcular la ruta por calles (sin conexión al servicio de rutas); se muestra una línea recta de referencia.';
+          }
+          if (driverPos && lastClientLatlngs.length){
+            window.L.polyline([[driverPos.lat,driverPos.lng], lastClientLatlngs[0]], { color:'#f97316', weight:3, opacity:.8, dashArray:'4,6' }).addTo(routeLayer);
           }
         }
 
@@ -1954,10 +2039,10 @@
             latlngs.push([addr.lat,addr.lng]);
           });
           lastClientLatlngs=latlngs;
+          legendEl.textContent=`Números = orden del cliente. Calculando ruta por calles…${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
           drawRouteLine();
           if (driverMarker) map.addLayer(driverMarker); // sobrevive al recreado del mapa si ya existía
           if (latlngs.length) map.fitBounds(window.L.latLngBounds(latlngs).pad(0.2)); else map.setView([-16.5,-68.15],12);
-          legendEl.textContent=`Números = orden del cliente. Línea punteada = ruta sugerida en línea recta (no sigue calles).${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
           setStatus(withCoords.length ? `${withCoords.length}/${list.length} puntos en el mapa.` : 'No se pudo ubicar a ningún cliente en el mapa todavía.');
           setTimeout(() => map && map.invalidateSize(), 50);
         }
@@ -2001,6 +2086,7 @@
           if (watchId!=null && navigator.geolocation){ navigator.geolocation.clearWatch(watchId); watchId=null; }
           if (map){ map.remove(); map=null; }
           driverMarker=null; markersLayer=null; routeLayer=null; driverPos=null; lastClientLatlngs=[];
+          lastRoadKey=null; lastRoadResult=null;
         }
 
         async function loadAndRender(routeIds){
