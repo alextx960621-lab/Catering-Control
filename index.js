@@ -2641,9 +2641,11 @@
       document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
       if(!activeUser){ window.location.replace('./login.html'); return; }
-      const onDriverApp = /driver\.html$/.test(location.pathname);
-      if (activeUser.role === 'driver' && !onDriverApp) { window.location.replace('./driver.html'); return; }
-      if (activeUser.role !== 'driver' && onDriverApp) { window.location.replace('./index.html'); return; }
+      // Antes este mismo archivo se servía desde dos HTML distintos
+      // (index.html para admin/editor/kitchen y driver.html para el driver)
+      // y acá se rebotaba a cada quien a su página. Ya no hace falta: todos
+      // entran por index.html y las páginas/acciones se muestran u ocultan
+      // según el rol (ver isDriverRole()/canAccessPage() en todo el archivo).
       load(); applyBranding(); loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate(isDriverRole()?'delivery':'dispatch');
       window.SupabaseDB?.joinPresence({id:activeUser.id, role:isDriverRole()?'driver':'staff', name:activeUser.name}, st=>{
         presenceCounts=computePresenceCounts(st);
@@ -2665,6 +2667,8 @@
         let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null, routeSelectWrap=null, refreshRouteBtn=null;
         let map=null, markersLayer=null, driverMarker=null, routeLayer=null, driverPos=null, lastClientLatlngs=[];
         let locationChannel=null, channelBound=false, currentRouteId='';
+        let watchId=null, lastBroadcastAt=0;
+        const BROADCAST_MIN_INTERVAL_MS = 4000;
 
         // -----------------------------------------------------------------
         // Ruta real por calles (OSRM, servidor público y gratuito de
@@ -2913,6 +2917,29 @@
           }
         }
 
+        // Lado driver: TRANSMITE su ubicación en vivo (GPS del celular)
+        // mientras el diálogo del mapa está abierto, para que el/los admin(s)
+        // viendo esa(s) misma(s) ruta(s) vean su posición en tiempo real
+        // (ver startListening arriba, que es quien la recibe).
+        function startBroadcast(routeIds, name){
+          const channel=ensureLocationChannel();
+          if (!channel || !navigator.geolocation) return;
+          channel.subscribe();
+          watchId=navigator.geolocation.watchPosition(pos => {
+            const now=Date.now();
+            drawDriverMarker(pos.coords.latitude, pos.coords.longitude, name || 'Tú');
+            if (now - lastBroadcastAt < BROADCAST_MIN_INTERVAL_MS) return;
+            lastBroadcastAt=now;
+            // routeIds (plural) para que el mapa del admin reconozca la
+            // transmisión sin importar cuál de las rutas del driver esté
+            // viendo; se manda también routeId (la primera) por si algún
+            // lado viejo todavía compara con el campo singular.
+            channel.send({ type:'broadcast', event:'loc', payload:{ routeId:routeIds[0], routeIds, lat:pos.coords.latitude, lng:pos.coords.longitude, name, at:now } });
+          }, err => {
+            setStatus(err.code===1 ? 'Activa el permiso de ubicación para compartir tu posición en vivo.' : 'No se pudo obtener tu ubicación en vivo.');
+          }, { enableHighAccuracy:true, maximumAge:4000, timeout:15000 });
+        }
+
         function drawDriverMarker(lat,lng,name){
           if (!map || !window.L) return;
           driverPos={lat,lng};
@@ -2923,6 +2950,7 @@
         }
 
         function teardown(){
+          if (watchId!=null && navigator.geolocation){ navigator.geolocation.clearWatch(watchId); watchId=null; }
           if (map){ map.remove(); map=null; }
           driverMarker=null; markersLayer=null; routeLayer=null; driverPos=null; lastClientLatlngs=[];
           lastRoadKey=null; lastRoadResult=null;
@@ -2946,12 +2974,14 @@
           return '';
         }
 
-        async function loadAndRender(routeId){
-          currentRouteId=routeId;
+        async function loadAndRender(routeIdOrIds){
+          const asDriver=isDriverRole();
+          currentRouteId=Array.isArray(routeIdOrIds)?routeIdOrIds[0]:routeIdOrIds;
+          const routeIds=Array.isArray(routeIdOrIds)?routeIdOrIds:[routeIdOrIds];
           setStatus('Cargando lista de entregas…');
           const date=workDate();
           await ensureDeliveryLoaded(date);
-          const fullList=deliveryListFor(routeId, date);
+          const fullList=deliveryListFor(asDriver?routeIds:currentRouteId, date);
           // Solo se muestran en el mapa los pedidos aún pendientes: en cuanto
           // se marca "entregado" o "no entregado", el número desaparece del
           // mapa para que solo queden los que faltan por entregar.
@@ -2959,23 +2989,33 @@
           if (!list.length){
             if (map){ map.remove(); map=null; }
             mapBodyEl.innerHTML=''; legendEl.textContent='';
-            setStatus(fullList.length ? 'Ya se marcaron todos los pedidos de esta ruta (entregados o no entregados).' : 'Esta ruta no tiene pedidos activos para hoy.');
+            setStatus(fullList.length ? 'Ya se marcaron todos los pedidos (entregados o no entregados).' : 'No hay pedidos activos para hoy.');
             return;
           }
           renderMapView(list, date);
           await resolveCoords(list, date);
           renderMapView(list, date);
-          startListening(routeId);
+          if (asDriver) startBroadcast(routeIds, activeUser?.name);
+          else startListening(currentRouteId);
         }
 
-        async function open(routeId){
+        async function open(routeIdParam){
           if (!canAccessPage('delivery')) return;
           ensureStyles(); buildDialog();
           dialog.showModal();
           setTimeout(() => map && map.invalidateSize(), 30);
-          const target=routeId || firstRouteWithData();
-          populateRouteSelector(target);
-          await loadAndRender(target);
+          if (isDriverRole()){
+            // El driver solo ve sus propias rutas: sin selector, siempre
+            // myRouteIds() (o las que vengan explícitas desde el botón que
+            // abrió el mapa).
+            if (routeSelectWrap) routeSelectWrap.hidden=true;
+            const routeIds=(routeIdParam?String(routeIdParam).split(',').filter(Boolean):null) || myRouteIds();
+            await loadAndRender(routeIds);
+          } else {
+            const target=routeIdParam || firstRouteWithData();
+            populateRouteSelector(target);
+            await loadAndRender(target);
+          }
         }
 
         window.DriverMap={ open };

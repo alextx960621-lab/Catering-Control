@@ -121,9 +121,12 @@
     const CLIENT_SESSION_KEY = `${APP_CONFIG.storagePrefix}-client-session-v1`;
     const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
     const STAFF_APP_URL = './index.html';
-    const DRIVER_APP_URL = './driver.html';
     const CLIENT_PORTAL_URL = './cliente.html';
-    function staffDestination(role) { return role === 'driver' ? DRIVER_APP_URL : STAFF_APP_URL; }
+    // Antes había un index.html (admin/editor/kitchen) y un driver.html
+    // separados. Ahora index.js ya trae permisos por rol (isDriverRole(),
+    // canAccessPage()) y muestra/oculta páginas según quién entró — así que
+    // TODOS entran al mismo index.html; driver.html queda sin usarse.
+    function staffDestination(role) { return STAFF_APP_URL; }
 
     function readCachedBranding() {
       try { return JSON.parse(localStorage.getItem(BRANDING_CACHE_KEY)) || null; }

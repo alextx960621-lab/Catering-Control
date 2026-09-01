@@ -1,16 +1,12 @@
-const CACHE_NAME = 'catering-control-v1.31.3'; // 
+const CACHE_NAME = 'catering-control-v1.32.1'; // unificación index+driver: ya no se precachea driver.html/js/css
 
 const PRECACHE_URLS = [
   './login.html',
   './index.html',
-  './driver.html',
   './cliente.html',
   './login.css?v=4',
-  './login.js',
   './index.css?v=16',
   './index.js?v=17',
-  './driver.css?v=2',
-  './driver.js?v=3',
   './cliente.css?v=7',
   './cliente.js?v=5',
   './config.js',
