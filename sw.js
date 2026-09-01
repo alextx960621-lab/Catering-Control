@@ -1,4 +1,4 @@
-const CACHE_NAME = 'catering-control-v1.30.4'; // 
+const CACHE_NAME = 'catering-control-v1.31.0'; // 
 
 const PRECACHE_URLS = [
   './login.html',
@@ -65,25 +65,35 @@ self.addEventListener('fetch', event => {
 
   if (req.method !== 'GET') return;
 
+  // Cache-primero para TODO (HTML incluido): si ya está guardado en esta
+  // versión del caché (CACHE_NAME), se sirve directo, sin tocar la red —
+  // así se ahorran los megas de volver a descargar lo mismo en cada
+  // apertura. La actualización llega sola cuando subes una versión nueva
+  // (ver readme.txt: subir el número de CACHE_NAME antes de cada
+  // despliegue), porque activate() borra los cachés de versiones viejas y
+  // pwa-register.js ya avisa "Actualización disponible" cuando eso pasa.
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req).then(res => {
-        const resCopy = res.clone(); // clonar YA, antes de devolver res a la página
-        safeCachePut(req, resCopy);
-        return res;
-      }).catch(() => caches.match(req).then(cached => cached || caches.match('./login.html')))
+      caches.match(req).then(cached => {
+        if (cached) return cached;
+        return fetch(req).then(res => {
+          const resCopy = res.clone(); // clonar YA, antes de devolver res a la página
+          safeCachePut(req, resCopy);
+          return res;
+        }).catch(() => caches.match('./login.html'));
+      })
     );
     return;
   }
 
   event.respondWith(
     caches.match(req).then(cached => {
-      const network = fetch(req).then(res => {
+      if (cached) return cached; // ya está en esta versión del caché: no hace falta red
+      return fetch(req).then(res => {
         const resCopy = res.clone(); // idem: clonar de inmediato
         safeCachePut(req, resCopy);
         return res;
-      }).catch(() => cached);
-      return cached || network;
+      });
     })
   );
 });

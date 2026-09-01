@@ -360,6 +360,9 @@
       background: var(--surface);
       border-radius: var(--radius);
       box-shadow: 0 2px 5px rgba(20,35,55,.025);
+      min-width: 0; /* evita que contenido interno (ej. botones/checklists
+        largos dentro de .two-col) fuerce la tarjeta más ancha que su
+        columna de grid y la saque de la pantalla */
     }
     .card-pad { padding: 17px; }
     .summary-grid {
@@ -377,32 +380,6 @@
       margin-top: 4px;
     }
     .metric small { color: var(--muted); }
-
-    .metrics-bar-row {
-      display: flex;
-      align-items: flex-end;
-      gap: 10px;
-      height: 140px;
-      padding-top: 8px;
-    }
-    .metrics-bar-col {
-      flex: 1 1 0;
-      min-width: 26px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-end;
-      height: 100%;
-      gap: 4px;
-    }
-    .metrics-bar {
-      width: 100%;
-      max-width: 34px;
-      min-height: 3px;
-      background: var(--accent, #0d6efd);
-      border-radius: 5px 5px 0 0;
-      transition: height .2s ease;
-    }
 
     .sheet {
       overflow: auto;
@@ -643,7 +620,7 @@
     }
     .two-col {
       display: grid;
-      grid-template-columns: 1.1fr .9fr;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
       gap: 18px;
     }
     .form-grid {

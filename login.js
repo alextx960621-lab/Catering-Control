@@ -90,7 +90,8 @@ formStaff.addEventListener('submit',async e=>{
   const email=document.getElementById('staff-email').value.trim(),password=document.getElementById('staff-pass').value;
   const rows=await window.SupabaseDB?.rpc('login_staff',{p_email:email,p_password:password});
   const person=Array.isArray(rows)?rows[0]:null;
-  if(!person){showError('Correo o contraseña incorrectos.');return;}
+  if(person?.locked_seconds>0){showError(`Demasiados intentos fallidos. Espera ${person.locked_seconds} segundos e intenta de nuevo.`);return;}
+  if(!person?.id){showError('Correo o contraseña incorrectos.');return;}
   sessionStorage.setItem(STAFF_SESSION_KEY,JSON.stringify({id:person.id,name:person.name,role:person.role,routeId:person.routeId||'',driverId:person.driverId||''}));
   window.location.href=staffDestination(person.role);
 });
