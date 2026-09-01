@@ -212,6 +212,7 @@ $$;
 revoke all on function login_cliente(text, text) from public;
 grant execute on function login_cliente(text, text) to anon, authenticated;
 
+drop function if exists login_staff(text, text);
 create or replace function login_staff(p_email text, p_password text)
 returns table(id text, name text, role text, "routeId" text, "driverId" text, locked_seconds int)
 language plpgsql
