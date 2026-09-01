@@ -222,14 +222,14 @@
             onError(`Demasiados intentos fallidos. Espera ${person.locked_seconds} segundos e intenta de nuevo.`);
             return;
           }
-          // Blindaje extra: solo se acepta la respuesta si trae un id real
-          // y un rol conocido. Esto es una segunda barrera en el frontend
-          // — la validación de verdad (contraseña correcta, cuenta no
-          // bloqueada) tiene que pasar en el backend (la función SQL
-          // login_staff). Si ves que esto se activa seguido, el problema
-          // está en esa función, no acá.
-          const KNOWN_ROLES = ['admin', 'editor', 'kitchen', 'driver'];
-          const validPerson = person && typeof person.id === 'string' && person.id.trim() && KNOWN_ROLES.includes(person.role);
+          // Blindaje extra: solo se acepta la respuesta si trae un id real.
+          // Antes también exigía que el rol estuviera en una lista fija, pero
+          // esa lista no incluía "superadmin" (ni roles personalizados que
+          // crees en Usuarios) y por eso bloqueaba el login aunque la
+          // contraseña fuera correcta. La validación de verdad (contraseña,
+          // cuenta bloqueada) ya la hace el backend en login_staff — acá solo
+          // nos aseguramos de que vino algo utilizable.
+          const validPerson = person && typeof person.id === 'string' && person.id.trim() && typeof person.role === 'string' && person.role.trim();
           if (!validPerson) { onError('Correo o contraseña incorrectos.'); return; }
           sessionStorage.setItem(STAFF_SESSION_KEY, JSON.stringify({
             id: person.id, name: person.name, role: person.role,
