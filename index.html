@@ -16,9 +16,11 @@
        exportar dietas, exportar orden de ruta). Así el panel carga más
        liviano y rápido en el uso normal del día a día. -->
   <link rel="stylesheet" href="./index.css">
-  <!-- Leaflet: mapa con tiles de OpenStreetMap (gratis, sin API key) para el
-       botón "Ver mapa" de Reparto. Se usa solo cuando se abre el mapa. -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <!-- Leaflet (CSS + JS, ~150KB) ya no se carga aquí en cada visita: se pide
+       bajo demanda solo cuando se abre el mapa de reparto (ver ensureLeaflet
+       en el script principal), igual que ExcelJS. Así se ahorra esa descarga
+       y ese CSS render-blocking en cada carga del panel para roles que casi
+       nunca abren el mapa (cocina, etc). -->
 
   <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#0d6efd">
@@ -106,6 +108,35 @@ document.addEventListener('DOMContentLoaded', () => {
           document.head.appendChild(script);
         });
         return excelJsLoadPromise;
+      }
+
+      // Leaflet (mapa de reparto): igual que ExcelJS, se pide bajo demanda
+      // solo cuando se abre el mapa (ver DriverMap.open más abajo), en vez
+      // de cargar CSS+JS (~150KB) en TODA carga del panel para TODOS los
+      // roles, la mayoría de los cuales nunca abre el mapa.
+      let leafletLoadPromise=null;
+      function ensureLeaflet(){
+        if(window.L) return Promise.resolve(true);
+        if(leafletLoadPromise) return leafletLoadPromise;
+        leafletLoadPromise=new Promise(resolve=>{
+          if(!document.getElementById('leaflet-css')){
+            const link=document.createElement('link');
+            link.id='leaflet-css';
+            link.rel='stylesheet';
+            link.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+            link.integrity='sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+            link.crossOrigin='';
+            document.head.appendChild(link);
+          }
+          const script=document.createElement('script');
+          script.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+          script.integrity='sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+          script.crossOrigin='';
+          script.onload=()=>resolve(true);
+          script.onerror=()=>{ leafletLoadPromise=null; resolve(false); };
+          document.head.appendChild(script);
+        });
+        return leafletLoadPromise;
       }
       const KEY = `${APP_CONFIG.storagePrefix}-operaciones-v3`;
 
@@ -3222,7 +3253,9 @@ document.addEventListener('DOMContentLoaded', () => {
         async function open(routeIdParam){
           if (!canAccessPage('delivery')) return;
           ensureStyles(); buildDialog();
+          setStatus('Cargando mapa…');
           dialog.showModal();
+          if(!await ensureLeaflet()){ setStatus('No se pudo cargar el mapa (sin conexión a internet).'); return; }
           setTimeout(() => map && map.invalidateSize(), 30);
           if (isDriverRole()){
             // El driver solo ve sus propias rutas: sin selector, siempre
@@ -3243,7 +3276,6 @@ document.addEventListener('DOMContentLoaded', () => {
     })();
 });
   </script>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous" defer></script>
 <script src="./pwa-register.js" defer></script>
 </body>
