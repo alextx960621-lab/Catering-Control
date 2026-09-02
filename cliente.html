@@ -781,12 +781,18 @@ function boot() {
     }
     ReactDOM.createRoot(document.getElementById('portal-root')).render(React.createElement(App, null));
 } // fin de boot()
-if (window.APP_CONFIG && window.SupabaseDB) {
+// Antes (con Babel) React/ReactDOM cargaban sin defer y ya estaban listos
+// para cuando este bloque corría. Ahora que este script va con JS ya
+// compilado y React/ReactDOM cargan con defer, hay que esperarlos también
+// -- si la red va lenta, boot() podía dispararse antes de que React
+// terminara de descargar y tronaba con "React is not defined", dejando la
+// pantalla en blanco.
+if (window.APP_CONFIG && window.SupabaseDB && window.React && window.ReactDOM) {
     boot();
 }
 else {
     const waitForDeps = setInterval(() => {
-        if (window.APP_CONFIG && window.SupabaseDB) {
+        if (window.APP_CONFIG && window.SupabaseDB && window.React && window.ReactDOM) {
             clearInterval(waitForDeps);
             boot();
         }
