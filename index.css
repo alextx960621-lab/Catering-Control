@@ -738,6 +738,29 @@
       font-weight: 500;
     }
     .toggle-list input { width: auto; min-height: auto; }
+    /* Lista de checkboxes de una sola columna (ej.: "Qué menús requieren
+       Premium"). Reusa el mismo arreglo que .toggle-list para que el
+       checkbox no herede width:100%/padding/border de la regla general de
+       inputs (eso es lo que lo hacía verse "descentrado": el checkbox se
+       estiraba a un rectángulo de ancho completo en vez de una casilla). */
+    .toggle-list-col {
+      display: grid;
+      gap: 8px;
+    }
+    .toggle-list-col label {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .toggle-list-col input { width: auto; min-height: auto; margin: 0; }
+    /* Celda de Google Maps en Día de trabajo: input para pegar la
+       dirección/URL corta + link "Abrir mapa" debajo cuando ya hay algo
+       guardado. */
+    .maps-cell { display: flex; flex-direction: column; gap: 4px; }
+    .maps-cell-link { font-size: 11px; white-space: nowrap; }
     input[type="file"] {
       width: 100%;
       max-width: 100%;

@@ -412,10 +412,16 @@ document.addEventListener('DOMContentLoaded', () => {
           details: details || {}
         });
       }
-      function canEditDispatchField(c, field){
+      function canEditDispatchField(c, field, date=workDate()){
         if (field === 'returnDate' && c.status !== 'Programado') return false;
         if (canEditPage('dispatch')) return true;
-        if (isDriverRole()) return ['maps','phone1','phone2','order'].includes(field) && myRouteIds().includes(effectiveRouteId(c));
+        // Los drivers solo pueden editar mientras ven el día actual en vivo.
+        // Si están mirando un día pasado (procesado o no), estos campos no
+        // son editables: de lo contrario, "editar" un día pasado terminaría
+        // modificando silenciosamente el dato actual/en vivo del cliente
+        // (teléfono, maps, orden), aunque el driver crea que solo estaba
+        // corrigiendo algo de ese día ya cerrado.
+        if (isDriverRole()) return date===realToday() && ['maps','phone1','phone2','order'].includes(field) && myRouteIds().includes(effectiveRouteId(c,date));
         return false;
       }
       let ui = { page:'dispatch', search:{}, sort:{}, route:'', month:today().slice(0,7), forceLiveDispatch:false, metrics:{ preset:'month', start:today().slice(0,8)+'01', end:today(), routeId:'', driverId:'', compare:{ enabled:false, start:'', end:'' } } };
@@ -1165,7 +1171,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let list=routeScoped.filter(c=>matchesBase(c) && matchesStatus(c));
         list=sort(list,'order','dispatch');
         const editableField=(c,field,val,type='text')=>{
-          const input=`<input class="day-edit" data-id="${c.id}" data-field="${field}" type="${type}" value="${esc(val)}" ${canEditDispatchField(c,field)?'':'disabled'}>`;
+          const input=`<input class="day-edit" data-id="${c.id}" data-field="${field}" type="${type}" value="${esc(val)}" ${canEditDispatchField(c,field,date)?'':'disabled'}>`;
           return type==='date'?`<div class="date-input-wrap">${input}</div>`:input;
         };
         const itemValue=(c,key)=>{
@@ -1185,7 +1191,7 @@ document.addEventListener('DOMContentLoaded', () => {
           {key:'plan',label:'Plan',cell:c=>{const p=plan(c.planId);return `${p?.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:18px;height:18px;object-fit:cover;border-radius:4px;vertical-align:-4px;margin-right:4px">`:''}${esc(planName(c.planId))}`;}},
           ...menuItems().map(([key,label])=>({key,label,cell:c=>itemValue(c,key)})),
           {key:'address1',label:'Dirección',cell:c=>{const addr=effectiveAddress(c,date),others=(c.addresses||[]).filter(a=>a.address&&a.address!==addr).map(a=>esc(a.address)).join('<br>');return `${esc(addr||'—')}${others?`<br><small>${others}</small>`:''}`;}},
-          {key:'maps',label:'Google Maps',cell:c=>{const link=effectiveMaps(c,date);return `${link?`<a href="${esc(link)}" target="_blank" rel="noopener">Abrir mapa</a>`:'—'}`;}},
+          {key:'maps',label:'Google Maps',cell:c=>{const raw=resolvedAddress(c,date)?.maps||c.maps||'';const link=effectiveMaps(c,date);return `<div class="maps-cell">${editableField(c,'maps',raw)}${link?`<a href="${esc(link)}" target="_blank" rel="noopener" class="maps-cell-link">Abrir mapa</a>`:''}</div>`;}},
           {key:'phone1',label:'Teléfono 1',cell:c=>editableField(c,'phone1',c.phone1||'')},
           {key:'phone2',label:'Teléfono 2',cell:c=>editableField(c,'phone2',c.phone2||'')},
           {key:'notes',label:'Observaciones',cell:c=>editableField(c,'notes',effectiveNotes(c,date))},
@@ -1230,8 +1236,8 @@ document.addEventListener('DOMContentLoaded', () => {
         $('#dispatch-route')?.addEventListener('change',e=>{ui.route=e.target.value;renderDispatch();}); $('#dispatch-status')?.addEventListener('change',e=>{ui.dispatchStatus=e.target.value;renderDispatch();}); $('#work-status')?.addEventListener('change',e=>{if(!canEditPage('dispatch'))return;day().laborable=e.target.value==='work';save();renderDispatch();}); bindSearch('dispatch-search','dispatch',renderDispatch);
         $$('.day-edit').forEach(i=>i.onchange=()=>{
           const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return;
-          if(!canEditDispatchField(c,i.dataset.field))return;
-          if(i.dataset.field==='order'||i.dataset.field==='notes'){
+          if(!canEditDispatchField(c,i.dataset.field,date))return;
+          if(i.dataset.field==='order'||i.dataset.field==='notes'||i.dataset.field==='maps'){
             const addr=resolvedAddress(c,date);
             if(addr) addr[i.dataset.field]=i.value; else c[i.dataset.field]=i.value;
           } else {
@@ -1242,6 +1248,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else if(c.status==='Programado'){ c.status='Pausado'; }
           }
           save();
+          if(i.dataset.field==='maps'){ resolveShortMapsLinksForClient(c); renderDispatch(); }
           if(i.dataset.field==='returnDate'){syncReturnDates(state.currentDate);renderDispatch();notice('Fecha de retorno actualizada. El pedido volverá a Activo en esa fecha.');}
         });
         enableTableTools();
@@ -1256,12 +1263,31 @@ document.addEventListener('DOMContentLoaded', () => {
           itemLabels.map(l=>`<td>${n(c.items?.[l])}</td>`).join('')+
           `<td>${esc(c.direccion||'—')}</td><td>${esc(c.telefono1||'—')}</td><td>${esc(c.telefono2||'—')}</td><td>${esc(c.dietaEspecial||'—')}</td><td>${esc(c.observaciones||'—')}</td><td>${n(c.carreras)}</td><td>${n(c.bolsas)}</td><td>${badge(c.estado)}</td><td>${c.serviciosRestantes??'—'}</td>`+
           `</tr>`;
+        const numericHistCols=new Set([...itemLabels,'Carreras','Bolsas','Servicios restantes']);
+        const histTotalRow=(label,rowsSubset)=>{
+          let labelled=false;
+          return `<tr class="table-totals">${headCols.map(h=>{
+            if(numericHistCols.has(h)){
+              const sum=rowsSubset.reduce((s,c)=>{
+                if(h==='Carreras') return s+n(c.carreras||1);
+                if(h==='Bolsas') return s+n(c.bolsas);
+                if(h==='Servicios restantes') return s+n(c.serviciosRestantes);
+                return s+n(c.items?.[h]);
+              },0);
+              return `<td>${sum}</td>`;
+            }
+            if(!labelled){ labelled=true; return `<td>${label}</td>`; }
+            return '<td>—</td>';
+          }).join('')}</tr>`;
+        };
+        const activeHistRows=rows.filter(c=>c.estado==='Activo');
+        const histTotals=`<tfoot>${histTotalRow(`Totales (${activeHistRows.length} pedidos activos)`,activeHistRows)}${histTotalRow(`Totales (${rows.length} pedidos atendidos)`,rows)}</tfoot>`;
         const dateFieldHist=isDriverRole()
           ?`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div><button type="button" class="outline" id="work-date-today" style="margin-top:6px" title="Volver a ver el día actual, sin procesar">Ver hoy</button>`
           :`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`;
         $('#dispatch-page').innerHTML=pageHead('Día de trabajo',`Historial guardado el ${savedAt} · ${rows.length} pedidos atendidos ese día. Son datos congelados: no cambian aunque después edites al cliente.`,canEditPage('dispatch')?'<button class="outline" data-action="dispatch-force-live">Ver datos actuales en vez del historial</button>':'')+
           `<div class="toolbar"><label class="field">Día de trabajo${dateFieldHist}</label><span class="spacer"></span><span class="badge off" title="Estos datos vienen del historial guardado, no de la ficha actual del cliente">📷 Viendo historial</span></div>`+
-          `<div class="sheet"><table>${colgroupHtml(headCols.map(h=>[h,h]),'dispatch-historial')}<thead><tr>${headCols.map(h=>th(h,h,'dispatch-historial')).join('')}</tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="${headCols.length}" class="empty">Ese día no tuvo pedidos atendidos.</td></tr>`}</tbody></table></div>`;
+          `<div class="sheet"><table>${colgroupHtml(headCols.map(h=>[h,h]),'dispatch-historial')}<thead><tr>${headCols.map(h=>th(h,h,'dispatch-historial')).join('')}</tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="${headCols.length}" class="empty">Ese día no tuvo pedidos atendidos.</td></tr>`}</tbody>${rows.length?histTotals:''}</table></div>`;
         $('#work-date')?.addEventListener('change',e=>{
           if(isDriverRole()){ setDriverViewDate(e.target.value); ui.forceLiveDispatch=false; renderDispatch(); return; }
           if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch();
@@ -2069,7 +2095,14 @@ document.addEventListener('DOMContentLoaded', () => {
       function renderPayroll(){ if(!canAccessPage('payroll')) return; if(pageNeedsPremium('payroll')){ $('#payroll-page').innerHTML=pageHead('Sueldos','Cálculo de tarifas por driver.')+premiumLockHtml('Sueldos'); return; } const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const dayValues=d=>dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const rows=d=>{const values=dayValues(d);const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
         const dayTotals=dates.map((date,i)=>list.reduce((sum,d)=>sum+n(dayValues(d)[i]),0));
         const grandTotal=dayTotals.reduce((a,v)=>a+v,0);
-        const totalsRow=`<tfoot><tr class="table-totals"><td>Total (carreras/día)</td>${dayTotals.map(v=>`<td>${v||'—'}</td>`).join('')}<td>${grandTotal}</td><td>—</td><td>—</td></tr></tfoot>`;
+        // Total de todos los sueldos (Monto Bs) sumando cada driver, para que
+        // el administrador vea de un vistazo cuánto se pagó en total el mes.
+        const grandAmount=list.reduce((sum,d)=>{
+          const total=dayValues(d).reduce((a,v)=>a+n(v),0);
+          const rate=n(day(state.currentDate).rates[d.id]??4.5);
+          return sum+total*rate;
+        },0);
+        const totalsRow=`<tfoot><tr class="table-totals"><td>Total (carreras/día)</td>${dayTotals.map(v=>`<td>${v||'—'}</td>`).join('')}<td>${grandTotal}</td><td>—</td><td>${grandAmount.toFixed(2)}</td></tr></tfoot>`;
         const headers=[['Driver / Ruta','driver'],...dates.map((d,i)=>[String(Number(d.slice(-2))),`d${i+1}`]),['Total','total'],['Día tarifa','rate'],['Monto Bs','amount']];
         $('#payroll-page').innerHTML=pageHead('Sueldos','Tarifa del día: visible para administración y para el driver correspondiente.')+`<div class="toolbar"><label class="field">Mes<div class="date-input-wrap"><input id="payroll-month" type="month" value="${ui.month}"></div></label><span class="muted">La tarifa se guarda para el día de trabajo seleccionado: ${state.currentDate.split('-').reverse().join('/')}</span></div><div class="sheet table-responsive"><table class="table table-hover align-middle mb-0 payroll">${colgroupHtml(headers,'payroll')}<thead><tr>${headers.map(h=>th(h[0],h[1],'payroll')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):'<tr><td class="empty">No hay drivers.</td></tr>'}</tbody>${list.length?totalsRow:''}</table></div>`;$('#payroll-month').onchange=e=>{ui.month=e.target.value;renderPayroll();};$$('.rate-edit').forEach(i=>i.onchange=()=>{day().rates[i.dataset.id]=n(i.value);save();renderPayroll();});}
 
@@ -2307,7 +2340,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <label>Tu WhatsApp<input id="premium-whatsapp" value="${esc(state.settings.premiumWhatsapp)}" placeholder="Ej: 59171234567"></label>
             <h3 style="margin-top:10px">Qué menús requieren Premium</h3>
             <p class="muted">Decide qué necesita el plan Premium para verse. Si desmarcas uno, queda disponible para todo el equipo aunque la cuenta esté en plan Básico.</p>
-            <div class="stack" style="gap:6px">${PREMIUM_LOCKABLE_PAGES.map(([key,label])=>`<label style="display:flex;align-items:center;gap:8px;font-weight:400"><input type="checkbox" data-premium-page="${key}" ${isPagePremiumLocked(key)?'checked':''}> ${esc(label)}</label>`).join('')}</div>
+            <div class="toggle-list-col">${PREMIUM_LOCKABLE_PAGES.map(([key,label])=>`<label><input type="checkbox" data-premium-page="${key}" ${isPagePremiumLocked(key)?'checked':''}>${esc(label)}</label>`).join('')}</div>
           </div>`:''}
         </div>`;
         $('#my-theme').onchange=e=>{saveUserTheme(e.target.value);render();};
@@ -2469,6 +2502,11 @@ document.addEventListener('DOMContentLoaded', () => {
           d.processed=true;d.processedClientIds=[];delete dispatchHistorialCache[state.currentDate];save();renderDispatch();
           notice('Día no laborable cerrado.');
           logAudit('Día cerrado (no laborable)','day',state.currentDate,state.currentDate,{});
+          // Sin esto, un día no laborable procesado nunca guarda constancia:
+          // al volver a verlo (ya como día pasado) no hay snapshot con qué
+          // mostrar el historial, y tampoco queda editable (quedaba "colgado",
+          // sin poder verse de ninguna de las dos formas).
+          window.SupabaseDB?.dbUpsertSnapshot(state.currentDate,buildDaySnapshotPayload(state.currentDate,[]));
           return;
         }
         if(!confirm(`¿Procesar el día ${state.currentDate.split('-').reverse().join('/')}?`))return;
