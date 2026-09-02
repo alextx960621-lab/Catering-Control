@@ -427,37 +427,93 @@
       );
     }
 
-    function AddressOverrideCard({ client, data, onSave }) {
+    // Tarjeta de dirección del cliente. Cubre dos casos:
+    //  1) Cambiar la dirección HABITUAL (client.activeAddressId) — desde
+    //     ahora en adelante, eligiendo entre las direcciones que ya tiene
+    //     guardadas. Se guarda directo con dbUpsertClientRows, igual que la
+    //     pausa/reactivación (mismo modelo de confianza: RLS ya le permite
+    //     al cliente escribir su propia fila).
+    //  2) Un cambio puntual SOLO para el próximo día laborable (usa la RPC
+    //     set_client_address_override que ya existía) — útil para una
+    //     excepción sin tocar su dirección de siempre.
+    // Si el cliente quiere una dirección que todavía no tiene guardada,
+    // no hay forma de "agregarla" desde acá a propósito: necesita que el
+    // equipo la tome bien (ubicación exacta, ruta, etc.), así que se le
+    // ofrece un botón directo de WhatsApp para eso.
+    function AddressCard({ client, data, branding, onSaveClient, onSaveTomorrowOverride }) {
+      const addresses = client.addresses || [];
       const next = nextWorkDay(data, workDate(data));
-      const currentOverride = (client.addressOverrides || []).find(o => o.date === next)?.addressId || '';
-      const [selected, setSelected] = useState(currentOverride || client.activeAddressId || '');
+      const currentOverrideId = (client.addressOverrides || []).find(o => o.date === next)?.addressId || '';
+      const hasChoice = addresses.length >= 2;
+      const [mode, setMode] = useState('permanent'); // 'permanent' | 'tomorrow'
+      const [selected, setSelected] = useState(currentOverrideId || client.activeAddressId || addresses[0]?.id || '');
       const [feedback, setFeedback] = useState(null);
       const [saving, setSaving] = useState(false);
-      if ((client.addresses || []).length < 2) return null;
+      const waNewAddress = whatsappNumber(branding) ? waLink(branding, `Hola, soy ${client.name}. Quiero agregar una nueva dirección de entrega.`) : '';
 
       async function handleSave() {
         if (!selected) return;
         setSaving(true);
-        const result = await onSave(selected);
+        let result;
+        if (mode === 'tomorrow') {
+          result = await onSaveTomorrowOverride(selected);
+        } else if (selected === client.activeAddressId) {
+          result = { error: false, text: 'Esa ya es tu dirección de entrega actual.' };
+        } else {
+          const updated = { ...client, activeAddressId: selected };
+          const saved = await onSaveClient(updated);
+          if (saved) {
+            window.SupabaseDB?.dbInsertAudit({ actor_id: client.id, actor_name: client.name, actor_role: 'cliente', action: 'Cliente cambió su dirección habitual (autoservicio)', entity_type: 'client', entity_label: client.name, entity_id: client.id, details: { addressId: selected } });
+          }
+          result = saved
+            ? { error: false, text: 'Listo — esa será tu dirección de entrega desde ahora, hasta que la cambies de nuevo.' }
+            : { error: true, text: 'No se pudo guardar. Intenta nuevamente o contáctanos por WhatsApp.' };
+        }
         setSaving(false);
         setFeedback(result);
       }
 
       return (
         <div className="col-12"><article className="card shadow-sm border-0"><div className="card-body p-4">
-          <h2 className="h5 mb-1">📍 Dirección de mañana</h2>
-          <p className="text-secondary">Elige a qué dirección quieres que te llegue el pedido de mañana ({fmt(next)}). Puedes confirmarlo hasta las <b>22:00</b> de hoy.</p>
-          <div className="row g-2 align-items-end">
-            <div className="col-sm-8">
-              <label className="form-label" htmlFor="tomorrow-address">Dirección para mañana</label>
-              <select className="form-select" id="tomorrow-address" value={selected} onChange={e => setSelected(e.target.value)}>
-                {(client.addresses || []).map(a => <option value={a.id} key={a.id}>{a.address || 'Sin nombre'}</option>)}
-              </select>
-            </div>
-            <div className="col-sm-4"><button className="btn btn-primary w-100" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar para mañana'}</button></div>
-          </div>
-          {currentOverride && <p className="text-secondary small mt-2 mb-0">Ya elegiste una dirección distinta para mañana. Si no cambias nada, se usará esa.</p>}
+          <h2 className="h5 mb-1">📍 Tu dirección de entrega</h2>
+          {!hasChoice && (
+            <p className="text-secondary mb-3">Actualmente entregamos en: <b>{addresses[0]?.address || 'sin dirección registrada'}</b>. Solo tienes esta dirección guardada.</p>
+          )}
+          {hasChoice && (
+            <>
+              <p className="text-secondary">Elige entre tus direcciones guardadas. Puedes cambiarla desde ahora en adelante, o solo para el próximo día de entrega ({fmt(next)}) sin tocar tu dirección de siempre.</p>
+              <div className="row g-2 mb-3">
+                <div className="col-sm-6">
+                  <input className="btn-check" type="radio" name="address-mode" id="address-mode-permanent" checked={mode === 'permanent'} onChange={() => setMode('permanent')} />
+                  <label className="pause-mode-card border d-block h-100 p-3" htmlFor="address-mode-permanent">
+                    <span className="d-block fw-semibold">🏠 Desde ahora en adelante</span>
+                    <span className="d-block small text-secondary mt-1">Cambia tu dirección habitual hasta que la vuelvas a cambiar.</span>
+                  </label>
+                </div>
+                <div className="col-sm-6">
+                  <input className="btn-check" type="radio" name="address-mode" id="address-mode-tomorrow" checked={mode === 'tomorrow'} onChange={() => setMode('tomorrow')} />
+                  <label className="pause-mode-card border d-block h-100 p-3" htmlFor="address-mode-tomorrow">
+                    <span className="d-block fw-semibold">📅 Solo el {fmt(next)}</span>
+                    <span className="d-block small text-secondary mt-1">Cambio puntual; después vuelve a tu dirección de siempre.</span>
+                  </label>
+                </div>
+              </div>
+              <div className="row g-2 align-items-end">
+                <div className="col-sm-8">
+                  <label className="form-label" htmlFor="address-select">{mode === 'tomorrow' ? `Dirección para el ${fmt(next)}` : 'Nueva dirección habitual'}</label>
+                  <select className="form-select" id="address-select" value={selected} onChange={e => setSelected(e.target.value)}>
+                    {addresses.map(a => <option value={a.id} key={a.id}>{a.address || 'Sin nombre'}{a.id === client.activeAddressId ? ' (actual)' : ''}</option>)}
+                  </select>
+                </div>
+                <div className="col-sm-4"><button className="btn btn-primary w-100" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button></div>
+              </div>
+              {mode === 'tomorrow' && currentOverrideId && <p className="text-secondary small mt-2 mb-0">Ya elegiste una dirección distinta solo para el {fmt(next)}. Si no cambias nada, se usará esa.</p>}
+            </>
+          )}
           {feedback && <div className={`alert mt-3 mb-0 alert-${feedback.error ? 'danger' : 'success'}`}>{feedback.text}</div>}
+          {waNewAddress && (
+            <p className="text-secondary small mt-3 mb-0">¿Necesitas una dirección que no está en la lista? <a href={waNewAddress} target="_blank" rel="noopener">Escríbenos por WhatsApp</a> para tomar los datos correctamente.</p>
+          )}
         </div></article></div>
       );
     }
@@ -576,7 +632,7 @@
                     : <ResumeForm next={next} message={message} onConfirm={handleResume} />)
                 : <PauseForm next={next} message={message} onConfirm={handlePause} />}
             </div>
-            <AddressOverrideCard client={client} data={data} onSave={handleAddressOverride} />
+            <AddressCard client={client} data={data} branding={branding} onSaveClient={onSaveClient} onSaveTomorrowOverride={handleAddressOverride} />
             <NoteCard client={client} />
             <InstagramLink branding={branding} />
           </section>
