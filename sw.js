@@ -1,17 +1,13 @@
-const CACHE_NAME = 'catering-control-v1.33.2'; // unificación index+driver: ya no se precachea driver.html/js/css
+const CACHE_NAME = 'catering-control-v1.34.0'; // ya no hay ?v= por archivo: la única versión que importa de aquí en más es este CACHE_NAME
 
 const PRECACHE_URLS = [
   './login.html',
   './index.html',
   './cliente.html',
-  './login.css?v=4',
-  './index.css?v=16',
-  './index.js?v=17',
-  './cliente.css?v=7',
-  './cliente.js?v=5',
+  './index.css',
   './config.js',
   './supabase-client.js',
-  './pwa-register.js?v=3',
+  './pwa-register.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
