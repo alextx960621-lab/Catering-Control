@@ -146,10 +146,15 @@ document.addEventListener('DOMContentLoaded', () => {
       // "abrir directo en Google Maps" en la página de Clientes.
       function extractLatLngFromMapsField(text){
         if (!text) return null;
+        // Orden importa: primero los patrones más precisos. "!3d..!4d.." es
+        // la coordenada EXACTA del pin dentro de un link de "lugar" de
+        // Google Maps; "@lat,lng" es solo el centro de la cámara del mapa en
+        // el momento de compartir y puede venir corrido de la ubicación real
+        // (por eso antes mandaba "a otra dirección" al pegar un link).
         const patterns=[
-          /@(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
-          /[?&](?:q|ll|daddr)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
           /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,
+          /[?&](?:q|ll|daddr)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+          /@(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
           /(-?\d{1,3}\.\d{3,}),\s*(-?\d{1,3}\.\d{3,})/
         ];
         for (const re of patterns){
@@ -777,8 +782,30 @@ document.addEventListener('DOMContentLoaded', () => {
             const routeSel=row.querySelector('.addr-route'), driverNameEl=row.querySelector('.addr-driver-name'), removeBtn=row.querySelector('.addr-remove');
             routeSel.onchange=()=>{ const d=driverForRoute(routeSel.value); driverNameEl.textContent=d?`${d.firstName} ${d.lastName}`:'— (según ruta)'; };
             removeBtn.style.visibility = container.querySelectorAll('.client-address-row').length<=1 ? 'hidden' : 'visible';
-            removeBtn.onclick=()=>{ if(list.length<=1) return; list.splice(Number(row.dataset.idx),1); render(); };
+            removeBtn.onclick=()=>{ if(list.length<=1) return; captureListFromDom(); list.splice(Number(row.dataset.idx),1); render(); };
             row.querySelector('.addr-text').oninput=()=>{ renderActiveSelector(); form._refreshScheduleOptions?.(); };
+          });
+        }
+        // Antes de destruir y volver a construir el HTML de las filas (al
+        // agregar/quitar una dirección), hay que guardar en "list" lo que el
+        // usuario ya escribió en el DOM. Si no, render() vuelve a dibujar
+        // todo desde "list" tal cual estaba al abrir el formulario y se
+        // pierde lo tecleado (ej.: llenar Dirección 1 y luego presionar
+        // "+ Añadir dirección" borraba esa Dirección 1).
+        function captureListFromDom(){
+          const rows=[...container.querySelectorAll('.client-address-row')];
+          rows.forEach((row,i)=>{
+            if(!list[i]) return;
+            list[i]={
+              ...list[i],
+              id:row.dataset.addressId,
+              address:row.querySelector('.addr-text').value,
+              maps:row.querySelector('.addr-maps').value,
+              coords:row.querySelector('.addr-coords').value,
+              notes:row.querySelector('.addr-notes').value,
+              routeId:row.querySelector('.addr-route').value,
+              order:row.querySelector('.addr-order').value
+            };
           });
         }
         function render(){
@@ -788,7 +815,7 @@ document.addEventListener('DOMContentLoaded', () => {
           form._refreshScheduleOptions?.();
         }
         render();
-        addBtn.onclick=()=>{ list.push({id:uid('a')}); render(); };
+        addBtn.onclick=()=>{ captureListFromDom(); list.push({id:uid('a')}); render(); };
         form._getAddresses=()=>[...container.querySelectorAll('.client-address-row')].map(row=>({
           id:row.dataset.addressId,
           address:row.querySelector('.addr-text').value.trim(),
@@ -2906,13 +2933,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function setStatus(text){ if (statusEl) statusEl.textContent=text; }
 
-        // Huella de qué se usó para resolver la coordenada: si el link o la
-        // dirección cambian, la huella cambia y se vuelve a resolver aunque
-        // ya hubiera una coordenada guardada (evita quedarse con datos viejos).
-        // Ahora es por dirección (addr), no por cliente completo.
-        function srcFingerprint(addr){ return `${addr?.maps||''}|${addr?.address||''}`; }
+        // Huella de qué se usó para resolver la coordenada: si el link, la
+        // coordenada manual o la dirección cambian, la huella cambia y se
+        // vuelve a resolver aunque ya hubiera una coordenada guardada (evita
+        // quedarse con datos viejos). Ahora es por dirección (addr), no por
+        // cliente completo.
+        function srcFingerprint(addr){ return `${addr?.coords||''}|${addr?.maps||''}|${addr?.address||''}`; }
 
         function extractCoords(text){ return extractLatLngFromMapsField(text); }
+
+        // Coordenada puesta a mano en el campo "Coordenada" de la dirección.
+        // Se prioriza siempre sobre el link y la dirección de texto (igual
+        // que en addressMapsLink más arriba), porque es el dato más
+        // confiable: no depende de que el link tenga el formato esperado ni
+        // de que el geocoder adivine bien un texto libre.
+        function parseCoordsField(coords){
+          const m=String(coords||'').trim().match(/^(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/);
+          if(!m) return null;
+          const lat=parseFloat(m[1]), lng=parseFloat(m[2]);
+          return (Math.abs(lat)<=90 && Math.abs(lng)<=180) ? { lat, lng } : null;
+        }
 
         async function geocodeAddress(address){
           try {
@@ -2936,7 +2976,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const pending=targets.filter(({addr}) => addr.lat==null || addr.lng==null || addr.geoSrc!==srcFingerprint(addr));
           let done=0, changed=false;
           for (const {addr} of pending){
-            let coords=extractCoords(addr.maps) || extractCoords(addr.address);
+            let coords=parseCoordsField(addr.coords) || extractCoords(addr.maps) || extractCoords(addr.address);
             if (!coords && addr.address){
               setStatus(`Resolviendo direcciones… ${done+1}/${pending.length}`);
               coords=await geocodeAddress(addr.address);
