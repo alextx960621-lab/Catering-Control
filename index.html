@@ -806,6 +806,45 @@ document.addEventListener('DOMContentLoaded', () => {
       function effectiveAddress(c,date=state.currentDate){ return resolvedAddress(c,date)?.address || c.address1 || ''; }
       function effectiveMaps(c,date=state.currentDate){ return addressMapsLink(resolvedAddress(c,date)) || (c.maps?googleMapsDirectLink(c.maps):''); }
       function effectiveOrder(c,date=state.currentDate){ const a=resolvedAddress(c,date); return (a && a.order!==undefined && a.order!=='') ? a.order : (c.order??''); }
+      // Escribe el número de orden respetando la misma prioridad que effectiveOrder:
+      // si hay una dirección/override para ese día, se guarda ahí; si no, en el cliente.
+      function writeOrderValue(c,date,val){ const addr=resolvedAddress(c,date); if(addr) addr.order=val; else c.order=val; }
+      // Corre un lugar hacia adelante (order+1) a todos los clientes activos de la
+      // misma ruta/día cuyo número sea >= fromValue, para abrir espacio a un
+      // cliente nuevo que se inserta con ese número (opción "correr los siguientes"
+      // del selector de conflicto de orden).
+      function shiftOrdersFrom(routeId,date,fromValue,excludeId){
+        const targets=state.clients
+          .filter(x=>x.id!==excludeId && status(x,date)==='Activo' && effectiveRouteId(x,date)===routeId)
+          .map(x=>({x,val:Number(effectiveOrder(x,date))}))
+          .filter(t=>!isNaN(t.val) && t.val>=fromValue);
+        targets.forEach(({x,val})=>writeOrderValue(x,date,String(val+1)));
+      }
+      // Diálogo chico para cuando dos clientes de la misma ruta/día quedarían con
+      // el mismo número de orden: dejar duplicado, correr la secuencia, o cancelar.
+      function askOrderConflictChoice(orderNum){
+        return new Promise(resolve=>{
+          const dlg=document.createElement('dialog');
+          dlg.className='app-modal-mini';
+          dlg.style.width='auto';
+          dlg.innerHTML=`<div style="padding:18px;max-width:380px;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:var(--radius-lg);box-shadow:var(--shadow)">
+            <h3 style="margin:0 0 8px;font-size:16px">Número de orden repetido</h3>
+            <p style="margin:0 0 16px;color:var(--muted)">Ya hay otro cliente activo con el número <b>${esc(String(orderNum))}</b> en esta ruta. ¿Qué hacés?</p>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button type="button" class="primary" data-choice="shift">Correr los siguientes un número (mantener la secuencia)</button>
+              <button type="button" class="outline" data-choice="duplicate">Dejar los dos con el número ${esc(String(orderNum))}</button>
+              <button type="button" class="outline" data-choice="cancel">Cancelar</button>
+            </div>
+          </div>`;
+          document.body.appendChild(dlg);
+          let resolved=false;
+          const finish=choice=>{ if(resolved)return; resolved=true; resolve(choice); dlg.close(); };
+          dlg.querySelectorAll('[data-choice]').forEach(btn=>btn.addEventListener('click',()=>finish(btn.dataset.choice)));
+          dlg.addEventListener('cancel',()=>finish('cancel'));
+          dlg.addEventListener('close',()=>{ dlg.remove(); if(!resolved){ resolved=true; resolve('cancel'); } });
+          dlg.showModal();
+        });
+      }
       function effectiveNotes(c,date=state.currentDate){ const a=resolvedAddress(c,date); return (a && a.notes) ? a.notes : (c.notes||''); }
       function scheduleSummary(c){
         if(!c.schedule?.length) return '';
@@ -1333,10 +1372,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         $('#work-date-today')?.addEventListener('click',()=>{ setDriverViewDate(realToday()); ui.forceLiveDispatch=false; renderDispatch(); });
         $('#dispatch-route')?.addEventListener('change',e=>{ui.route=e.target.value;renderDispatch();}); $('#dispatch-status')?.addEventListener('change',e=>{ui.dispatchStatus=e.target.value;renderDispatch();}); $('#work-status')?.addEventListener('change',e=>{if(!canEditPage('dispatch'))return;day().laborable=e.target.value==='work';save();renderDispatch();}); bindSearch('dispatch-search','dispatch',renderDispatch);
-        $$('.day-edit').forEach(i=>i.onchange=()=>{
+        $$('.day-edit').forEach(i=>i.onchange=async()=>{
           const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return;
           if(!canEditDispatchField(c,i.dataset.field,date))return;
-          if(i.dataset.field==='order'||i.dataset.field==='notes'||i.dataset.field==='maps'){
+          if(i.dataset.field==='order'){
+            const newVal=i.value.trim();
+            const prevVal=String(effectiveOrder(c,date)??'');
+            if(newVal!==''){
+              const routeId=effectiveRouteId(c,date);
+              const conflicts=state.clients.filter(x=>x.id!==c.id && status(x,date)==='Activo' && effectiveRouteId(x,date)===routeId && String(effectiveOrder(x,date))===newVal);
+              if(conflicts.length){
+                const choice=await askOrderConflictChoice(newVal);
+                if(choice==='cancel'||!choice){ i.value=prevVal; return; }
+                if(choice==='shift') shiftOrdersFrom(routeId,date,Number(newVal),c.id);
+                // 'duplicate': se deja tal cual, los dos quedan con el mismo número.
+              }
+            }
+            writeOrderValue(c,date,newVal);
+          } else if(i.dataset.field==='notes'||i.dataset.field==='maps'){
             const addr=resolvedAddress(c,date);
             if(addr) addr[i.dataset.field]=i.value; else c[i.dataset.field]=i.value;
           } else {
@@ -1347,6 +1400,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else if(c.status==='Programado'){ c.status='Pausado'; }
           }
           save();
+          if(i.dataset.field==='order'){ renderDispatch(); }
           if(i.dataset.field==='maps'){ resolveShortMapsLinksForClient(c); renderDispatch(); }
           if(i.dataset.field==='returnDate'){syncReturnDates(state.currentDate);renderDispatch();notice('Fecha de retorno actualizada. El pedido volverá a Activo en esa fecha.');}
         });
@@ -2991,6 +3045,7 @@ document.addEventListener('DOMContentLoaded', () => {
             #map-dialog select{padding:5px 8px;border-radius:8px;border:1px solid var(--line);font-size:13px;background:var(--surface);color:var(--text)}
             .mc-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;background:#0d6efd;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transform:rotate(-45deg);display:flex;align-items:center;justify-content:center}
             .mc-pin span{transform:rotate(45deg);color:#fff;font-weight:700;font-size:12px}
+            .mc-pin.mc-pin-pending{background:#f97316}
             .mc-driver-icon{width:34px;height:34px;border-radius:50%;background:#f97316;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:16px}
             .mc-arrow{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:11px solid #0d6efd;opacity:.85;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
             @media (max-width:520px){#map-dialog{width:100vw;height:100vh;border-radius:0}}
@@ -3134,12 +3189,14 @@ document.addEventListener('DOMContentLoaded', () => {
           const sorted=[...withCoords].sort((a,b) => (n(effectiveOrder(a.c,date))||9999) - (n(effectiveOrder(b.c,date))||9999));
           const latlngs=[];
           sorted.forEach(({c,addr}) => {
-            const icon=window.L.divIcon({ className:'', html:`<div class="mc-pin"><span>${n(effectiveOrder(c,date))||'·'}</span></div>`, iconSize:[26,26], iconAnchor:[13,26] });
-            window.L.marker([addr.lat,addr.lng], { icon }).addTo(markersLayer).bindPopup(`<b>${escapeHtml(c.name)}</b><br>Orden: ${n(effectiveOrder(c,date))||'—'}<br>${escapeHtml(addr.address||'')}`);
+            const ord=n(effectiveOrder(c,date));
+            const pending=!ord;
+            const icon=window.L.divIcon({ className:'', html:`<div class="mc-pin${pending?' mc-pin-pending':''}"><span>${pending?'P':ord}</span></div>`, iconSize:[26,26], iconAnchor:[13,26] });
+            window.L.marker([addr.lat,addr.lng], { icon }).addTo(markersLayer).bindPopup(`<b>${escapeHtml(c.name)}</b><br>Orden: ${pending?'Pendiente de asignar':ord}<br>${escapeHtml(addr.address||'')}`);
             latlngs.push([addr.lat,addr.lng]);
           });
           lastClientLatlngs=latlngs;
-          legendEl.textContent=`Números = orden del cliente. Calculando ruta por calles…${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
+          legendEl.textContent=`Números = orden del cliente. Naranja con "P" = todavía sin número asignado. Calculando ruta por calles…${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
           drawRouteLine();
           if (latlngs.length) map.fitBounds(window.L.latLngBounds(latlngs).pad(0.2)); else map.setView([-16.5,-68.15],12);
           setStatus(withCoords.length ? `${withCoords.length}/${list.length} puntos en el mapa.` : 'No se pudo ubicar a ningún cliente en el mapa todavía.');
