@@ -1,4 +1,4 @@
-const CACHE_NAME = 'catering-control-v1.34.0'; // ya no hay ?v= por archivo: la única versión que importa de aquí en más es este CACHE_NAME
+const CACHE_NAME = 'catering-control-v1.34.1'; 
 
 const PRECACHE_URLS = [
   './login.html',
