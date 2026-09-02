@@ -24,8 +24,9 @@
 --     secuencias
 --   · Migración de clientes existentes (db_clientes → db_clientes_rows),
 --     no rompe nada si el proyecto está vacío
---   · Limpieza automática con pg_cron: 30 días para delivery_status y
---     dispatch_snapshots, 15 días para audit_log
+--   · Limpieza automática con pg_cron: 7 días para delivery_status (fotos
+--     de entrega), 1 año para dispatch_snapshots (historial de días
+--     procesados), 15 días para audit_log
 --
 -- NO incluidos a propósito (llevan un dato tuyo, van aparte):
 --   · reset-admin-password.sql   → fija la contraseña del admin inicial
@@ -457,24 +458,29 @@ on conflict (id) do update set payload = excluded.payload, updated_at = now();
 -- 10. Limpieza automática con pg_cron
 -- --------------------------------------------------------------------------
 
--- delivery_status y dispatch_snapshots: 30 días, todos los días a la 1 AM UTC.
+-- delivery_status: 7 días (son fotos de respaldo de entrega — solo hacen
+-- falta para reclamos de los últimos días, no para siempre), todos los días
+-- a la 1 AM UTC.
 do $do$
 begin
   perform cron.schedule(
     'delivery-status-cleanup',
     '0 1 * * *',
-    $cron$ delete from public.db_delivery_status where date < (now() - interval '30 days')::date; $cron$
+    $cron$ delete from public.db_delivery_status where date < (now() - interval '7 days')::date; $cron$
   );
 exception when others then
   raise notice 'No se pudo programar el cron de delivery_status (revisa permisos/pg_cron).';
 end $do$;
 
+-- dispatch_snapshots: 1 año (son el historial congelado de "Día de
+-- trabajo" ya procesado — mucho más valioso que las fotos, se guarda bastante
+-- más tiempo), todos los días a la 1 AM UTC.
 do $do$
 begin
   perform cron.schedule(
     'delete-old-dispatch-snapshots',
     '0 1 * * *',
-    $cron$ delete from public.db_dispatch_snapshots where date < (current_date - interval '30 days'); $cron$
+    $cron$ delete from public.db_dispatch_snapshots where date < (current_date - interval '1 year'); $cron$
   );
 exception when others then
   raise notice 'No se pudo programar el cron de dispatch_snapshots (revisa permisos/pg_cron).';
@@ -514,7 +520,7 @@ end $do$;
 --   select * from db_clientes_rows limit 5;
 --   select get_branding();
 --   select get_plan_status();
---   select * from cron.job;                    -- los 3 jobs de limpieza programados
+--   select * from cron.job;                    -- los 4 jobs de limpieza programados
 --
 -- Después de esto, corre por separado (llevan un dato tuyo):
 --   reset-admin-password.sql       → contraseña del admin inicial

@@ -125,6 +125,15 @@ document.addEventListener('DOMContentLoaded', () => {
       // está desplegada o falla, el link igual se guarda tal cual lo pegó el
       // usuario y el geocoding por texto (Nominatim) sigue de respaldo.
       function isShortMapsLink(text){ return /(?:maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(text||''); }
+      // Huella de qué se usó para resolver la coordenada de una dirección: si
+      // la coordenada manual, el link o el texto de la dirección cambian, la
+      // huella cambia y toca recalcular. Está en el ámbito general (no solo
+      // dentro del mapa interno) porque tanto el resolver de links cortos
+      // como el mapa interno tienen que usar EXACTAMENTE la misma huella —
+      // si no, una función piensa que el dato de la otra está desactualizado
+      // y lo vuelve a calcular por su cuenta, pisando un resultado bueno con
+      // uno peor (esto es justo lo que pasaba antes de este arreglo).
+      function srcFingerprint(addr){ return `${addr?.coords||''}|${addr?.maps||''}|${addr?.address||''}`; }
       async function resolveShortMapsLinksForClient(c){
         const db=window.SupabaseDB;
         if(!db?.client?.functions) return;
@@ -134,7 +143,14 @@ document.addEventListener('DOMContentLoaded', () => {
           try{
             const { data, error } = await db.client.functions.invoke('resolve-maps-link', { body:{ url: addr.maps } });
             if(!error && data?.lat!=null && data?.lng!=null){
-              addr.lat=data.lat; addr.lng=data.lng; addr.geoSrc=`${addr.maps}|${addr.address||''}`;
+              addr.lat=data.lat; addr.lng=data.lng;
+              // También se rellena la casilla "Coordenada" visible del
+              // formulario, no solo el caché interno del mapa — así el
+              // driver/admin ve confirmación de que el link sí se resolvió,
+              // y esa misma coordenada queda disponible para "Abrir mapa" en
+              // Clientes (que lee addr.coords, no addr.lat/lng).
+              addr.coords=`${data.lat}, ${data.lng}`;
+              addr.geoSrc=srcFingerprint(addr);
               changed=true;
             }
           } catch(_){ /* silencioso: no bloquea nada si falla */ }
@@ -1086,7 +1102,13 @@ document.addEventListener('DOMContentLoaded', () => {
           const file = f.elements['photoFile']?.files?.[0];
           let image = existing?.status === kind ? (existing.image || '') : '';
           if (file) {
-            try { image = await readImageAsDataURL(file, 480, .75); }
+            // Fotos de respaldo de entrega: solo sirven para comprobar el
+            // paquete/puerta ante un reclamo, no hace falta que sean nítidas.
+            // Se guardan como base64 dentro de la fila de Postgres (no hay
+            // bucket de Storage), así que más chico = base de datos más
+            // liviana. 360px y calidad 0.55 siguen siendo perfectamente
+            // legibles para eso, y pesan bastante menos que 480px/0.75.
+            try { image = await readImageAsDataURL(file, 360, .55); }
             catch (_) { notice('No se pudo procesar la foto.', true); return false; }
           }
           const reason = (data.reason || '').trim();
@@ -2718,16 +2740,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(chosen.data,null,2)],{type:'application/json'}));a.download=`catering-${chosen.label}-${today()}.json`;a.click();
             return;
           }
-          notice('Preparando respaldo completo (incluye auditoría, despachos y snapshots)…');
+          notice('Preparando respaldo completo (incluye auditoría, despachos y snapshots de los últimos 2 años)…');
           const db=window.SupabaseDB;
+          // Limitar el respaldo completo a los últimos 2 años: evita que el
+          // archivo crezca sin límite con el tiempo y, de paso, garantiza
+          // quedar siempre por debajo del límite de 1000 filas por consulta
+          // que aplica Supabase por defecto (2 años ≈ 730 días como máximo).
+          const cutoff=new Date(); cutoff.setFullYear(cutoff.getFullYear()-2);
+          const cutoffDate=cutoff.toISOString().slice(0,10);
           const [auditLog,deliveryStatus,snapshots]=await Promise.all([
-            db?.dbGetAllAuditLog(),
-            db?.dbGetAllDeliveryStatus(),
-            db?.dbGetAllSnapshots()
+            db?.dbGetAllAuditLog(cutoffDate),
+            db?.dbGetAllDeliveryStatus(cutoffDate),
+            db?.dbGetAllSnapshots(cutoffDate)
           ]);
-          const data={...state,staffUsers,auditLog:auditLog||[],deliveryStatus:deliveryStatus||[],snapshots:snapshots||[]};
+          const trimmedDays=Object.fromEntries(Object.entries(state.days||{}).filter(([d])=>d>=cutoffDate));
+          const data={...state,days:trimmedDays,staffUsers,auditLog:auditLog||[],deliveryStatus:deliveryStatus||[],snapshots:snapshots||[]};
           const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download=`catering-respaldo-completo-${today()}.json`;a.click();
-          notice('Respaldo completo descargado.');
+          notice('Respaldo completo descargado (últimos 2 años).');
         },"import-json":()=>$('#import-file').click(),"open-route-map":()=>window.DriverMap?.open(e.target.closest('[data-action]')?.dataset.route||'')};
 
         const ACTION_PERMS={
@@ -2933,13 +2962,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function setStatus(text){ if (statusEl) statusEl.textContent=text; }
 
-        // Huella de qué se usó para resolver la coordenada: si el link, la
-        // coordenada manual o la dirección cambian, la huella cambia y se
-        // vuelve a resolver aunque ya hubiera una coordenada guardada (evita
-        // quedarse con datos viejos). Ahora es por dirección (addr), no por
-        // cliente completo.
-        function srcFingerprint(addr){ return `${addr?.coords||''}|${addr?.maps||''}|${addr?.address||''}`; }
-
+        // srcFingerprint ya está definida arriba, en el ámbito general — la
+        // usa también resolveShortMapsLinksForClient(), así las dos
+        // funciones siempre están de acuerdo sobre cuándo una coordenada
+        // quedó desactualizada.
         function extractCoords(text){ return extractLatLngFromMapsField(text); }
 
         // Coordenada puesta a mano en el campo "Coordenada" de la dirección.

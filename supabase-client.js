@@ -221,9 +221,11 @@
     }
   }
 
-  async function dbGetAllAuditLog() {
+  async function dbGetAllAuditLog(sinceDate) {
     try {
-      const { data, error } = await client.from('db_audit_log').select('*').order('at', { ascending: false });
+      let q = client.from('db_audit_log').select('*').order('at', { ascending: false });
+      if (sinceDate) q = q.gte('at', sinceDate);
+      const { data, error } = await q;
       if (error) { console.error('[supabase] Error leyendo historial completo:', error.message); return null; }
       return data || [];
     } catch (err) {
@@ -248,9 +250,11 @@
     }
   }
 
-  async function dbGetAllDeliveryStatus() {
+  async function dbGetAllDeliveryStatus(sinceDate) {
     try {
-      const { data, error } = await client.from('db_delivery_status').select('date,client_id,payload');
+      let q = client.from('db_delivery_status').select('date,client_id,payload');
+      if (sinceDate) q = q.gte('date', sinceDate);
+      const { data, error } = await q;
       if (error) { console.error('[supabase] Error leyendo todo db_delivery_status:', error.message); return null; }
       return (data || []).map(r => ({ date: r.date, clientId: r.client_id, payload: r.payload }));
     } catch (err) {
@@ -259,9 +263,11 @@
     }
   }
 
-  async function dbGetAllSnapshots() {
+  async function dbGetAllSnapshots(sinceDate) {
     try {
-      const { data, error } = await client.from('db_dispatch_snapshots').select('date,payload');
+      let q = client.from('db_dispatch_snapshots').select('date,payload');
+      if (sinceDate) q = q.gte('date', sinceDate);
+      const { data, error } = await q;
       if (error) { console.error('[supabase] Error leyendo todos los snapshots:', error.message); return null; }
       return data || [];
     } catch (err) {
