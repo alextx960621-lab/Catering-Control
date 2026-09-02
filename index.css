@@ -472,6 +472,19 @@
         padding: 10px 8px;
         margin: -10px -4px -10px -8px; /* compensa el padding para no correr el layout */
       }
+      /* Los <label> (que envuelven casi todos los inputs) usan
+         font-size:12px, y como "input,select,textarea{font:inherit}" lo
+         heredan, cualquier campo de texto queda por debajo de 16px. Los
+         navegadores móviles (Safari/Chrome en iOS y Android) hacen zoom
+         automático de toda la página al enfocar un campo así de chico —
+         es su forma de "ayudar" a que se lea el texto que estás
+         escribiendo, pero acá agranda la pantalla entera cada vez que
+         tocas un campo del formulario, cosa molesta que no pasa en
+         escritorio. Forzando 16px (el umbral que evita ese zoom) SOLO en
+         pantallas táctiles, el pellizco manual de dos dedos para
+         agrandar/achicar sigue funcionando igual que siempre — esto solo
+         evita el zoom automático no pedido. */
+      input, select, textarea { font-size: 16px; }
     }
 
     .editable-cell input,
@@ -482,6 +495,14 @@
       background: var(--surface);
       min-width: 64px;
       font-size: 12px;
+    }
+    /* Mismo motivo que el bloque @media (pointer: coarse) de más arriba:
+       sin esto, estos inputs de edición rápida (celdas editables de las
+       tablas) se quedarían en 12px y seguirían disparando el zoom
+       automático en móvil — esta regla necesita ir DESPUÉS de la de
+       arriba para ganarle en la cascada (misma especificidad). */
+    @media (pointer: coarse) {
+      .editable-cell input, .editable-cell select { font-size: 16px; }
     }
     .editable-cell select { width: 135px; }
     .handle {

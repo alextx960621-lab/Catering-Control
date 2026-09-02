@@ -499,6 +499,18 @@ document.addEventListener('DOMContentLoaded', () => {
       let lastSavedClients=new Map();
       let lastSavedNotes=new Map();
       let lastSyncedClientes=null, lastSyncedPersonal=null, lastSyncedInventario=null;
+      // Se setea al arrancar la app (ver el boot al final del archivo) con
+      // la promesa de la PRIMERA loadFromServer(). Mientras esa promesa no
+      // se resuelva, lastSavedClients/lastSavedNotes siguen vacíos — y si
+      // algo llama a save() en ese momento (ej. el driver marca una entrega
+      // apenas abre la app, antes de que termine de bajar los datos reales
+      // por una conexión lenta), diffClients()/diffNotes() verían "todo
+      // cambiado" y subirían la copia vieja del caché del celular,
+      // pisando cualquier cambio que un editor haya hecho mientras tanto
+      // (el orden de reparto, por ejemplo). save() espera esta promesa
+      // antes de subir nada, para partir siempre de la base real del
+      // servidor.
+      let initialServerLoadPromise=null;
       function mergeTopLevel(serverPayload, localPayload, lastSynced){
         const merged={...(serverPayload||{})};
         Object.keys(localPayload).forEach(key=>{
@@ -557,6 +569,13 @@ document.addEventListener('DOMContentLoaded', () => {
         setDatabaseStatus('saving');
         operationsSaveQueue=operationsSaveQueue.then(async()=>{
           try{
+            // Blindaje contra la carrera con la primera carga: si todavía
+            // no bajó loadFromServer() por primera vez, se espera acá
+            // (ver comentario en la declaración de initialServerLoadPromise
+            // más arriba). loadFromServer() nunca rechaza (atrapa sus
+            // propios errores), así que este await no se cuelga ni aunque
+            // falle la red — simplemente sigue con lo que haya.
+            if (initialServerLoadPromise) { try { await initialServerLoadPromise; } catch(_){} }
             const db=window.SupabaseDB;
             if(!db) throw new Error('Supabase no está disponible');
             const localClientes={plans:state.plans,days:state.days,currentDate:state.currentDate};
@@ -1266,7 +1285,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         const rows=c=>`<tr data-id="${c.id}">${columns.map(col=>`<td>${col.cell(c)}</td>`).join('')}</tr>`;
         const filteredActive=list.filter(c=>status(c,date)==='Activo');
-        const totals=`<tfoot>${totalRow(`Totales filtrados (${filteredActive.length} pedidos activos)`,filteredActive,'filtered')}${totalRow(`Totales generales (${activeOrders.length} pedidos activos)`,activeOrders,'general')}</tfoot>`;
+        const totals=`<tfoot>${totalRow(`Totales filtrados (${filteredActive.length} clientes activos)`,filteredActive,'filtered')}${totalRow(`Totales generales (${activeOrders.length} clientes activos)`,activeOrders,'general')}</tfoot>`;
         const printButtons=isDriverRole()
           ?`<button class="outline" data-action="export-diets">Imprimir orden de ruta</button>`
           :`<button class="outline" data-action="export-diets">Imprimir dietas especiales</button><button class="outline" data-action="export-route-order">Imprimir orden de ruta</button>`;
@@ -1330,7 +1349,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }).join('')}</tr>`;
         };
         const activeHistRows=rows.filter(c=>c.estado==='Activo');
-        const histTotals=`<tfoot>${histTotalRow(`Totales (${activeHistRows.length} pedidos activos)`,activeHistRows)}${histTotalRow(`Totales (${rows.length} pedidos atendidos)`,rows)}</tfoot>`;
+        const histTotals=`<tfoot>${histTotalRow(`Totales (${activeHistRows.length} clientes activos)`,activeHistRows)}${histTotalRow(`Total de clientes procesados: ${rows.length}`,rows)}</tfoot>`;
         const dateFieldHist=isDriverRole()
           ?`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div><button type="button" class="outline" id="work-date-today" style="margin-top:6px" title="Volver a ver el día actual, sin procesar">Ver hoy</button>`
           :`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div>`;
@@ -2013,12 +2032,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'background:#ffe1e6';
       }
       function metricsDriverTable(m){
-        const rows=m.driverRanking.map(d=>`<tr><td><b>${esc(d.name)}</b></td><td>${d.completed}</td><td>${d.failed}</td><td style="${heatColor(d.successRate)}">${(d.successRate*100).toFixed(0)}%</td><td>${d.avgMinutes?Math.round(d.avgMinutes)+' min':'—'}</td><td>${d.km?d.km.toFixed(1):'—'}</td><td>${d.routesWorked}</td></tr>`).join('');
-        return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Driver</th><th>Completadas</th><th>Fallidas</th><th>% éxito</th><th>Tiempo prom./ruta</th><th>Km estimados</th><th>Rutas trabajadas</th></tr></thead><tbody>${rows||'<tr><td class="empty" colspan="7">Sin datos en el periodo.</td></tr>'}</tbody></table></div>`;
+        const list=sort(m.driverRanking,'name','metrics-drivers');
+        const headers=[['Driver','name'],['Completadas','completed'],['Fallidas','failed'],['% éxito','successRate'],['Tiempo prom./ruta','avgMinutes'],['Km estimados','km'],['Rutas trabajadas','routesWorked']];
+        const rows=d=>`<tr><td><b>${esc(d.name)}</b></td><td>${d.completed}</td><td>${d.failed}</td><td style="${heatColor(d.successRate)}">${(d.successRate*100).toFixed(0)}%</td><td>${d.avgMinutes?Math.round(d.avgMinutes)+' min':'—'}</td><td>${d.km?d.km.toFixed(1):'—'}</td><td>${d.routesWorked}</td></tr>`;
+        return table(list,headers,rows,'metrics-drivers');
       }
       function metricsRouteTable(m){
-        const rows=m.routeRanking.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td>${r.scheduled}</td><td>${r.completed}</td><td>${r.failed}</td><td style="${heatColor(r.successRate)}">${(r.successRate*100).toFixed(0)}%</td><td>${r.avgMinutes?Math.round(r.avgMinutes)+' min':'—'}</td><td>${r.avgKm?r.avgKm.toFixed(1):'—'}</td><td>${r.avgClients.toFixed(1)}</td></tr>`).join('');
-        return `<div class="sheet table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Ruta</th><th>Programados</th><th>Completados</th><th>Fallidos</th><th>% éxito</th><th>Tiempo prom.</th><th>Km prom./día</th><th>Clientes prom./día</th></tr></thead><tbody>${rows||'<tr><td class="empty" colspan="8">Sin datos en el periodo.</td></tr>'}</tbody></table></div>`;
+        const list=sort(m.routeRanking,'name','metrics-routes');
+        const headers=[['Ruta','name'],['Programados','scheduled'],['Completados','completed'],['Fallidos','failed'],['% éxito','successRate'],['Tiempo prom.','avgMinutes'],['Km prom./día','avgKm'],['Clientes prom./día','avgClients']];
+        const rows=r=>`<tr><td><b>${esc(r.name)}</b></td><td>${r.scheduled}</td><td>${r.completed}</td><td>${r.failed}</td><td style="${heatColor(r.successRate)}">${(r.successRate*100).toFixed(0)}%</td><td>${r.avgMinutes?Math.round(r.avgMinutes)+' min':'—'}</td><td>${r.avgKm?r.avgKm.toFixed(1):'—'}</td><td>${r.avgClients.toFixed(1)}</td></tr>`;
+        return table(list,headers,rows,'metrics-routes');
       }
       function metricsComparisonCard(a,b){
         const pct=x=>`${(x*100).toFixed(0)}%`;
@@ -2500,6 +2523,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const ws=wb.addWorksheet('Clientes atendidos',{views:[{state:'frozen',ySplit:1}]});
         ws.columns=[
           {header:'Nombre',key:'nombre',width:26},{header:'Ruta',key:'ruta',width:16},
+          {header:'Clientes',key:'clientes',width:10},
           {header:'Bolsas',key:'bolsas',width:9},
           ...menuCols.map(([key,label])=>({header:label,key,width:11})),
           {header:'Servicios restantes',key:'restantes',width:17},
@@ -2513,10 +2537,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const styleTotalRow=(row,argb)=>row.eachCell((cell,colNumber)=>{cell.font={bold:true};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===CARRERAS_COL?'FFB8860B':argb}};if(colNumber===CARRERAS_COL)cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
         routeGroups.forEach(group=>{
           group.clients.forEach((c,i)=>{const row=ws.addRow({...clientRow(c),ruta:group.name});styleDataRow(row,i);});
-          const totalRow=ws.addRow({nombre:`Total ${group.name}`,ruta:'',...Object.fromEntries(NUMERIC_KEYS.map(k=>[k,sumField(group.clients,k)]))});
+          const totalRow=ws.addRow({nombre:`Total ${group.name}`,ruta:'',clientes:group.clients.length,...Object.fromEntries(NUMERIC_KEYS.map(k=>[k,sumField(group.clients,k)]))});
           styleTotalRow(totalRow,'FFE3E7EE');
         });
-        const grandTotalRow=ws.addRow({nombre:'TOTAL GENERAL',ruta:'',...Object.fromEntries(NUMERIC_KEYS.map(k=>[k,sumField(activeClients,k)]))});
+        const grandTotalRow=ws.addRow({nombre:'TOTAL GENERAL',ruta:'',clientes:activeClients.length,...Object.fromEntries(NUMERIC_KEYS.map(k=>[k,sumField(activeClients,k)]))});
         styleTotalRow(grandTotalRow,'FF0D6EFD');
         grandTotalRow.eachCell((cell,colNumber)=>{if(colNumber!==CARRERAS_COL)cell.font={bold:true,color:{argb:'FFFFFFFF'}};});
         if(movimientosDelDia.length){
@@ -2832,7 +2856,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // y acá se rebotaba a cada quien a su página. Ya no hace falta: todos
       // entran por index.html y las páginas/acciones se muestran u ocultan
       // según el rol (ver isDriverRole()/canAccessPage() en todo el archivo).
-      load(); applyBranding(); loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate(isDriverRole()?'delivery':'dispatch');
+      load(); applyBranding(); initialServerLoadPromise=loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate(isDriverRole()?'delivery':'dispatch');
       window.SupabaseDB?.joinPresence({id:activeUser.id, role:isDriverRole()?'driver':'staff', name:activeUser.name}, st=>{
         presenceCounts=computePresenceCounts(st);
         const box=document.getElementById('presence-counts');

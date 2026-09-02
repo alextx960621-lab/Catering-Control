@@ -22,8 +22,10 @@
 //      cual y el geocoding por texto (Nominatim) sigue de respaldo.
 //
 // Entrada (POST body JSON):  { "url": "https://maps.app.goo.gl/xxxx" }
-// Salida (200 JSON):         { "lat": -16.5, "lng": -68.15 } en éxito
-//                             { "error": "mensaje" } si no se pudo resolver
+// Salida (200 JSON):         { "lat": -16.5, "lng": -68.15, "resolvedUrl": "..." } en éxito
+//                             { "error": "mensaje", "resolvedUrl": "..." } si no se pudo resolver
+//                             (resolvedUrl es la URL larga a la que redirigió el link corto,
+//                             solo para diagnóstico manual — el frontend la ignora)
 // ============================================================================
 
 const CORS_HEADERS = {
@@ -37,18 +39,27 @@ const CORS_HEADERS = {
 // sea consistente sin importar si el link se resolvió acá o en el navegador.
 function extractLatLng(text: string): { lat: number; lng: number } | null {
   if (!text) return null;
+  // Orden importa: primero los patrones más precisos. "!3d..!4d.." es la
+  // coordenada EXACTA del pin dentro de un link de "lugar" de Google Maps —
+  // por eso necesita su PROPIO patrón (no comparte uno con "@lat,lng": ese
+  // formato no lleva coma entre los dos números, van separados por "!4d",
+  // así que un patrón que exige coma nunca lo matchea, y en la práctica
+  // siempre terminaba cayendo al "@lat,lng" de más abajo). "@lat,lng" es
+  // solo el centro de la cámara del mapa al compartir y puede venir corrido
+  // de la ubicación real, así que se prueba último entre los que sí tienen
+  // coordenadas explícitas en la URL.
   const patterns = [
-    /[@!]([-\d.]+),([-\d.]+)/,        // .../@-16.54,-68.05,17z  o  !3d-16.54!4d-68.05 (parcial)
-    /q=(-?\d+\.\d+),(-?\d+\.\d+)/,    // ?q=-16.54,-68.05
-    /ll=(-?\d+\.\d+),(-?\d+\.\d+)/,   // ?ll=-16.54,-68.05
-    /(-?\d{1,3}\.\d{3,},\s*-?\d{1,3}\.\d{3,})/, // "(-16.54, -68.05)" o "-16.54, -68.05" sueltos
+    /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,   // .../data=!...!3d-16.5233!4d-68.0889...
+    /q=(-?\d+\.\d+),(-?\d+\.\d+)/,              // ?q=-16.54,-68.05
+    /ll=(-?\d+\.\d+),(-?\d+\.\d+)/,             // ?ll=-16.54,-68.05
+    /@(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,    // .../@-16.54,-68.05,17z
+    /(-?\d{1,3}\.\d{3,}),\s*(-?\d{1,3}\.\d{3,})/, // "-16.54, -68.05" sueltos
   ];
   for (const re of patterns) {
     const m = text.match(re);
     if (m) {
-      const [latStr, lngStr] = m.length === 3 ? [m[1], m[2]] : m[1].split(',').map((s) => s.trim());
-      const lat = parseFloat(latStr);
-      const lng = parseFloat(lngStr);
+      const lat = parseFloat(m[1]);
+      const lng = parseFloat(m[2]);
       if (!isNaN(lat) && !isNaN(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
         return { lat, lng };
       }
@@ -92,10 +103,11 @@ Deno.serve(async (req: Request) => {
     // Si el link ya trae coordenadas (algunos links "cortos" en realidad no
     // lo son), ni siquiera hace falta seguir la redirección.
     let coords = extractLatLng(url);
+    let resolvedUrl: string | null = null;
 
     if (!coords) {
-      const finalUrl = await resolveShortLink(url);
-      if (finalUrl) coords = extractLatLng(finalUrl);
+      resolvedUrl = await resolveShortLink(url);
+      if (resolvedUrl) coords = extractLatLng(resolvedUrl);
       // Si el link resuelto tampoco trae coordenadas en la URL (a veces
       // Google Maps arma la URL larga solo con el nombre del lugar, sin
       // lat/lng visibles), no hay más nada que hacer del lado del link:
@@ -103,13 +115,13 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!coords) {
-      return new Response(JSON.stringify({ error: 'No se pudieron extraer coordenadas de ese link.' }), {
+      return new Response(JSON.stringify({ error: 'No se pudieron extraer coordenadas de ese link.', resolvedUrl }), {
         status: 200, // no es un error de la función, simplemente no se pudo
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       });
     }
 
-    return new Response(JSON.stringify(coords), {
+    return new Response(JSON.stringify({ ...coords, resolvedUrl }), {
       status: 200,
       headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
     });
