@@ -142,6 +142,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const STAFF_USERS_KEY = `${APP_CONFIG.storagePrefix}-staff-users-v1`;
       const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
+      // Marca de tiempo de la última sincronización de clientes lograda con
+      // éxito. Se usa para pedir solo los clientes que cambiaron desde esa
+      // fecha en vez de re-bajar el payload completo de todos en cada
+      // carga (ver loadClientRows más abajo).
+      const CLIENTS_SYNC_KEY = `${APP_CONFIG.storagePrefix}-clients-sync-at-v1`;
 
       const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
       const USER_THEME_KEY = `${APP_CONFIG.storagePrefix}-user-theme-v1`;
@@ -689,6 +694,42 @@ document.addEventListener('DOMContentLoaded', () => {
         return operationsSaveQueue;
       }
       function load(){ try { state=JSON.parse(localStorage.getItem(KEY)); } catch { state=null; } normalize(); localStorage.setItem(KEY,JSON.stringify(state)); }
+      // Sincroniza state.clients con el servidor sin volver a bajar el
+      // payload completo de todos los clientes en cada carga. La primera
+      // vez (o si por algún motivo no hay caché local todavía) se hace la
+      // sincronización completa de siempre. De ahí en más, solo se bajan:
+      //  1) los IDs de todos los clientes (liviano, solo para detectar
+      //     bajas comparando contra lo que ya había en caché), y
+      //  2) el payload de los clientes con updated_at >= la última sync
+      //     (los que sí cambiaron).
+      // El resto de los clientes se reutiliza tal cual del caché local.
+      // syncStartedAt se toma ANTES de pedirle nada al servidor: así, si
+      // algún cliente se guarda justo mientras esta consulta está en
+      // vuelo, la próxima sincronización lo vuelve a pedir igual (más
+      // seguro pedir un cliente de más por las dudas, que arriesgarse a
+      // perder uno por una carrera de tiempos).
+      async function loadClientRows(){
+        const db=window.SupabaseDB;
+        const lastSyncAt=localStorage.getItem(CLIENTS_SYNC_KEY);
+        const syncStartedAt=new Date().toISOString();
+        if(!lastSyncAt || !state.clients?.length){
+          const rows=await db.dbGetClientRows();
+          if(rows) localStorage.setItem(CLIENTS_SYNC_KEY, syncStartedAt);
+          return rows;
+        }
+        const [ids,changed]=await Promise.all([
+          db.dbGetClientRowIds(),
+          db.dbGetClientRowsSince(lastSyncAt)
+        ]);
+        if(ids===null || changed===null) return null; // falló la red: se conserva lo que ya había en caché
+        const idSet=new Set(ids);
+        const changedById=new Map(changed.map(c=>[c.id,c]));
+        const merged=state.clients.filter(c=>idSet.has(c.id)).map(c=>changedById.get(c.id)||c);
+        const mergedIds=new Set(merged.map(c=>c.id));
+        changed.forEach(c=>{ if(!mergedIds.has(c.id)){ merged.push(c); mergedIds.add(c.id); } });
+        localStorage.setItem(CLIENTS_SYNC_KEY, syncStartedAt);
+        return merged;
+      }
       async function loadFromServer(){
         try {
           const db=window.SupabaseDB;
@@ -697,7 +738,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const personalKeys=['drivers','routes','settings','staffUsers'];
           const inventarioKeys=['inventory'];
           const [clientesFields,clientRows,noteRows,personalFields,inventarioFields]=await Promise.all([
-            db.dbGetFields('clientes',clientesKeys), db.dbGetClientRows(), db.dbGetNoteRows(),
+            db.dbGetFields('clientes',clientesKeys), loadClientRows(), db.dbGetNoteRows(),
             db.dbGetFields('personal',personalKeys), db.dbGetFields('inventario',inventarioKeys)
           ]);
           let gotAny=false;

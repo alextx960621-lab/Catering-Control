@@ -108,6 +108,37 @@
     }
   }
 
+  // Variante liviana de dbGetClientRows para sincronizaciones que NO son la
+  // primera: dbGetClientRowIds trae solo la columna id (mínimo peso, solo
+  // sirve para detectar bajas comparando contra la lista local) y
+  // dbGetClientRowsSince trae el payload completo pero SOLO de los
+  // clientes cuyo updated_at es igual o posterior a la última sync (los
+  // que no cambiaron ni se piden). Ver loadClientRows() en index.html, que
+  // combina esto con la copia local en caché para reconstruir la lista
+  // completa sin volver a bajar el payload de todos los clientes en cada
+  // carga -- eso es lo que más pesa en egreso cuando hay muchos clientes.
+  async function dbGetClientRowIds() {
+    try {
+      const { data, error } = await client.from('db_clientes_rows').select('id');
+      if (error) { console.error('[supabase] Error leyendo ids de db_clientes_rows:', error.message); return null; }
+      return (data || []).map(r => r.id);
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo ids de db_clientes_rows:', err);
+      return null;
+    }
+  }
+
+  async function dbGetClientRowsSince(sinceISO) {
+    try {
+      const { data, error } = await client.from('db_clientes_rows').select('id,payload').gte('updated_at', sinceISO);
+      if (error) { console.error('[supabase] Error leyendo cambios de db_clientes_rows:', error.message); return null; }
+      return (data || []).map(r => ({ ...r.payload, id: r.id }));
+    } catch (err) {
+      console.error('[supabase] Fallo de red leyendo cambios de db_clientes_rows:', err);
+      return null;
+    }
+  }
+
   async function dbUpsertClientRows(clientsArray) {
     if (!clientsArray || !clientsArray.length) return true;
     try {
@@ -396,5 +427,5 @@
     }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, dbGetFields, dbSetFields, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetAllAuditLog, dbInsertAuditBulk, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, dbGetAllSnapshots, dbUpsertSnapshotsBulk, dbGetDeliveryRows, dbUpsertDeliveryRows, dbGetAllDeliveryStatus, joinPresence, presenceState, storageUploadImage, storageRemoveImage, IMAGES_BUCKET, client };
+  window.SupabaseDB = { dbGet, dbSet, dbGetFields, dbSetFields, rpc, dbGetClientRows, dbGetClientRowIds, dbGetClientRowsSince, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetAllAuditLog, dbInsertAuditBulk, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, dbGetAllSnapshots, dbUpsertSnapshotsBulk, dbGetDeliveryRows, dbUpsertDeliveryRows, dbGetAllDeliveryStatus, joinPresence, presenceState, storageUploadImage, storageRemoveImage, IMAGES_BUCKET, client };
 })();

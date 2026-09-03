@@ -706,21 +706,31 @@ function boot() {
                     localClient = JSON.parse(localStorage.getItem(CLIENT_ROW_KEY));
                 }
                 catch (_) { }
-                if (!localClient || localClient.id !== session.id) {
-                    localClient = await window.SupabaseDB?.dbGetClientRow(session.id);
-                    if (!localClient) {
+                const needsClientFetch = !localClient || localClient.id !== session.id;
+                // Estas 3 llamadas no dependen entre sí (branding y el chequeo
+                // Premium no necesitan el cliente para nada) -- antes iban una
+                // tras otra con await, sumando sus tiempos de red uno encima
+                // del otro. Pidiéndolas en paralelo, la pantalla "Cargando tu
+                // portal..." dura lo que tarda la más lenta de las 3, no la suma.
+                const [fetchedClient, freshBranding, isPremium] = await Promise.all([
+                    needsClientFetch ? window.SupabaseDB?.dbGetClientRow(session.id) : Promise.resolve(localClient),
+                    fetchBrandingRemote(),
+                    fetchIsPremium()
+                ]);
+                if (needsClientFetch) {
+                    if (!fetchedClient) {
                         window.location.replace('./login.html');
                         return;
                     }
+                    localClient = fetchedClient;
                     localStorage.setItem(CLIENT_ROW_KEY, JSON.stringify(localClient));
                 }
                 setData(localData);
                 setClient(localClient);
                 setTheme(getClientTheme(session.id));
-                const freshBranding = await fetchBrandingRemote();
                 if (freshBranding)
                     setBranding(freshBranding);
-                if (!(await fetchIsPremium())) {
+                if (!isPremium) {
                     setPhase('locked');
                     return;
                 }
