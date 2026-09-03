@@ -163,15 +163,12 @@ function boot() {
                 const cleanPhone = phone.replace(/\D/g, '');
                 const rows = await window.SupabaseDB?.rpc('login_cliente', { p_carnet: cleanCarnet, p_phone: cleanPhone });
                 const client = Array.isArray(rows) ? rows[0] : null;
-                if (client?.locked_seconds > 0) {
-                    onError(`Demasiados intentos fallidos. Espera ${client.locked_seconds} segundos e intenta de nuevo.`);
-                    return;
-                }
-                if (!client || !client.id) {
+                if (!client) {
                     onError('Carnet o teléfono no coinciden con un cliente registrado.');
                     return;
                 }
-                sessionStorage.setItem(CLIENT_SESSION_KEY, JSON.stringify({ id: client.id, name: client.name }));
+                sessionStorage.setItem(CLIENT_SESSION_KEY, JSON.stringify({ id: client.id, name: client.name, sessionToken: client.session_token }));
+                window.SupabaseDB?.setSessionToken(client.session_token, 'cliente');
                 window.location.href = CLIENT_PORTAL_URL;
             }
             catch (_) {
@@ -215,15 +212,17 @@ function boot() {
                 // contraseña fuera correcta. La validación de verdad (contraseña,
                 // cuenta bloqueada) ya la hace el backend en login_staff — acá solo
                 // nos aseguramos de que vino algo utilizable.
-                const validPerson = person && typeof person.id === 'string' && person.id.trim() && typeof person.role === 'string' && person.role.trim();
+                const validPerson = person && typeof person.id === 'string' && person.id.trim() && typeof person.role === 'string' && person.role.trim() && typeof person.session_token === 'string' && person.session_token.trim();
                 if (!validPerson) {
                     onError('Correo o contraseña incorrectos.');
                     return;
                 }
                 sessionStorage.setItem(STAFF_SESSION_KEY, JSON.stringify({
                     id: person.id, name: person.name, role: person.role,
-                    routeId: person.routeId || '', driverId: person.driverId || ''
+                    routeId: person.routeId || '', driverId: person.driverId || '',
+                    sessionToken: person.session_token
                 }));
+                window.SupabaseDB?.setSessionToken(person.session_token, 'staff');
                 window.location.href = staffDestination(person.role);
             }
             catch (_) {

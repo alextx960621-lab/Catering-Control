@@ -3009,6 +3009,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.onclick=()=>{ const collapsed=!document.getElementById('app').classList.contains('sidebar-collapsed'); apply(collapsed); localStorage.setItem(SIDEBAR_COLLAPSED_KEY,collapsed?'1':'0'); };
       })();$('#modal-close').onclick=()=>$('#modal').close();$('#modal-cancel').onclick=()=>$('#modal').close();$('#logout-btn').onclick=async()=>{
         try{ await operationsSaveQueue; }catch(_){}
+        try{ await window.SupabaseDB?.revokeSession(); }catch(_){}
         sessionStorage.removeItem(STAFF_SESSION_KEY);
         location.href='./login.html';
       };$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();const sd=await serverToday();normalize(sd);deliveryCache={};render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{
@@ -3049,6 +3050,7 @@ document.addEventListener('DOMContentLoaded', () => {
       };
       document.getElementById('brand-name').textContent = APP_CONFIG.companyName;
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
+        window.SupabaseDB?.setSessionToken(activeUser?.sessionToken || null, 'staff');
       if(!activeUser){ window.location.replace('./login.html'); return; }
       // Antes este mismo archivo se servía desde dos HTML distintos
       // (index.html para admin/editor/kitchen y driver.html para el driver)

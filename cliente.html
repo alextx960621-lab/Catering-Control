@@ -211,19 +211,13 @@ function boot() {
     }
     async function fetchServerSync(clientId) {
         try {
-            // 'clientes' ahora guarda plans/days/currentDate como filas
-            // separadas (una por campo) en vez de un solo bloque JSON en
-            // id='main' -- ver el mismo cambio en index.html/save(). Si la
-            // cuenta todavía no migró (nunca se guardó con la versión
-            // nueva del panel admin), se cae de respaldo al bloque viejo.
-            const [fields, remoteClient] = await Promise.all([
-                window.SupabaseDB?.dbGetFields('clientes', ['plans', 'days', 'currentDate']),
+            // plans/days/currentDate se leen del catálogo público del
+            // portal (get_portal_catalog RPC) -- no requiere sesión de
+            // staff, es información del mismo tipo que get_branding().
+            const [remoteMeta, remoteClient] = await Promise.all([
+                window.SupabaseDB?.getPortalCatalog(),
                 window.SupabaseDB?.dbGetClientRow(clientId)
             ]);
-            let remoteMeta = fields;
-            if (!remoteMeta || !Object.keys(remoteMeta).length) {
-                remoteMeta = await window.SupabaseDB?.dbGet('clientes');
-            }
             return { remoteMeta, remoteClient };
         }
         catch (_) {
@@ -233,7 +227,12 @@ function boot() {
     async function saveClient(updatedClient) {
         localStorage.setItem(CLIENT_ROW_KEY, JSON.stringify(updatedClient));
         try {
-            return await window.SupabaseDB.dbUpsertClientRows([updatedClient]);
+            // Guarda solo lo que el portal cliente puede tocar de su propio
+            // perfil (pausa/reactivación/dirección habitual) -- nunca el
+            // objeto completo. El servidor vuelve a filtrar esto igual,
+            // esto acá es nomás para no mandar de más.
+            const { pauseStart, returnDate, status, pauseDates, activeAddressId } = updatedClient;
+            return await window.SupabaseDB.dbSaveOwnClientProfile(updatedClient.id, { pauseStart, returnDate, status, pauseDates, activeAddressId });
         }
         catch (_) {
             return false;
@@ -244,6 +243,7 @@ function boot() {
         React.createElement("path", { d: "M16 17l5-5-5-5" }),
         React.createElement("path", { d: "M21 12H9" })));
     function logout() {
+        try { window.SupabaseDB?.revokeSession(); } catch (_) { }
         sessionStorage.removeItem(CLIENT_SESSION_KEY);
         window.location.href = './login.html';
     }
@@ -446,9 +446,10 @@ function boot() {
     // Tarjeta de dirección del cliente. Cubre dos casos:
     //  1) Cambiar la dirección HABITUAL (client.activeAddressId) — desde
     //     ahora en adelante, eligiendo entre las direcciones que ya tiene
-    //     guardadas. Se guarda directo con dbUpsertClientRows, igual que la
-    //     pausa/reactivación (mismo modelo de confianza: RLS ya le permite
-    //     al cliente escribir su propia fila).
+    //     guardadas. Se guarda con dbSaveOwnClientProfile, igual que la
+    //     pausa/reactivación (el RPC cliente_save_profile valida server-side
+    //     que la sesión sea dueña de esa fila y solo deja tocar los campos
+    //     de la lista blanca -- ver supabase-security-lockdown.sql).
     //  2) Un cambio puntual SOLO para el próximo día laborable (usa la RPC
     //     set_client_address_override que ya existía) — útil para una
     //     excepción sin tocar su dirección de siempre.
@@ -544,7 +545,7 @@ function boot() {
                 return;
             }
             setSending(true);
-            const result = await window.SupabaseDB?.rpc('crear_nota_cliente', { p_client_id: client.id, p_texto: text });
+            const result = await window.SupabaseDB?.rpc('crear_nota_cliente', { p_token: window.SupabaseDB?.getSessionToken(), p_client_id: client.id, p_texto: text });
             setSending(false);
             if (!result) {
                 setFeedback({ error: true, text: 'No se pudo enviar. Intenta nuevamente o contáctanos por WhatsApp.' });
@@ -644,7 +645,7 @@ function boot() {
             const now = new Date();
             if (now.getHours() >= 22)
                 return { error: true, text: 'Ya pasó el horario para cambiar la dirección de mañana. Ponte en contacto con Atención al Cliente.' };
-            const result = await window.SupabaseDB?.rpc('set_client_address_override', { p_client_id: client.id, p_address_id: selectedAddressId, p_date: next });
+            const result = await window.SupabaseDB?.rpc('set_client_address_override', { p_token: window.SupabaseDB?.getSessionToken(), p_client_id: client.id, p_address_id: selectedAddressId, p_date: next });
             if (!result)
                 return { error: true, text: 'No se pudo guardar. Intenta nuevamente o contáctanos por WhatsApp.' };
             const overrides = Array.isArray(result) ? result : (client.addressOverrides || []).filter(o => o.date !== next).concat([{ date: next, addressId: selectedAddressId }]);
@@ -700,6 +701,7 @@ function boot() {
                     return;
                 }
                 sessionRef.current = session;
+                window.SupabaseDB?.setSessionToken(session.sessionToken || null, 'cliente');
                 localData.days || (localData.days = {});
                 let localClient = null;
                 try {
@@ -779,7 +781,7 @@ function boot() {
         }
         // onLocalUpdateOnly=true: la dirección de mañana ya se guardó vía RPC
         // propia (set_client_address_override) — acá solo hay que reflejar el
-        // cambio en el estado de React, sin volver a llamar dbUpsertClientRows.
+        // cambio en el estado de React, sin volver a llamar dbSaveOwnClientProfile.
         async function handleSaveClient(updated, onLocalUpdateOnly) {
             if (onLocalUpdateOnly) {
                 setClient(updated);
