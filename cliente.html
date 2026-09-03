@@ -211,10 +211,19 @@ function boot() {
     }
     async function fetchServerSync(clientId) {
         try {
-            const [remoteMeta, remoteClient] = await Promise.all([
-                window.SupabaseDB?.dbGet('clientes'),
+            // 'clientes' ahora guarda plans/days/currentDate como filas
+            // separadas (una por campo) en vez de un solo bloque JSON en
+            // id='main' -- ver el mismo cambio en index.html/save(). Si la
+            // cuenta todavía no migró (nunca se guardó con la versión
+            // nueva del panel admin), se cae de respaldo al bloque viejo.
+            const [fields, remoteClient] = await Promise.all([
+                window.SupabaseDB?.dbGetFields('clientes', ['plans', 'days', 'currentDate']),
                 window.SupabaseDB?.dbGetClientRow(clientId)
             ]);
+            let remoteMeta = fields;
+            if (!remoteMeta || !Object.keys(remoteMeta).length) {
+                remoteMeta = await window.SupabaseDB?.dbGet('clientes');
+            }
             return { remoteMeta, remoteClient };
         }
         catch (_) {

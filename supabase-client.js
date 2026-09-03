@@ -46,6 +46,46 @@
     }
   }
 
+  // dbGetFields/dbSetFields: variante "por campo" de dbGet/dbSet. En vez de
+  // guardar todo el bloque (clientes/personal/inventario) en una sola fila
+  // id='main', cada campo top-level (plans, days, drivers, settings...)
+  // vive en su propia fila (id=nombre del campo) dentro de la misma tabla.
+  // Así save() puede leer/escribir solo el campito que cambió, sin bajar
+  // ni subir el bloque entero cada vez. No requiere migración de esquema:
+  // las tablas db_clientes/db_personal/db_inventario ya son id/payload/
+  // updated_at: 'main' simplemente deja de usarse para escritura nueva
+  // (queda como respaldo legado para migrar cuentas viejas, ver
+  // loadFromServer en index.html).
+  async function dbGetFields(tableKey, ids) {
+    const table = DB_TABLES[tableKey];
+    if (!ids || !ids.length) return {};
+    try {
+      const { data, error } = await client.from(table).select('id,payload').in('id', ids);
+      if (error) { console.error(`[supabase] Error leyendo campos de ${table}:`, error.message); return null; }
+      const result = {};
+      (data || []).forEach(r => { result[r.id] = r.payload; });
+      return result;
+    } catch (err) {
+      console.error(`[supabase] Fallo de red leyendo campos de ${table}:`, err);
+      return null;
+    }
+  }
+
+  async function dbSetFields(tableKey, fieldsObj) {
+    const table = DB_TABLES[tableKey];
+    const ids = Object.keys(fieldsObj || {});
+    if (!ids.length) return true;
+    try {
+      const rows = ids.map(id => ({ id, payload: fieldsObj[id], updated_at: new Date().toISOString() }));
+      const { error } = await client.from(table).upsert(rows, { onConflict: 'id' });
+      if (error) { console.error(`[supabase] Error guardando campos de ${table}:`, error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error(`[supabase] Fallo de red guardando campos de ${table}:`, err);
+      return false;
+    }
+  }
+
   async function rpc(fnName, params) {
     try {
       const { data, error } = await client.rpc(fnName, params);
@@ -321,5 +361,40 @@
     catch (_) { return {}; }
   }
 
-  window.SupabaseDB = { dbGet, dbSet, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetAllAuditLog, dbInsertAuditBulk, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, dbGetAllSnapshots, dbUpsertSnapshotsBulk, dbGetDeliveryRows, dbUpsertDeliveryRows, dbGetAllDeliveryStatus, joinPresence, presenceState, client };
+  // --- Storage de imágenes (logo, fotos de drivers/planes, íconos de menú,
+  // fotos de respaldo de entrega). Antes viajaban como base64 pegadas en las
+  // filas de Postgres (se re-descargaban enteras en cada lectura de esas
+  // filas); ahora se suben como archivo al bucket "app-images" y en la fila
+  // solo queda guardada la URL pública. Requiere haber corrido
+  // supabase-storage-setup.sql una vez en el proyecto.
+  const IMAGES_BUCKET = 'app-images';
+
+  async function storageUploadImage(path, blob, contentType) {
+    try {
+      // cacheControl largo: son fotos que casi no cambian (logo, driver,
+      // plan...), así que el navegador las cachea y no las vuelve a pedir
+      // en cada visita -- eso es egress que ya no se gasta.
+      const { error } = await client.storage.from(IMAGES_BUCKET).upload(path, blob, { contentType, upsert: true, cacheControl: '604800' });
+      if (error) { console.error('[supabase] Error subiendo imagen:', error.message); return null; }
+      const { data } = client.storage.from(IMAGES_BUCKET).getPublicUrl(path);
+      return data?.publicUrl || null;
+    } catch (err) {
+      console.error('[supabase] Fallo de red subiendo imagen:', err);
+      return null;
+    }
+  }
+
+  async function storageRemoveImage(path) {
+    if (!path) return true;
+    try {
+      const { error } = await client.storage.from(IMAGES_BUCKET).remove([path]);
+      if (error) { console.error('[supabase] Error borrando imagen:', error.message); return false; }
+      return true;
+    } catch (err) {
+      console.error('[supabase] Fallo de red borrando imagen:', err);
+      return false;
+    }
+  }
+
+  window.SupabaseDB = { dbGet, dbSet, dbGetFields, dbSetFields, rpc, dbGetClientRows, dbUpsertClientRows, dbDeleteClientRows, dbGetClientRow, dbInsertAudit, dbGetAuditLog, dbGetAllAuditLog, dbInsertAuditBulk, dbGetNoteRows, dbUpsertNoteRows, dbDeleteNoteRows, dbUpsertSnapshot, dbGetSnapshot, dbListSnapshotDates, dbGetAllSnapshots, dbUpsertSnapshotsBulk, dbGetDeliveryRows, dbUpsertDeliveryRows, dbGetAllDeliveryStatus, joinPresence, presenceState, storageUploadImage, storageRemoveImage, IMAGES_BUCKET, client };
 })();

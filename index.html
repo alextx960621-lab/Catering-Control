@@ -265,7 +265,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       function menuItems(){ return (state?.settings?.menuItems||[]).map(m=>[m.key,m.label]); }
 
-      function readImageAsDataURL(file, maxDim = 480, quality = 0.82) {
+      // Comprime la imagen a JPEG (igual que antes) y devuelve un Blob en vez
+      // de un dataURL base64 -- listo para subir a Storage en vez de
+      // embeberlo en la fila de Postgres.
+      function resizeImageToBlob(file, maxDim = 480, quality = 0.82) {
         return new Promise((resolve, reject) => {
           if (!file || !file.type?.startsWith('image/')) { reject(new Error('Archivo no válido')); return; }
           const img = new Image();
@@ -276,7 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
               const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
               const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
               canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-              resolve(canvas.toDataURL('image/jpeg', quality));
+              canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('No se pudo comprimir la imagen')), 'image/jpeg', quality);
             };
             img.onerror = () => reject(new Error('No se pudo leer la imagen'));
             img.src = reader.result;
@@ -284,6 +287,36 @@ document.addEventListener('DOMContentLoaded', () => {
           reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
           reader.readAsDataURL(file);
         });
+      }
+      // Saca el "path" dentro del bucket a partir de la URL pública guardada
+      // (".../object/public/app-images/logos/xxx.jpg" -> "logos/xxx.jpg"),
+      // para poder borrar el archivo viejo del bucket cuando se reemplaza o
+      // se quita una imagen (si no, quedan huérfanos ocupando espacio).
+      function storagePathFromUrl(url) {
+        if (!url) return null;
+        const bucket = window.SupabaseDB?.IMAGES_BUCKET || 'app-images';
+        const marker = `/object/public/${bucket}/`;
+        const idx = String(url).indexOf(marker);
+        return idx === -1 ? null : url.slice(idx + marker.length);
+      }
+      function removeStorageImageByUrl(url) {
+        const path = storagePathFromUrl(url);
+        if (path) window.SupabaseDB?.storageRemoveImage(path);
+      }
+      // Reemplaza al viejo readImageAsDataURL: en vez de embeber la imagen
+      // como base64 dentro de la fila de Postgres (lo que hacía que se
+      // volviera a descargar entera en cada lectura de esa fila -- login,
+      // cada guardado, polling de Despacho cada 12s...), la sube al bucket
+      // "app-images" y devuelve la URL pública, que es lo único que se
+      // guarda en la fila. Requiere haber corrido
+      // supabase-storage-setup.sql una vez en el proyecto.
+      async function uploadImageFile(file, folder, maxDim = 480, quality = 0.82, oldUrl = '') {
+        const blob = await resizeImageToBlob(file, maxDim, quality);
+        const path = `${folder}/${uid('img')}.jpg`;
+        const url = await window.SupabaseDB?.storageUploadImage(path, blob, 'image/jpeg');
+        if (!url) throw new Error('No se pudo subir la imagen a Storage.');
+        if (oldUrl) removeStorageImageByUrl(oldUrl);
+        return url;
       }
       function applyBranding(){
         const name = state?.settings?.companyName?.trim() || APP_CONFIG.companyName;
@@ -529,27 +562,39 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       let lastSavedClients=new Map();
       let lastSavedNotes=new Map();
-      let lastSyncedClientes=null, lastSyncedPersonal=null, lastSyncedInventario=null;
+      // Antes 'clientes'/'personal'/'inventario' se guardaban como un solo
+      // bloque JSON gigante por tabla (fila id='main'). Ahora cada campo
+      // top-level tiene su propia fila (id=nombre del campo) en la misma
+      // tabla, vía dbGetFields/dbSetFields (ver supabase-client.js). Eso
+      // permite que save() detecte y suba SOLO el campito que cambió en
+      // vez de todo el bloque -- ya no hace falta bajar el bloque entero
+      // para mezclarlo antes de subir (ver FIELD_MAP más abajo), porque al
+      // vivir cada campo en su propia fila no hay riesgo de pisar otros
+      // campos del mismo bloque como pasaba antes.
+      // lastSyncedFields guarda el último JSON subido/bajado con éxito de
+      // cada campo, para poder compararlo y saber cuáles cambiaron.
+      let lastSyncedFields={};
+      const FIELD_MAP={
+        plans:      { table:'clientes',   get:()=>state.plans,       set:v=>{ state.plans=v; } },
+        days:       { table:'clientes',   get:()=>state.days,        set:v=>{ state.days=v; } },
+        currentDate:{ table:'clientes',   get:()=>state.currentDate, set:v=>{ state.currentDate=v; } },
+        drivers:    { table:'personal',   get:()=>state.drivers,     set:v=>{ state.drivers=v; } },
+        routes:     { table:'personal',   get:()=>state.routes,      set:v=>{ state.routes=v; } },
+        settings:   { table:'personal',   get:()=>state.settings,    set:v=>{ state.settings=v; } },
+        staffUsers: { table:'personal',   get:()=>staffUsers,        set:v=>{ if(Array.isArray(v)&&v.length){ staffUsers=v; localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers)); } } },
+        inventory:  { table:'inventario', get:()=>state.inventory,   set:v=>{ state.inventory=v; } }
+      };
       // Se setea al arrancar la app (ver el boot al final del archivo) con
       // la promesa de la PRIMERA loadFromServer(). Mientras esa promesa no
-      // se resuelva, lastSavedClients/lastSavedNotes siguen vacíos — y si
-      // algo llama a save() en ese momento (ej. el driver marca una entrega
-      // apenas abre la app, antes de que termine de bajar los datos reales
-      // por una conexión lenta), diffClients()/diffNotes() verían "todo
-      // cambiado" y subirían la copia vieja del caché del celular,
-      // pisando cualquier cambio que un editor haya hecho mientras tanto
-      // (el orden de reparto, por ejemplo). save() espera esta promesa
-      // antes de subir nada, para partir siempre de la base real del
-      // servidor.
+      // se resuelva, lastSavedClients/lastSavedNotes/lastSyncedFields siguen
+      // vacíos — y si algo llama a save() en ese momento (ej. el driver
+      // marca una entrega apenas abre la app, antes de que termine de bajar
+      // los datos reales por una conexión lenta), se vería "todo cambiado"
+      // y subiría la copia vieja del caché del celular, pisando cualquier
+      // cambio que un editor haya hecho mientras tanto (el orden de
+      // reparto, por ejemplo). save() espera esta promesa antes de subir
+      // nada, para partir siempre de la base real del servidor.
       let initialServerLoadPromise=null;
-      function mergeTopLevel(serverPayload, localPayload, lastSynced){
-        const merged={...(serverPayload||{})};
-        Object.keys(localPayload).forEach(key=>{
-          const changed=!lastSynced || JSON.stringify(localPayload[key])!==JSON.stringify(lastSynced[key]);
-          if(changed) merged[key]=localPayload[key];
-        });
-        return merged;
-      }
       function diffClients(){
         const changed=[],currentIds=new Set();
         for(const c of state.clients){
@@ -590,10 +635,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if(okDelete) deletedIds.forEach(id=>lastSavedNotes.delete(id));
         return okUpsert&&okDelete;
       }
-      function blockChanged(local,lastSynced){
-        if(!lastSynced) return true;
-        return Object.keys(local).some(key=>JSON.stringify(local[key])!==JSON.stringify(lastSynced[key]));
-      }
       function save(){
         localStorage.setItem(KEY, JSON.stringify(state));
         localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
@@ -609,35 +650,34 @@ document.addEventListener('DOMContentLoaded', () => {
             if (initialServerLoadPromise) { try { await initialServerLoadPromise; } catch(_){} }
             const db=window.SupabaseDB;
             if(!db) throw new Error('Supabase no está disponible');
-            const localClientes={plans:state.plans,days:state.days,currentDate:state.currentDate};
-            const localPersonal={drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers};
-            const localInventario={inventory:state.inventory};
-            const needClientes=blockChanged(localClientes,lastSyncedClientes);
-            const needPersonal=blockChanged(localPersonal,lastSyncedPersonal);
-            const needInventario=blockChanged(localInventario,lastSyncedInventario);
-            const [serverClientes,serverPersonal,serverInventario]=await Promise.all([
-              needClientes?db.dbGet('clientes'):Promise.resolve(null),
-              needPersonal?db.dbGet('personal'):Promise.resolve(null),
-              needInventario?db.dbGet('inventario'):Promise.resolve(null)
-            ]);
-            const mergedClientes=needClientes?mergeTopLevel(serverClientes,localClientes,lastSyncedClientes):localClientes;
-            const mergedPersonal=needPersonal?mergeTopLevel(serverPersonal,localPersonal,lastSyncedPersonal):localPersonal;
-            const mergedInventario=needInventario?mergeTopLevel(serverInventario,localInventario,lastSyncedInventario):localInventario;
-            state.plans=mergedClientes.plans; state.days=mergedClientes.days; state.currentDate=mergedClientes.currentDate;
-            state.drivers=mergedPersonal.drivers; state.routes=mergedPersonal.routes; state.settings=mergedPersonal.settings; staffUsers=mergedPersonal.staffUsers;
-            state.inventory=mergedInventario.inventory;
-            const [okClientes,okClientRows,okNoteRows,okPersonal,okInventario]=await Promise.all([
-              needClientes?db.dbSet('clientes',mergedClientes):Promise.resolve(true),
+            // Solo se sube el campo cuyo JSON cambió desde el último
+            // guardado con éxito -- no hace falta bajar nada del servidor
+            // primero para mezclar, porque cada campo vive en su propia
+            // fila (dbSetFields) y escribirlo no toca los demás.
+            const changedByTable={};
+            const changedKeys=[];
+            for(const key in FIELD_MAP){
+              const val=FIELD_MAP[key].get();
+              const json=JSON.stringify(val);
+              if(lastSyncedFields[key]!==json){
+                (changedByTable[FIELD_MAP[key].table] ||= {})[key]=val;
+                changedKeys.push(key);
+              }
+            }
+            const tables=Object.keys(changedByTable);
+            const [okFields,okClientRows,okNoteRows]=await Promise.all([
+              (async()=>{
+                if(!tables.length) return true;
+                const results=await Promise.all(tables.map(t=>db.dbSetFields(t,changedByTable[t])));
+                const allOk=results.every(Boolean);
+                if(allOk) changedKeys.forEach(key=>{ lastSyncedFields[key]=JSON.stringify(FIELD_MAP[key].get()); });
+                return allOk;
+              })(),
               saveClientRows(),
-              saveNoteRows(),
-              needPersonal?db.dbSet('personal',mergedPersonal):Promise.resolve(true),
-              needInventario?db.dbSet('inventario',mergedInventario):Promise.resolve(true)
+              saveNoteRows()
             ]);
-            const ok=okClientes&&okClientRows&&okNoteRows&&okPersonal&&okInventario;
+            const ok=okFields&&okClientRows&&okNoteRows;
             if(ok){
-              if(needClientes)lastSyncedClientes=JSON.parse(JSON.stringify(mergedClientes));
-              if(needPersonal)lastSyncedPersonal=JSON.parse(JSON.stringify(mergedPersonal));
-              if(needInventario)lastSyncedInventario=JSON.parse(JSON.stringify(mergedInventario));
               localStorage.setItem(KEY, JSON.stringify(state));
               localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
             }
@@ -653,16 +693,33 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const db=window.SupabaseDB;
           if(!db) throw new Error('Supabase no está disponible');
-          const [clientesData,clientRows,noteRows,personalData,inventarioData]=await Promise.all([
-            db.dbGet('clientes'), db.dbGetClientRows(), db.dbGetNoteRows(), db.dbGet('personal'), db.dbGet('inventario')
+          const clientesKeys=['plans','days','currentDate'];
+          const personalKeys=['drivers','routes','settings','staffUsers'];
+          const inventarioKeys=['inventory'];
+          const [clientesFields,clientRows,noteRows,personalFields,inventarioFields]=await Promise.all([
+            db.dbGetFields('clientes',clientesKeys), db.dbGetClientRows(), db.dbGetNoteRows(),
+            db.dbGetFields('personal',personalKeys), db.dbGetFields('inventario',inventarioKeys)
           ]);
           let gotAny=false;
-          if (clientesData) {
+          // Migración de cuentas viejas: si todavía no hay filas por campo
+          // (cuenta nunca guardó con la versión nueva) pero sí existe el
+          // bloque legado completo en id='main', se usa ese como respaldo
+          // una única vez. Apenas se llame a save() de nuevo, ya queda
+          // reescrito como filas por campo (el 'main' viejo se ignora de
+          // ahí en más, no hace falta borrarlo).
+          let clientesData=clientesFields;
+          if(!clientesData || !Object.keys(clientesData).length){
+            const legacy=await db.dbGet('clientes');
+            if(legacy) clientesData=legacy;
+          }
+          if (clientesData && Object.keys(clientesData).length) {
             gotAny=true;
-            state.plans = clientesData.plans ?? state.plans;
-            state.days = clientesData.days ?? state.days;
-            state.currentDate = clientesData.currentDate ?? state.currentDate;
-            lastSyncedClientes = JSON.parse(JSON.stringify({plans:state.plans,days:state.days,currentDate:state.currentDate}));
+            if('plans' in clientesData) state.plans = clientesData.plans ?? state.plans;
+            if('days' in clientesData) state.days = clientesData.days ?? state.days;
+            if('currentDate' in clientesData) state.currentDate = clientesData.currentDate ?? state.currentDate;
+            lastSyncedFields.plans=JSON.stringify(state.plans);
+            lastSyncedFields.days=JSON.stringify(state.days);
+            lastSyncedFields.currentDate=JSON.stringify(state.currentDate);
           }
           if (clientRows) {
             gotAny=true;
@@ -674,21 +731,34 @@ document.addEventListener('DOMContentLoaded', () => {
             state.notes = noteRows;
             lastSavedNotes = new Map(noteRows.map(nt=>[nt.id, JSON.stringify(nt)]));
           }
-          if (personalData) {
+          let personalData=personalFields;
+          if(!personalData || !Object.keys(personalData).length){
+            const legacy=await db.dbGet('personal');
+            if(legacy) personalData=legacy;
+          }
+          if (personalData && Object.keys(personalData).length) {
             gotAny=true;
-            state.drivers = personalData.drivers ?? state.drivers;
-            state.routes = personalData.routes ?? state.routes;
-            state.settings = personalData.settings ?? state.settings;
+            if('drivers' in personalData) state.drivers = personalData.drivers ?? state.drivers;
+            if('routes' in personalData) state.routes = personalData.routes ?? state.routes;
+            if('settings' in personalData) state.settings = personalData.settings ?? state.settings;
             if (Array.isArray(personalData.staffUsers) && personalData.staffUsers.length) {
               staffUsers = personalData.staffUsers;
               localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
             }
-            lastSyncedPersonal = JSON.parse(JSON.stringify({drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers}));
+            lastSyncedFields.drivers=JSON.stringify(state.drivers);
+            lastSyncedFields.routes=JSON.stringify(state.routes);
+            lastSyncedFields.settings=JSON.stringify(state.settings);
+            lastSyncedFields.staffUsers=JSON.stringify(staffUsers);
           }
-          if (inventarioData) {
+          let inventarioData=inventarioFields;
+          if(!inventarioData || !Object.keys(inventarioData).length){
+            const legacy=await db.dbGet('inventario');
+            if(legacy) inventarioData=legacy;
+          }
+          if (inventarioData && Object.keys(inventarioData).length) {
             gotAny=true;
-            state.inventory = inventarioData.inventory ?? state.inventory;
-            lastSyncedInventario = JSON.parse(JSON.stringify({inventory:state.inventory}));
+            if('inventory' in inventarioData) state.inventory = inventarioData.inventory ?? state.inventory;
+            lastSyncedFields.inventory=JSON.stringify(state.inventory);
           }
           if (gotAny) localStorage.setItem(KEY, JSON.stringify(state));
           setDatabaseStatus('ok');
@@ -1127,6 +1197,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stopDeliveryPoll();
         deliveryPollTimer = setInterval(async () => {
           if (ui.page !== 'delivery' || workDate() !== date) { stopDeliveryPoll(); return; }
+          if (document.hidden) return; // pestaña en segundo plano: no gastar datos en vano
           if ($('#modal')?.open) return; // no interrumpir una marca/edición en curso
           await ensureDeliveryLoaded(date, true);
           if (ui.page !== 'delivery' || workDate() !== date) return; // cambió mientras esperaba la red
@@ -1193,11 +1264,11 @@ document.addEventListener('DOMContentLoaded', () => {
           if (file) {
             // Fotos de respaldo de entrega: solo sirven para comprobar el
             // paquete/puerta ante un reclamo, no hace falta que sean nítidas.
-            // Se guardan como base64 dentro de la fila de Postgres (no hay
-            // bucket de Storage), así que más chico = base de datos más
-            // liviana. 360px y calidad 0.55 siguen siendo perfectamente
-            // legibles para eso, y pesan bastante menos que 480px/0.75.
-            try { image = await readImageAsDataURL(file, 360, .55); }
+            // Ahora se suben al bucket de Storage (antes iban como base64
+            // dentro de la fila de Postgres, y se re-descargaban enteras
+            // cada 12s mientras Despacho está abierto). 360px y calidad
+            // 0.55 siguen siendo perfectamente legibles para eso.
+            try { image = await uploadImageFile(file, 'delivery', 360, .55, image); }
             catch (_) { notice('No se pudo procesar la foto.', true); return false; }
           }
           const reason = (data.reason || '').trim();
@@ -1213,6 +1284,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!canEditPage('delivery')) { notice('No tienes permiso para hacer esto.', true); return; }
         const date = workDate(), c = state.clients.find(x => x.id === clientId);
         if (!confirm('¿Quitar la marca de entrega de este pedido?')) return;
+        const prev = deliveryRecord(date, clientId);
+        if (prev?.image) removeStorageImageByUrl(prev.image);
         const ok = await saveDeliveryRecord(date, clientId, { status: 'pendiente', reason: '', note: '', image: '', at: new Date().toISOString(), by: activeUser?.name || roleLabel(role()) });
         renderDelivery();
         $('#modal')?.open && $('#modal').close(); // por si se quitó desde el detalle (openDeliveryDetail)
@@ -1722,7 +1795,7 @@ document.addEventListener('DOMContentLoaded', () => {
         bindSearch('drivers-search','drivers',renderDrivers);
       }
       function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label class="wide">Rutas adicionales (solo para cubrir un reemplazo temporal)<select name="extraRouteIds" multiple size="4">${state.routes.map(r=>`<option value="${esc(r.id)}" ${(d.extraRouteIds||[]).includes(r.id)?'selected':''}>${esc(r.name)}</option>`).join('')}</select><small class="muted">Ctrl/Cmd + clic para elegir varias. Una ruta no puede estar a la vez en dos drivers (ni como principal ni como adicional) — si necesitas moverla, quítala primero del otro driver.</small></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="outline" data-action="remove-driver-photo" data-id="${d.id}">Quitar foto</button>`:''}</div></label></div>`;}
-      async function removeDriverPhoto(id){const d=driver(id);if(!d)return;d.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openDriver(id);}
+      async function removeDriverPhoto(id){const d=driver(id);if(!d)return;if(d.photoUrl)removeStorageImageByUrl(d.photoUrl);d.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openDriver(id);}
       function openDriver(id){const isNew=!id;const d0=id?driver(id):null;showModal(d0?'Editar driver':'Añadir driver',driverForm(d0||{}),async f=>{
         const data=Object.fromEntries(new FormData(f));
         const extraRouteIds=[...f.elements['extraRouteIds'].selectedOptions].map(o=>o.value).filter(Boolean);
@@ -1733,7 +1806,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const conflict=driverRouteConflict(rid,d0?.id);
           if(conflict){notice(`La ruta "${routeName(rid)}" ya está asignada a ${conflict.firstName} ${conflict.lastName}. Quítasela primero (o usa "Rutas adicionales" solo para reemplazos puntuales).`,true);return false;}
         }
-        if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}
+        if(file){try{data.photoUrl=await uploadImageFile(file,'drivers',320,.82,d0?.photoUrl||'');}catch(_){notice('No se pudo procesar la foto.',true);}}
         let d=d0;
         if(d){Object.assign(d,data,{extraRouteIds});state.clients.filter(c=>c.driverId===d.id).forEach(c=>c.routeId=d.routeId);
         const linkedUser=staffUsers.find(u=>u.driverId===d.id);
@@ -1825,11 +1898,11 @@ document.addEventListener('DOMContentLoaded', () => {
         openItemIconsHandlers();
       }
       function openItemIconsHandlers(){
-        $$('[data-item-icon]').forEach(input=>input.onchange=async e=>{const file=e.target.files[0];if(!file)return;const key=input.dataset.itemIcon;try{state.settings.itemIcons[key]=await readImageAsDataURL(file,160,.8);const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}});
+        $$('[data-item-icon]').forEach(input=>input.onchange=async e=>{const file=e.target.files[0];if(!file)return;const key=input.dataset.itemIcon;try{const oldUrl=state.settings.itemIcons[key];state.settings.itemIcons[key]=await uploadImageFile(file,'icons',160,.8,oldUrl);const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}});
       }
       function planForm(p={}){return `<div class="form-grid"><label>Nombre *<input name="name" required value="${esc(p.name)}"></label><label>Tipo<input name="type" value="${esc(p.type||'General')}"></label><label class="wide">Foto del plan<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><input type="file" name="photoFile" accept="image/*">${p.id&&p.photoUrl?`<button type="button" class="outline" data-action="remove-plan-photo" data-id="${p.id}">Quitar foto</button>`:''}</div></label><div class="wide"><label>Artículos incluidos</label>${itemFields(p.items)}</div></div>`;}
-      async function removePlanPhoto(id){const p=plan(id);if(!p)return;p.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openPlan(id);}
-      function openPlan(id){const isNew=!id;const p0=id?plan(id):null;showModal(p0?'Editar plan':'Crear plan',planForm(p0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;data.items=formItems(f);if(file){try{data.photoUrl=await readImageAsDataURL(file,320,.82);}catch(_){notice('No se pudo procesar la foto.',true);}}let p=p0;if(p)Object.assign(p,data);else{p={id:uid('p'),...data};state.plans.push(p);}const saved=await save();if(!saved)return false;renderPlans();notice('Plan guardado.');logAudit(isNew?'Plan creado':'Plan editado','plan',p.name,p.id,{});});}
+      async function removePlanPhoto(id){const p=plan(id);if(!p)return;if(p.photoUrl)removeStorageImageByUrl(p.photoUrl);p.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openPlan(id);}
+      function openPlan(id){const isNew=!id;const p0=id?plan(id):null;showModal(p0?'Editar plan':'Crear plan',planForm(p0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;data.items=formItems(f);if(file){try{data.photoUrl=await uploadImageFile(file,'plans',320,.82,p0?.photoUrl||'');}catch(_){notice('No se pudo procesar la foto.',true);}}let p=p0;if(p)Object.assign(p,data);else{p={id:uid('p'),...data};state.plans.push(p);}const saved=await save();if(!saved)return false;renderPlans();notice('Plan guardado.');logAudit(isNew?'Plan creado':'Plan editado','plan',p.name,p.id,{});});}
 
       function kitchenItem(id){ return state.inventory.items.find(x=>x.id===id); }
       function clientItemQuantity(c,key){ const own=c.items && Object.keys(c.items).length ? c.items : plan(c.planId)?.items || {}; return n(own[key]); }
@@ -2503,11 +2576,11 @@ document.addEventListener('DOMContentLoaded', () => {
         $('#my-theme').onchange=e=>{saveUserTheme(e.target.value);render();};
         $$('[data-column]').forEach(input=>input.onchange=()=>{const key=input.dataset.column,hidden=userColPrefs().hiddenColumns;saveHiddenColumns(input.checked?hidden.filter(x=>x!==key):[...hidden,key]);notice('Columnas actualizadas.');});
         $('#company-name').onchange=async e=>{state.settings.companyName=e.target.value.trim();const saved=await save();applyBranding();notice(saved?'Nombre de la empresa actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
-        $('#logo-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.logoUrl=await readImageAsDataURL(file,240,.85);const saved=await save();applyBranding();renderSettings();notice(saved?'Logo actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
+        $('#logo-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const oldUrl=state.settings.logoUrl;state.settings.logoUrl=await uploadImageFile(file,'logos',240,.85,oldUrl);const saved=await save();applyBranding();renderSettings();notice(saved?'Logo actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
         $('#whatsapp-number').onchange=async e=>{state.settings.whatsappNumber=e.target.value.trim().replace(/[^\d]/g,'');e.target.value=state.settings.whatsappNumber;const saved=await save();notice(saved?'Número de WhatsApp actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
         $('#instagram-url').onchange=async e=>{state.settings.instagramUrl=e.target.value.trim();const saved=await save();notice(saved?'Link de Instagram actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
         $('#instagram-handle').onchange=async e=>{state.settings.instagramHandle=e.target.value.trim();const saved=await save();notice(saved?'Usuario de Instagram actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
-        $('#ad-image-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{state.settings.adImageUrl=await readImageAsDataURL(file,960,.85);const saved=await save();renderSettings();notice(saved?'Imagen publicitaria actualizada.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
+        $('#ad-image-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const oldUrl=state.settings.adImageUrl;state.settings.adImageUrl=await uploadImageFile(file,'ads',960,.85,oldUrl);const saved=await save();renderSettings();notice(saved?'Imagen publicitaria actualizada.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}};
         $('#renewal-warning-days').onchange=async e=>{state.settings.renewalWarningDays=Math.max(0,n(e.target.value));e.target.value=state.settings.renewalWarningDays;const saved=await save();notice(saved?'Aviso de renovación actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);};
         $('#activate-premium-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;state.settings.plan='premium';state.settings.premiumUntil='';const saved=await save();renderSettings();notice(saved?'Plan Premium activado sin vencimiento.':'Se activó localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit('Plan cambiado a Premium (sin vencimiento)','settings','Plan de la cuenta','',{});});
         $('#activate-premium-days-btn')?.addEventListener('click',async()=>{if(!isSuperAdmin())return;const days=n($('#premium-days').value);if(days<=0){notice('Ingresa una cantidad de días válida.',true);return;}const base=await serverToday();const until=new Date(base+'T00:00:00Z');until.setUTCDate(until.getUTCDate()+days);const untilStr=until.toISOString().slice(0,10);state.settings.plan='premium';state.settings.premiumUntil=untilStr;const saved=await save();renderSettings();notice(saved?`Plan Premium activado por ${days} días (vence el ${untilStr.split('-').reverse().join('/')}).`:'Se activó localmente, pero no se guardó en la base de datos.',!saved);if(saved)logAudit(`Plan cambiado a Premium por ${days} días`,'settings','Plan de la cuenta','',{premiumUntil:untilStr});});
@@ -2841,7 +2914,7 @@ document.addEventListener('DOMContentLoaded', () => {
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
-        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"export-metrics":exportMetrics,"remove-logo":async()=>{state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"export-metrics":exportMetrics,"remove-logo":async()=>{if(state.settings.logoUrl)removeStorageImageByUrl(state.settings.logoUrl);state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{if(state.settings.adImageUrl)removeStorageImageByUrl(state.settings.adImageUrl);state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{if(state.settings.itemIcons[id])removeStorageImageByUrl(state.settings.itemIcons[id]);delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
           const scope=$('#export-scope')?.value||'all';
           if(scope!=='all'){
             const scopes={clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};
