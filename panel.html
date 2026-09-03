@@ -15,7 +15,1103 @@
        bajo demanda solo cuando el usuario exporta un Excel (procesar día,
        exportar dietas, exportar orden de ruta). Así el panel carga más
        liviano y rápido en el uso normal del día a día. -->
-  <link rel="stylesheet" href="./panel.css">
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-2: #f0f4fa;
+      --text: #172033;
+      --muted: #657188;
+      --line: #dbe2ee;
+      --primary: #3867f4;
+      --primary-ink: #fff;
+      --accent: #15a77f;
+      --danger: #e4002b;
+      --warning: #f4a940;
+      --shadow: 0 14px 36px rgba(21,35,62,.10);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --radius-lg: 16px;
+      --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-display: Figtree, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color-scheme: light;
+      --bs-body-color: var(--text);
+      --bs-body-bg: var(--bg);
+      --bs-border-color: var(--line);
+      --bs-secondary-color: var(--muted);
+      --bs-emphasis-color: var(--text);
+      --bs-heading-color: var(--text);
+      --bs-link-color: var(--primary);
+      --bs-tertiary-bg: var(--surface-2);
+    }
+    [data-theme="night"] {
+      --bg: #121824;
+      --surface: #1b2433;
+      --surface-2: #222e40;
+      --text: #edf2fa;
+      --muted: #a9b6c9;
+      --line: #324158;
+      --primary: #7296ff;
+      --primary-ink: #0f1726;
+      --accent: #51cfaa;
+      --danger: #ff4d4d;
+      --warning: #ffc466;
+      --shadow: 0 14px 36px rgba(0,0,0,.3);
+      color-scheme: dark;
+    }
+    [data-theme="forest"] {
+      --bg: #dcefdc;
+      --surface: #f2faf1;
+      --surface-2: #cde6cd;
+      --text: #163821;
+      --muted: #4f7259;
+      --line: #a9d2ab;
+      color-scheme: light;
+      --primary: #1f7a4d;
+      --primary-ink: #fff;
+      --accent: #9c5f20;
+      --danger: #b3001f;
+      --warning: #bd7b1d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { overflow-x: hidden; max-width: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.35 var(--font);
+      transition: background .2s, color .2s;
+    }
+    button, input, select, textarea { font: inherit; }
+    button {
+      border: 0;
+      cursor: pointer;
+      border-radius: 999px;
+      padding: 9px 18px;
+      font-family: var(--font-display);
+      font-weight: 650;
+      color: var(--text);
+      background: var(--surface-2);
+      min-height: 36px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.07);
+      transition: background .15s, transform .12s ease, box-shadow .15s ease, filter .15s ease;
+    }
+    button:hover { filter: brightness(.97); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,.13); }
+    button:active { transform: translateY(0); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    button.primary, button.refresh {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 78%, white 22%), var(--primary));
+      color: var(--primary-ink);
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 38%, transparent);
+    }
+    button.primary:hover, button.refresh:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 42%, transparent); }
+    button.danger {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--danger) 78%, white 22%), var(--danger));
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--danger) 38%, transparent);
+    }
+    button.danger:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--danger) 42%, transparent); }
+    button.outline {
+      background: transparent;
+      border: 1px solid var(--line);
+      box-shadow: none;
+    }
+    button.outline:hover { background: var(--surface-2); box-shadow: none; }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: .52;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+    input, select, textarea {
+      width: 100%;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      outline: none;
+      min-height: 36px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    select option { color: var(--text); background: var(--surface); }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+    }
+    textarea { resize: vertical; min-height: 70px; }
+
+    #login {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--bg);
+    }
+    .login-card {
+      width: min(440px, 100%);
+      padding: 28px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .brand {
+      display: flex;
+      gap: 11px;
+      align-items: center;
+    }
+    .brand-mark {
+      background: var(--primary);
+      color: var(--primary-ink);
+      font-size: 22px;
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .brand-mark img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+    .brand strong, .profile b { font-family: var(--font-display); }
+    h1, h2, h3, p { margin-top: 0; }
+    h1, h2, h3 { font-family: var(--font-display); font-weight: 700; }
+    .muted { color: var(--muted); }
+    .stack { display: grid; gap: 12px; }
+    label { display: grid; gap: 5px; font-weight: 650; font-size: 12px; min-width: 0; }
+
+    #app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+    }
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 18px 12px 130px;
+      background: var(--surface);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: background .2s;
+    }
+    .aside-title {
+      padding: 6px 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .aside-title small {
+      color: var(--muted);
+      display: block;
+      margin: 4px 0 0 54px;
+    }
+    .menu-toggle {
+      display: none;
+      background: transparent;
+      font-size: 24px;
+      padding: 4px 8px;
+      min-height: auto;
+      color: var(--text);
+    }
+    .collapse-toggle {
+      display: block;
+      background: transparent;
+      border: 1px solid var(--line);
+      font-size: 14px;
+      font-weight: 700;
+      padding: 4px 8px;
+      min-height: auto;
+      flex-shrink: 0;
+      color: var(--muted);
+    }
+    nav {
+      display: grid;
+      gap: 4px;
+    }
+    nav button {
+      display: flex;
+      text-align: left;
+      gap: 11px;
+      align-items: center;
+      background: transparent;
+      color: var(--muted);
+      border-radius: var(--radius-sm);
+      padding: 10px;
+      font-weight: 500;
+    }
+    nav button.active,
+    nav button:hover {
+      color: var(--primary);
+      background: color-mix(in srgb, var(--primary) 10%, transparent);
+    }
+    .nav-icon { position: relative; width: 21px; text-align: center; font-size: 16px; }
+    .nav-badge {
+      position: absolute; top: -6px; right: -10px;
+      min-width: 16px; height: 16px; padding: 0 4px;
+      border-radius: 999px; background: #e5484d; color: #fff;
+      font-size: 10px; font-weight: 800; line-height: 16px; text-align: center;
+      box-shadow: 0 0 0 2px var(--surface);
+    }
+    #app.sidebar-collapsed .nav-badge { top: -4px; right: -6px; }
+    .aside-bottom {
+      margin-top: auto;
+      padding: 12px 10px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 8px;
+    }
+    .profile {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .avatar {
+      width: 31px; height: 31px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: var(--primary);
+      color: var(--primary-ink);
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .sync-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .sync-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--muted);
+      flex: 0 0 auto;
+    }
+    .sync-dot.ok { background: var(--accent); }
+    .sync-dot.error { background: var(--danger); }
+    .sync-dot.local { background: var(--warning); }
+    .aside-bottom-actions {
+      position: fixed;
+      left: 18px;
+      bottom: 18px;
+      z-index: 40;
+      width: 204px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-areas: "status status" "logout sync";
+      gap: 8px;
+      align-items: center;
+      background: var(--surface);
+      padding: 10px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      border: 1px solid var(--line);
+    }
+    .mobile-sync-group { display: contents; }
+    #sync-pill { grid-area: status; }
+    #logout-btn, #manual-sync-btn {
+      grid-area: logout;
+      width: 100%;
+      justify-content: center;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 6px;
+    }
+    #manual-sync-btn { grid-area: sync; }
+    .btn-text { display: inline; }
+
+    main {
+      min-width: 0;
+      padding: 26px;
+      background: var(--bg);
+      transition: background .2s;
+    }
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .page-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 18px;
+      align-items: flex-start;
+      margin-bottom: 20px;
+    }
+    .page-head h1 { font-size: 25px; margin: 0 0 5px; }
+    .page-head p { color: var(--muted); margin: 0; }
+    .head-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      flex-basis: 100%;
+    }
+    .head-actions:empty { display: none; }
+    .toolbar {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 13px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: var(--radius);
+    }
+    .toolbar .search { width: 230px; }
+    .toolbar .field { width: 175px; }
+    .toolbar .spacer { flex: 1; }
+    .date-input-wrap {
+      width: 100%;
+      display: flex;
+    }
+    .date-input-wrap input[type="date"], .date-input-wrap input[type="month"] {
+      flex: 1 1 0;
+      width: 0;
+      min-width: 0;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: 0 2px 5px rgba(20,35,55,.025);
+      min-width: 0; /* evita que contenido interno (ej. botones/checklists
+        largos dentro de .two-col) fuerce la tarjeta más ancha que su
+        columna de grid y la saque de la pantalla */
+    }
+    .card-pad { padding: 17px; }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(135px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .metric {
+      padding: 14px;
+    }
+    .metric strong {
+      font-size: 24px;
+      display: block;
+      margin-top: 4px;
+    }
+    .metric small { color: var(--muted); }
+
+    .sheet {
+      overflow: auto;
+      max-height: calc(100vh - 244px);
+      min-height: 340px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      -webkit-overflow-scrolling: touch;
+    }
+    table {
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: fixed;
+    }
+    .sheet table.table {
+      table-layout: fixed;
+      margin-bottom: 0;
+    }
+    .sheet table.table > :not(caption) > * > * { box-shadow: none; color: inherit; }
+    th, td {
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 8px 10px;
+      vertical-align: middle;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--surface-2);
+      text-align: left;
+      font-size: 11px;
+      letter-spacing: .02em;
+      color: var(--muted);
+      text-transform: uppercase;
+      user-select: none;
+    }
+    th[data-sort] { cursor: pointer; }
+    th[data-sort]:hover { color: var(--primary); }
+    th:last-child, td:last-child { border-right: 0; }
+    tr:last-child td { border-bottom: 0; }
+    .sheet table.table tbody tr:nth-child(even) td,
+    #dispatch-table tbody tr:nth-child(even) td {
+      background: var(--surface-2);
+    }
+    tbody tr:hover td {
+      background: color-mix(in srgb, var(--primary) 4%, transparent);
+    }
+    tr.dragging td { opacity: .4; }
+
+    .resize-handle {
+      position: absolute;
+      right: -3px;
+      top: 0;
+      width: 7px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 4;
+      touch-action: none;
+    }
+    th { position: sticky; }
+    body.col-dragging, body.col-dragging * {
+      user-select: none !important;
+      -webkit-user-select: none !important;
+    }
+    th .resize-handle:hover { background: var(--primary); }
+    .col-drag-handle {
+      display: inline-block;
+      margin-right: 4px;
+      cursor: grab;
+      color: var(--muted);
+      touch-action: none;
+      user-select: none;
+    }
+    .col-drag-handle:hover { color: var(--primary); }
+    #dispatch-table thead th.drag-over { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+
+    /* En pantallas táctiles el dedo es mucho menos preciso que un mouse:
+       agrandamos el área real de toque de ambos controles (sin agrandar
+       tanto el dibujo visual) para que agarrarlos sea confiable. */
+    @media (pointer: coarse) {
+      .resize-handle { width: 22px; right: -11px; }
+      .col-drag-handle {
+        font-size: 20px;
+        line-height: 1;
+        padding: 10px 8px;
+        margin: -10px -4px -10px -8px; /* compensa el padding para no correr el layout */
+      }
+      /* Los <label> (que envuelven casi todos los inputs) usan
+         font-size:12px, y como "input,select,textarea{font:inherit}" lo
+         heredan, cualquier campo de texto queda por debajo de 16px. Los
+         navegadores móviles (Safari/Chrome en iOS y Android) hacen zoom
+         automático de toda la página al enfocar un campo así de chico —
+         es su forma de "ayudar" a que se lea el texto que estás
+         escribiendo, pero acá agranda la pantalla entera cada vez que
+         tocas un campo del formulario, cosa molesta que no pasa en
+         escritorio. Forzando 16px (el umbral que evita ese zoom) SOLO en
+         pantallas táctiles, el pellizco manual de dos dedos para
+         agrandar/achicar sigue funcionando igual que siempre — esto solo
+         evita el zoom automático no pedido. */
+      input, select, textarea { font-size: 16px; }
+    }
+
+    .editable-cell input,
+    .editable-cell select {
+      padding: 4px 5px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      min-width: 64px;
+      font-size: 12px;
+    }
+    /* Mismo motivo que el bloque @media (pointer: coarse) de más arriba:
+       sin esto, estos inputs de edición rápida (celdas editables de las
+       tablas) se quedarían en 12px y seguirían disparando el zoom
+       automático en móvil — esta regla necesita ir DESPUÉS de la de
+       arriba para ganarle en la cascada (misma especificidad). */
+    @media (pointer: coarse) {
+      .editable-cell input, .editable-cell select { font-size: 16px; }
+    }
+    .editable-cell select { width: 135px; }
+    .handle {
+      color: var(--muted);
+      cursor: grab;
+      font-size: 16px;
+      text-align: center;
+      width: 30px;
+      position: relative;
+    }
+    .row-resize-handle {
+      position: absolute;
+      left: 0; right: 0; bottom: -3px;
+      height: 7px;
+      cursor: row-resize;
+      z-index: 5;
+    }
+    .row-resize-handle:hover { background: var(--primary); opacity: .35; }
+    .id-cell { color: var(--muted); font-size: 12px; }
+    .actions { display: flex; gap: 5px; }
+    .icon-btn {
+      padding: 5px 7px;
+      background: transparent;
+      color: var(--primary);
+      min-height: auto;
+    }
+    .icon-btn.delete { color: var(--danger); }
+    .sort-ind {
+      font-size: 9px;
+      margin-left: 3px;
+      opacity: .7;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .badge.active { color: #087354; background: #dff7ed; }
+    .badge.paused { color: #8d5a02; background: #fff2d9; }
+    .badge.pending { color: #7551ad; background: #eee5ff; }
+    .badge.done { color: #697589; background: #e8edf4; }
+    .badge.off { color: #778293; background: #edf0f5; }
+    .badge.warn { color: #8d5a02; background: #fff2d9; }
+    .badge.danger { color: #a3123a; background: #ffe1e6; }
+    .notes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+    .note-card { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--primary); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .note-card.note-overdue { border-left-color: #e5484d; }
+    .note-card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .note-date { margin-left: auto; font-size: 12px; white-space: nowrap; }
+    .note-text { margin: 0; white-space: pre-wrap; word-break: break-word; }
+    .note-client { margin: 0; font-size: 12.5px; }
+    .note-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+    [data-theme="night"] .badge.active { color: #8cf0ce; background: #164c3b; }
+    [data-theme="night"] .badge.paused { color: #ffd58e; background: #5e4318; }
+    [data-theme="night"] .badge.pending { color: #d5b9ff; background: #423061; }
+    [data-theme="night"] .badge.done { color: #c7d0e0; background: #2b3648; }
+    [data-theme="night"] .badge.off { color: #b9c3d4; background: #26303f; }
+    [data-theme="night"] .badge.warn { color: #ffd58e; background: #5e4318; }
+    [data-theme="night"] .badge.danger { color: #ffb3c2; background: #5c1626; }
+
+    .delivery-routes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; align-items: start; }
+    .delivery-route-card { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+    .delivery-route-head { display: flex; flex-direction: column; gap: 4px; min-width: 0; cursor: pointer; list-style: none; }
+    .delivery-route-head::-webkit-details-marker { display: none; }
+    .delivery-route-title { display: flex; align-items: center; gap: 8px 10px; min-width: 0; }
+    .delivery-route-title h3 { margin: 0; font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+    .delivery-route-title::after { content: '▾'; margin-left: 6px; font-size: 12px; color: var(--muted); transition: transform .15s ease; flex: 0 0 auto; }
+    .delivery-route-card[open] .delivery-route-title::after { transform: rotate(180deg); }
+    .delivery-route-body { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+    .delivery-route-driver { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+    .delivery-counter { margin-left: auto; flex: 0 0 auto; font-weight: 700; font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); white-space: nowrap; }
+    .delivery-client-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; }
+    .delivery-client { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px; font: inherit; font-size: 13.5px; font-weight: 600; border: 1px solid transparent; cursor: pointer; transition: filter .15s ease, transform .1s ease; }
+    .delivery-client:hover { filter: brightness(.97); }
+    .delivery-client:active { transform: scale(.99); }
+    .delivery-client.delivery-green { background: #dff7ed; color: #087354; border-color: #b9ecd4; }
+    .delivery-client.delivery-orange { background: #fff2d9; color: #8d5a02; border-color: #ffdd9e; }
+    .delivery-client.delivery-purple { background: #eee5ff; color: #7551ad; border-color: #ddccff; }
+    .delivery-client.delivery-red { background: #ffe1e6; color: #a3123a; border-color: #ffc2cd; }
+    [data-theme="night"] .delivery-counter { background: #121824; border-color: #2b3648; }
+    [data-theme="night"] .delivery-client.delivery-green { background: #164c3b; color: #8cf0ce; border-color: #1c6a52; }
+    [data-theme="night"] .delivery-client.delivery-orange { background: #5e4318; color: #ffd58e; border-color: #7a5a24; }
+    [data-theme="night"] .delivery-client.delivery-purple { background: #423061; color: #d5b9ff; border-color: #5b4382; }
+    [data-theme="night"] .delivery-client.delivery-red { background: #5c1626; color: #ffb3c2; border-color: #7c1e33; }
+    [data-theme="forest"] .delivery-counter { background: #cde6cd; border-color: #a9d2ab; }
+    .delivery-detail-photo { display: block; max-width: 100%; margin-top: 6px; border-radius: 10px; border: 1px solid var(--line); }
+    .delivery-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    #delivery-page td:last-child { white-space: normal; }
+    #delivery-page td:last-child .icon-btn, #delivery-page td:last-child .primary, #delivery-page td:last-child .outline { white-space: nowrap; margin: 2px 4px 2px 0; }
+
+    .route-totals {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 11px;
+      background: var(--surface-2);
+      border-top: 1px solid var(--line);
+      position: sticky;
+      bottom: 0;
+      left: 0;
+      width: max-content;
+      min-width: 100%;
+    }
+    .route-total {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: var(--radius-sm);
+      padding: 5px 8px;
+      font-size: 12px;
+    }
+    .table-totals td {
+      background: var(--surface-2);
+      border-top: 2px solid var(--line);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .table-totals.general td { color: var(--primary); }
+    .table-totals.filtered td { border-top-width: 1px; }
+    .pause-day-btn {
+      display: block;
+      margin-top: 5px;
+      padding: 3px 6px;
+      min-height: auto;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .empty {
+      padding: 42px 20px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+      gap: 18px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .form-grid .wide { grid-column: 1 / -1; }
+    .items-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 9px;
+      padding: 12px;
+      background: var(--surface-2);
+      border-radius: 99px;
+    }
+    .items-grid label { font-size: 11px; }
+    .items-grid input { padding: 6px; min-height: auto; }
+
+    dialog {
+      border: 0;
+      padding: 0;
+      background: transparent;
+      width: min(760px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      max-height: calc(100dvh - 24px);
+      margin: auto; /* el reset "* { margin:0 }" de arriba anulaba el centrado nativo del <dialog> */
+      /* El navegador solo fija inset vertical (top/bottom) al mostrar el <dialog>
+         como modal; el horizontal queda en "auto" y por spec eso lo ancla a su
+         posición estática (izquierda), no lo centra. Forzamos los 4 insets a 0
+         para que "margin: auto" centre también en horizontal. */
+      inset: 0;
+    }
+    dialog::backdrop {
+      background: rgba(11, 21, 38, .48);
+      backdrop-filter: blur(2px);
+    }
+    .app-modal {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      max-height: calc(100vh - 24px);
+      max-height: calc(100dvh - 24px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .app-modal-head {
+      padding: 16px 19px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      flex: 0 0 auto;
+    }
+    .app-modal-head h2 { font-size: 17px; margin: 0; }
+    .app-modal-body {
+      padding: 18px 19px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .app-modal-foot {
+      padding: 14px 19px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex: 0 0 auto;
+      background: var(--surface);
+    }
+    .close {
+      padding: 3px 8px;
+      font-size: 20px;
+      min-height: auto;
+    }
+
+    .notice {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 20;
+      background: #172033;
+      color: #fff;
+      padding: 11px 15px;
+      border-radius: 99px;
+      box-shadow: var(--shadow);
+      transform: translateY(90px);
+      opacity: 0;
+      transition: .25s;
+      max-width: 320px;
+    }
+    .notice.show { transform: none; opacity: 1; }
+    .notice.error { background: var(--danger); }
+
+    .legend {
+      display: flex;
+      gap: 9px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .toggle-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+    .toggle-list label {
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .toggle-list input { width: auto; min-height: auto; }
+    /* Lista de checkboxes de una sola columna (ej.: "Qué menús requieren
+       Premium"). Reusa el mismo arreglo que .toggle-list para que el
+       checkbox no herede width:100%/padding/border de la regla general de
+       inputs (eso es lo que lo hacía verse "descentrado": el checkbox se
+       estiraba a un rectángulo de ancho completo en vez de una casilla). */
+    .toggle-list-col {
+      display: grid;
+      gap: 8px;
+    }
+    .toggle-list-col label {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .toggle-list-col input { width: auto; min-height: auto; margin: 0; }
+    /* Celda de Google Maps en Día de trabajo: input para pegar la
+       dirección/URL corta + link "Abrir mapa" debajo cuando ya hay algo
+       guardado. */
+    .maps-cell { display: flex; flex-direction: column; gap: 4px; }
+    .maps-cell-link { font-size: 11px; white-space: nowrap; }
+    input[type="file"] {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+    }
+
+    .payroll td, .payroll th { text-align: center; padding: 7px; min-width: 52px; }
+    .payroll th:first-child, .payroll td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      min-width: 170px;
+      text-align: left;
+      background: var(--surface);
+    }
+    .payroll th:first-child { z-index: 3; background: var(--surface-2); }
+    .payroll td:last-child, .payroll th:last-child,
+    .payroll td:nth-last-child(2), .payroll th:nth-last-child(2) {
+      font-weight: 800;
+      background: var(--surface-2);
+      min-width: 78px;
+    }
+
+    .info-box {
+      border-left: 3px solid var(--primary);
+      padding: 10px 12px;
+      background: color-mix(in srgb, var(--primary) 8%, transparent);
+      color: var(--muted);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      font-size: 12px;
+    }
+    .pause-panel {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--line));
+      border-radius: var(--radius);
+      background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+    }
+    .pause-panel p { margin: 0; color: var(--muted); font-size: 13px; }
+    .pause-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      font-weight: 700;
+    }
+    .pause-option input { width: auto; min-height: auto; margin-top: 3px; }
+    .rate-row input { padding: 5px 6px; }
+
+    @media (min-width: 851px) and (hover: hover) and (pointer: fine) {
+      #app.sidebar-collapsed {
+        grid-template-columns: 72px 1fr;
+      }
+      #app.sidebar-collapsed aside {
+        padding: 18px 8px;
+      }
+      #app.sidebar-collapsed .aside-title {
+        flex-direction: column;
+        gap: 10px;
+        padding: 0 0 16px;
+      }
+      #app.sidebar-collapsed .brand { gap: 0; justify-content: center; }
+      #app.sidebar-collapsed .brand strong,
+      #app.sidebar-collapsed .aside-title small {
+        display: none;
+      }
+      #app.sidebar-collapsed .collapse-toggle {
+        width: 100%;
+      }
+      #app.sidebar-collapsed nav button {
+        justify-content: center;
+        padding: 10px 4px;
+      }
+      #app.sidebar-collapsed .nav-label {
+        display: none;
+      }
+      #app.sidebar-collapsed .profile {
+        justify-content: center;
+      }
+      #app.sidebar-collapsed .profile > div {
+        display: none;
+      }
+      #app.sidebar-collapsed .aside-bottom-actions {
+        grid-template-columns: 1fr;
+        grid-template-areas: "status" "logout" "sync";
+        width: 56px;
+        left: 8px;
+        padding: 8px 6px;
+      }
+      #app.sidebar-collapsed aside {
+        padding-bottom: 150px;
+      }
+      #app.sidebar-collapsed .btn-text,
+      #app.sidebar-collapsed .sync-text-label {
+        display: none;
+      }
+      #app.sidebar-collapsed #sync-pill {
+        justify-content: center;
+      }
+    }
+
+    @media (max-width: 850px) {
+      /* Evita que el grid #app estire la fila del header cuando el
+         contenido de la página es corto (Notas, Sueldos, Auditoría,
+         Inventario, etc.). Sin esto, el hueco entre el ☰ y el nombre
+         de usuario variaba según cuánto contenido tuviera cada página. */
+      #app { grid-template-rows: auto 1fr; align-content: start; }
+      .collapse-toggle { display: none; }
+      .notes-grid { grid-template-columns: 1fr; gap: 8px; }
+      .note-card { padding: 10px 12px; gap: 4px; border-left-width: 3px; }
+      .note-card-top { gap: 6px; }
+      .note-text { font-size: 13.5px; }
+      .note-client { font-size: 11.5px; }
+      .note-actions { gap: 6px; margin-top: 2px; }
+      .note-actions .outline, .note-actions .icon-btn { padding: 4px 8px; font-size: 12px; }
+      #app {
+        grid-template-columns: 1fr;
+      }
+      aside {
+        height: auto;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        padding: 8px 12px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        flex-direction: row;
+        justify-content: flex-start;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .aside-title {
+        padding: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .aside-title .brand { min-width: 0; overflow: hidden; }
+      .aside-title .brand strong {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+      }
+      .aside-title small { display: none; }
+      .menu-toggle { display: block; flex-shrink: 0; }
+      nav {
+        display: none;
+        width: 100%;
+        flex-direction: column;
+        gap: 2px;
+        padding: 12px 0 4px;
+        border-top: 1px solid var(--line);
+        margin-top: 8px;
+      }
+      nav.open { display: flex; }
+      nav button {
+        padding: 8px 10px;
+        font-size: 14px;
+        white-space: nowrap;
+        justify-content: center;
+      }
+      .aside-bottom {
+        margin: 0;
+        padding: 0;
+        border-top: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex: 1 1 100%;
+        flex-wrap: nowrap;
+      }
+      .profile {
+        font-size: 12px;
+        min-width: 0;
+        max-width: calc(100vw - 24px);
+        flex: 0 1 auto;
+        overflow: hidden;
+      }
+      .profile > div { min-width: 0; }
+      .profile b, .profile small {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .aside-bottom-actions {
+        position: fixed;
+        top: 58px;
+        right: 10px;
+        bottom: auto;
+        left: auto;
+        width: auto;
+        height: auto;
+        z-index: 200;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: nowrap;
+        flex-shrink: 0;
+        background: var(--surface);
+        padding: 5px 8px;
+        border-radius: 999px;
+        box-shadow: var(--shadow);
+        border: 1px solid var(--line);
+      }
+      .mobile-sync-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: nowrap;
+      }
+      .btn-text, .sync-text-label { display: none; }
+      .aside-bottom button { padding: 6px 8px; font-size: 14px; min-height: 30px; }
+      .sync-pill { padding: 4px; }
+      .sync-dot { width: 9px; height: 9px; }
+
+      main { padding: 12px; }
+      .summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+      .metric { padding: 10px; }
+      .metric strong { font-size: 18px; }
+      .toolbar {
+        padding: 8px;
+        gap: 8px;
+        align-items: stretch;
+      }
+      .toolbar .search, .toolbar .field { width: 100%; min-width: 0; }
+      .toolbar input[type="date"] { width: 100%; min-width: 0; }
+      .field-locked {
+        width: 100%;
+        min-width: 0;
+        min-height: 36px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+        color: var(--muted);
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        overflow: hidden;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      label:has(.field-locked) { -webkit-tap-highlight-color: transparent; }
+      .resize-handle { width: 18px; right: -9px; }
+      .col-drag-handle { font-size: 18px; padding: 4px 2px; }
+      .two-col { grid-template-columns: 1fr; }
+      .page-head {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .page-head h1 { font-size: 20px; }
+      .sheet { max-height: calc(100vh - 280px); }
+      .form-grid { grid-template-columns: 1fr; }
+      .items-grid { grid-template-columns: repeat(2, 1fr); border-radius: var(--radius); }
+    }
+    @media (max-width: 480px) {
+      .summary-grid { grid-template-columns: 1fr 1fr; }
+      .toolbar .field { width: 100%; }
+      .login-card { padding: 20px; }
+      input[type="file"] { font-size: 11px; }
+      #settings-page .toggle-list[style*="minmax"] {
+        grid-template-columns: 1fr !important;
+      }
+    }
+    tr[data-id] { scroll-margin-top: 90px; }
+    @keyframes rowFlash {
+      0% { background: color-mix(in srgb, var(--accent) 38%, transparent); }
+      100% { background: transparent; }
+    }
+    tr.row-flash td { animation: rowFlash 2.1s ease-out; }
+.premium-lock {
+  max-width: 460px;
+  margin: 40px auto;
+  padding: 28px 24px;
+  text-align: center;
+  border-radius: var(--radius-lg);
+  color: #fff;
+  background: linear-gradient(120deg, #e4002b, #ff4b3e);
+  box-shadow: 0 10px 30px rgba(228, 0, 43, .25);
+}
+.premium-lock .premium-lock-icon { font-size: 32px; margin-bottom: 8px; }
+.premium-lock h2 { font-size: 18px; margin: 0 0 8px; }
+.premium-lock p { margin: 0 0 16px; opacity: .95; font-size: 14px; }
+.btn-premium {
+  display: inline-block;
+  background: #fff;
+  color: #e4002b;
+  font-weight: 700;
+  padding: 10px 18px;
+  border-radius: 999px;
+  text-decoration: none;
+}
+.btn-premium:hover { filter: brightness(.95); }
+</style>
   <!-- Leaflet (CSS + JS, ~150KB) ya no se carga aquí en cada visita: se pide
        bajo demanda solo cuando se abre el mapa de reparto (ver ensureLeaflet
        en el script principal), igual que ExcelJS. Así se ahorra esa descarga
@@ -1391,13 +2487,15 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (!nextAssigned) { cls = 'delivery-orange'; nextAssigned = true; }
             return `<li><button type="button" class="delivery-client ${cls}" data-action="view-delivery" data-id="${c.id}">${esc(c.name)}</button></li>`;
           }).join('');
-          return `<div class="card card-pad delivery-route-card">
-            <div class="delivery-route-head">
+          return `<details class="card card-pad delivery-route-card">
+            <summary class="delivery-route-head">
               <div class="delivery-route-title"><h3>${esc(g.route.name)}</h3><span class="delivery-counter">${delivered}/${g.clients.length}</span></div>
+            </summary>
+            <div class="delivery-route-body">
               <div class="delivery-route-driver">Driver: ${esc(drv ? `${drv.firstName} ${drv.lastName}` : 'Sin asignar')}</div>
+              <ul class="delivery-client-list">${items}</ul>
             </div>
-            <ul class="delivery-client-list">${items}</ul>
-          </div>`;
+          </details>`;
         };
         $('#delivery-page').innerHTML = pageHead('Despacho', `Progreso de entrega por ruta — ${date.split('-').reverse().join('/')}. Verde: entregado · Naranja: siguiente en la lista del driver · Morado: pendientes · Rojo: no entregado. Toca un cliente para ver el detalle. Se actualiza sola cada pocos segundos.`, groups.length?`<button class="outline" data-action="open-route-map">🗺️ Ver mapa</button>`:'') +
           `<div class="delivery-routes-grid">${groups.length ? groups.map(cardHtml).join('') : '<p class="muted">No hay rutas con pedidos activos para esta fecha.</p>'}</div>`;
