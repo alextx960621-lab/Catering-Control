@@ -11,22 +11,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
 
-  <!-- Igual que antes: config.js define window.APP_CONFIG y
-       app.js (antes supabase-client.js) expone window.SupabaseDB. Esta
-       página React no cambia nada de esos dos archivos ni de cómo
-       funciona Supabase. -->
+
   <script src="./config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="./app.js" defer></script>
 
-  <!-- React sin paso de compilación (Vite/npm): se sigue cargando la
-       librería por CDN, "un solo archivo" que funciona con solo subirlo,
-       igual que el resto de tu app. Ya NO se carga Babel Standalone
-       (~1MB, transpilaba el JSX en el navegador en CADA carga): el JSX de
-       esta página se precompiló una sola vez a JS plano
-       (React.createElement) y quedó pegado directo en el <script> de más
-       abajo. Si tocás la lógica de este archivo, seguís escribiendo JS
-       normal (ya no hay JSX que editar acá — ver nota en ese <script>). -->
+
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
 
@@ -40,7 +30,7 @@
   <meta name="apple-mobile-web-app-title" content="Catering">
 
   <style>
-    /* ===== Contenido de login.css, sin cambios de diseño ===== */
+
     html { font-size:15px; }
     :root {
       --brand:#0d6efd;
@@ -97,20 +87,13 @@
 <body class="d-flex align-items-center py-4">
   <main class="container">
     <div class="row justify-content-center">
-      <div class="col-12 login-card">
-        <!-- Todo lo de adentro de esta tarjeta lo dibuja React. -->
+      <div class="col-12 login-card">    
         <div id="root"></div>
       </div>
     </div>
   </main>
 
   <script>
-// Blindaje de orden de carga: config.js y app.js cargan con
-// "defer" y en teoría ya están listos cuando Babel ejecuta este bloque
-// (Babel espera al evento DOMContentLoaded, que ocurre después de los
-// scripts defer). Aun así, para no depender de esa sutileza en todos los
-// navegadores/velocidades de red, se espera explícitamente a que ambos
-// existan antes de arrancar React.
 function boot() {
     const { useState, useEffect, useRef, useCallback } = React;
     const APP_CONFIG = window.APP_CONFIG;
@@ -120,10 +103,7 @@ function boot() {
     const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
     const STAFF_APP_URL = './panel.html';
     const CLIENT_PORTAL_URL = './cliente.html';
-    // Antes había un panel.html (admin/editor/kitchen) y un driver.html
-    // separados. Ahora index.js ya trae permisos por rol (isDriverRole(),
-    // canAccessPage()) y muestra/oculta páginas según quién entró — así que
-    // TODOS entran al mismo panel.html; driver.html queda sin usarse.
+
     function staffDestination(role) { return STAFF_APP_URL; }
     function readCachedBranding() {
         try {
@@ -133,7 +113,7 @@ function boot() {
             return null;
         }
     }
-    // ---------- Logo / nombre de la empresa (con caché, igual que antes) ----------
+    // ---------- Logo / nombre de la empresa (con caché) ----------
     function BrandMark({ logo, name }) {
         const [broken, setBroken] = useState(false);
         if (logo && !broken) {
@@ -206,13 +186,7 @@ function boot() {
                     onError(`Demasiados intentos fallidos. Espera ${person.locked_seconds} segundos e intenta de nuevo.`);
                     return;
                 }
-                // Blindaje extra: solo se acepta la respuesta si trae un id real.
-                // Antes también exigía que el rol estuviera en una lista fija, pero
-                // esa lista no incluía "superadmin" (ni roles personalizados que
-                // crees en Usuarios) y por eso bloqueaba el login aunque la
-                // contraseña fuera correcta. La validación de verdad (contraseña,
-                // cuenta bloqueada) ya la hace el backend en login_staff — acá solo
-                // nos aseguramos de que vino algo utilizable.
+            
                 const validPerson = person && typeof person.id === 'string' && person.id.trim() && typeof person.role === 'string' && person.role.trim() && typeof person.session_token === 'string' && person.session_token.trim();
                 if (!validPerson) {
                     onError('Correo o contraseña incorrectos.');
@@ -254,8 +228,7 @@ function boot() {
         const [brandLogo, setBrandLogo] = useState(cached?.logo || APP_CONFIG.logoUrl || '');
         const [whatsappNumber, setWhatsappNumber] = useState(cached?.whatsappNumber || APP_CONFIG.whatsappNumber || '');
         const redirected = useRef(false);
-        // Tema: se refleja como atributo data-theme en <html>, igual que el
-        // login.js original — el CSS de arriba ya está escrito para leerlo así.
+     
         useEffect(() => {
             document.documentElement.dataset.theme = theme;
             localStorage.setItem(UI_THEME_KEY, theme);
@@ -264,8 +237,7 @@ function boot() {
         useEffect(() => {
             document.title = `${brandName} · Iniciar sesión`;
         }, [brandName]);
-        // Si ya hay una sesión de staff activa, saltar directo al panel
-        // correspondiente — se revisa una sola vez al montar.
+     
         useEffect(() => {
             if (redirected.current)
                 return;
@@ -278,8 +250,7 @@ function boot() {
             }
             catch (_) { }
         }, []);
-        // Trae el branding real desde Supabase (nombre, logo, WhatsApp) y
-        // actualiza la caché local para que la próxima carga sea instantánea.
+   
         useEffect(() => {
             let cancelled = false;
             (async () => {
@@ -325,13 +296,7 @@ function boot() {
                     React.createElement("span", null, "\u00BFNecesitas ayuda? Contactanos"))))));
     }
     ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App, null));
-} // fin de boot()
-// Antes (con Babel) React/ReactDOM cargaban sin defer y ya estaban listos
-// para cuando este bloque corría. Ahora que este script va con JS ya
-// compilado y React/ReactDOM cargan con defer, hay que esperarlos también
-// -- si la red va lenta, boot() podía dispararse antes de que React
-// terminara de descargar y tronaba con "React is not defined", dejando la
-// pantalla en blanco.
+
 if (window.APP_CONFIG && window.SupabaseDB && window.React && window.ReactDOM) {
     boot();
 }
