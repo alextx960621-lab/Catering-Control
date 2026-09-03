@@ -2274,7 +2274,7 @@ document.addEventListener('DOMContentLoaded', () => {
           { group:'routes', allKeys:['order','name','type','description','clients','drivers','id'] },
           { group:'plans', allKeys:['name','type',...menuItems().map(([key])=>key),'id'] },
           { group:'menu-items', allKeys:['label','id'] },
-          { group:'delivery', allKeys:['order','name','status','id'] },
+          { group:'delivery', allKeys:['order','name','route','status','id'] },
           { group:'inventory', allKeys:['name','unit','stock','minimum','links','id'] },
           { group:'inventory-links', allKeys:['inventoryId','clientItemKey','quantity','id'] },
           { group:'inventory-movements', allKeys:['date','inventoryId','quantity','type','note','id'] },
@@ -2339,6 +2339,7 @@ document.addEventListener('DOMContentLoaded', () => {
           await ensureDeliveryLoaded(date, true);
           if (ui.page !== 'delivery' || workDate() !== date) return; // cambió mientras esperaba la red
           if (isDriverRole()) renderDeliveryDriver(date); else renderDeliveryAdmin(date);
+          enableTableTools();
         }, 12000);
       }
       function deliveryRecord(date, clientId){
@@ -2442,6 +2443,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await ensureDeliveryLoaded(date);
         if (workDate() !== date || ui.page !== 'delivery') return; // cambió de fecha/página mientras cargaba
         if (isDriverRole()) renderDeliveryDriver(date); else renderDeliveryAdmin(date);
+        enableTableTools();
         startDeliveryPoll(date);
       }
       function renderDeliveryDriver(date){
@@ -3360,20 +3362,32 @@ document.addEventListener('DOMContentLoaded', () => {
         const trs=rows.map(([label,av,bv,rawA,rawB])=>`<tr><td>${esc(label)}</td><td>${av}</td><td>${bv}</td><td>${delta(av,bv,rawA,rawB)}</td></tr>`).join('');
         return `<div class="card card-pad" style="margin-bottom:16px"><h3 style="margin:0 0 6px;font-size:15px">Comparación de periodos</h3><p class="muted" style="margin:0 0 10px;font-size:12px">Actual: ${ui.metrics.start.split('-').reverse().join('/')} a ${ui.metrics.end.split('-').reverse().join('/')} · Comparado: ${ui.metrics.compare.start.split('-').reverse().join('/')} a ${ui.metrics.compare.end.split('-').reverse().join('/')}</p><div class="sheet table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>KPI</th><th>Periodo actual</th><th>Periodo comparado</th><th>Variación</th></tr></thead><tbody>${trs}</tbody></table></div></div>`;
       }
-      let metricsLastComputed=null, metricsLastCompare=null;
-      async function renderMetrics(){
+      let metricsLastComputed=null, metricsLastCompare=null, metricsLoaded=false, metricsStale=false;
+      const REFRESH_ICON='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+      async function renderMetrics(forceRefresh){
         if(!canAccessPage('metrics')) return;
         const el=$('#metrics-page');
-        el.innerHTML=pageHead('Métricas','Estadísticas de reparto: tiempos, cumplimiento, kilómetros estimados y desempeño de drivers y rutas.')+metricsFilterBar()+'<p class="muted">Calculando…</p>';
-        bindMetricsFilters();
-        const {start,end,routeId,driverId,compare}=ui.metrics;
-        const [m,mB]=await Promise.all([
-          computeMetrics(start,end,routeId,driverId),
-          compare.enabled && compare.start && compare.end ? computeMetrics(compare.start,compare.end,routeId,driverId) : Promise.resolve(null)
-        ]);
-        metricsLastComputed=m; metricsLastCompare=mB;
-        if(ui.page!=='metrics') return; // el usuario navegó a otra página mientras calculaba
-        el.innerHTML=pageHead('Métricas','Estadísticas de reparto: tiempos, cumplimiento, kilómetros estimados y desempeño de drivers y rutas.')+metricsFilterBar()
+        const subtitleBase='Estadísticas de reparto: tiempos, cumplimiento, kilómetros estimados y desempeño de drivers y rutas.';
+        const actions=`<button class="refresh" data-action="refresh-metrics">${REFRESH_ICON}Actualizar</button>`;
+        if(forceRefresh){
+          el.innerHTML=pageHead('Métricas',subtitleBase,actions)+metricsFilterBar()+'<p class="muted">Calculando…</p>';
+          bindMetricsFilters();
+          const {start,end,routeId,driverId,compare}=ui.metrics;
+          const [m,mB]=await Promise.all([
+            computeMetrics(start,end,routeId,driverId),
+            compare.enabled && compare.start && compare.end ? computeMetrics(compare.start,compare.end,routeId,driverId) : Promise.resolve(null)
+          ]);
+          metricsLastComputed=m; metricsLastCompare=mB; metricsLoaded=true; metricsStale=false;
+          if(ui.page!=='metrics') return; // el usuario navegó a otra página mientras calculaba
+        }
+        if(!metricsLoaded){
+          el.innerHTML=pageHead('Métricas',subtitleBase,actions)+metricsFilterBar()+'<p class="muted">Ajusta los filtros si quieres y presiona Actualizar para calcular las métricas. No se consulta la base de datos hasta entonces.</p>';
+          bindMetricsFilters();
+          return;
+        }
+        const m=metricsLastComputed, mB=metricsLastCompare;
+        const staleNote=metricsStale?'<p class="muted" style="color:var(--danger)">Cambiaste los filtros — estos números son del cálculo anterior. Presiona Actualizar para recalcular.</p>':'';
+        el.innerHTML=pageHead('Métricas',subtitleBase,actions)+metricsFilterBar()+staleNote
           +metricsKpiCards(m)
           +(mB?metricsComparisonCard(m,mB):'')
           +`<div class="two-col" style="display:grid;grid-template-columns:1.3fr .7fr;gap:16px;margin-bottom:16px">${metricsTrendChart(m)}${metricsExtremesCard(m)}</div>`
@@ -3382,19 +3396,24 @@ document.addEventListener('DOMContentLoaded', () => {
           +`<p class="muted" style="margin-top:14px;font-size:12px">Los kilómetros son una estimación en línea recta entre las direcciones de los clientes (no siguen calles reales). Métricas de accesos al portal web de clientes y uso de links de WhatsApp/Maps no están disponibles todavía: requieren un módulo de analítica del portal que esta versión no incluye.</p>`;
         bindMetricsFilters();
       }
+      // Los filtros SOLO actualizan el estado en memoria (ui.metrics) y
+      // re-renderizan la barra/página con lo último ya calculado -- NUNCA
+      // disparan una consulta a Supabase por sí solos. Eso pasa nada más
+      // cuando el usuario aprieta "Actualizar" (o "Ver todos" en Auditoría).
       function bindMetricsFilters(){
+        const markStaleAndRerender=()=>{ if(metricsLoaded) metricsStale=true; renderMetrics(false); };
         const presetSel=$('#metrics-preset');
         if(presetSel) presetSel.onchange=e=>{
           ui.metrics.preset=e.target.value;
           if(e.target.value!=='custom'){ const r=metricsPresetRange(e.target.value); ui.metrics.start=r.start; ui.metrics.end=r.end; }
-          renderMetrics();
+          markStaleAndRerender();
         };
         const startI=$('#metrics-start'), endI=$('#metrics-end');
-        if(startI) startI.onchange=e=>{ ui.metrics.start=e.target.value; renderMetrics(); };
-        if(endI) endI.onchange=e=>{ ui.metrics.end=e.target.value; renderMetrics(); };
-        const routeSel=$('#metrics-route'); if(routeSel) routeSel.onchange=e=>{ ui.metrics.routeId=e.target.value; renderMetrics(); };
-        const driverSel=$('#metrics-driver'); if(driverSel) driverSel.onchange=e=>{ ui.metrics.driverId=e.target.value; renderMetrics(); };
-        const costI=$('#metrics-cost-km'); if(costI) costI.onchange=async e=>{ state.settings.costPerKm=n(e.target.value); const saved=await save(); renderMetrics(); notice(saved?'Costo por km actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved); };
+        if(startI) startI.onchange=e=>{ ui.metrics.start=e.target.value; markStaleAndRerender(); };
+        if(endI) endI.onchange=e=>{ ui.metrics.end=e.target.value; markStaleAndRerender(); };
+        const routeSel=$('#metrics-route'); if(routeSel) routeSel.onchange=e=>{ ui.metrics.routeId=e.target.value; markStaleAndRerender(); };
+        const driverSel=$('#metrics-driver'); if(driverSel) driverSel.onchange=e=>{ ui.metrics.driverId=e.target.value; markStaleAndRerender(); };
+        const costI=$('#metrics-cost-km'); if(costI) costI.onchange=async e=>{ state.settings.costPerKm=n(e.target.value); const saved=await save(); markStaleAndRerender(); notice(saved?'Costo por km actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved); };
         const cmpToggle=$('#metrics-compare-toggle');
         if(cmpToggle) cmpToggle.onchange=e=>{
           ui.metrics.compare.enabled=e.target.checked;
@@ -3402,10 +3421,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const r=shiftedPreviousRange(ui.metrics.start, ui.metrics.end);
             ui.metrics.compare.start=r.start; ui.metrics.compare.end=r.end;
           }
-          renderMetrics();
+          markStaleAndRerender();
         };
-        const cmpStart=$('#metrics-compare-start'); if(cmpStart) cmpStart.onchange=e=>{ ui.metrics.compare.start=e.target.value; renderMetrics(); };
-        const cmpEnd=$('#metrics-compare-end'); if(cmpEnd) cmpEnd.onchange=e=>{ ui.metrics.compare.end=e.target.value; renderMetrics(); };
+        const cmpStart=$('#metrics-compare-start'); if(cmpStart) cmpStart.onchange=e=>{ ui.metrics.compare.start=e.target.value; markStaleAndRerender(); };
+        const cmpEnd=$('#metrics-compare-end'); if(cmpEnd) cmpEnd.onchange=e=>{ ui.metrics.compare.end=e.target.value; markStaleAndRerender(); };
       }
       async function exportMetrics(){
         const m=metricsLastComputed; if(!m){ notice('Espera a que se calculen las métricas.',true); return; }
@@ -3498,6 +3517,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       let auditEntries=null;
       let auditShowingAll=false;
+      let auditLoaded=false;
       async function loadAllAudit(){
         if(!canAccessPage('audit')) return;
         $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo.','')+'<p class="muted">Cargando historial completo… esto puede tardar unos segundos.</p>';
@@ -3505,21 +3525,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if(!rows){ notice('No se pudo cargar el historial completo.',true); auditShowingAll=false; renderAudit(true); return; }
         auditEntries=rows;
         auditShowingAll=true;
+        auditLoaded=true;
         renderAudit(false);
       }
       async function renderAudit(forceRefresh){
         if(!canAccessPage('audit')) return;
         if(pageNeedsPremium('audit')){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios.')+premiumLockHtml('Auditoría'); return; }
-        if(forceRefresh) auditShowingAll=false;
-        const actions='<button class="refresh" data-action="refresh-audit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>'
+        if(forceRefresh){ auditShowingAll=false; auditLoaded=false; }
+        const actions='<button class="refresh" data-action="refresh-audit">'+REFRESH_ICON+'Actualizar</button>'
           +(auditShowingAll?'':' <button class="outline" data-action="load-all-audit">Ver todos los eventos guardados</button>');
-        const subtitle=auditShowingAll?'Historial de cambios: quién hizo qué y cuándo. Mostrando el historial completo guardado.':'Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos (usa "Ver todos" para cargar el historial completo).';
-        if(forceRefresh||auditEntries===null){
-          $('#audit-page').innerHTML=pageHead('Auditoría',subtitle,actions)+'<p class="muted">Cargando historial…</p>';
+        if(!auditLoaded){
+          if(!forceRefresh){
+            $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo.',actions)+'<p class="muted">Presiona Actualizar para cargar el historial. No se consulta la base de datos hasta entonces.</p>';
+            return;
+          }
+          $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo.',actions)+'<p class="muted">Cargando historial…</p>';
           const rows=await window.SupabaseDB?.dbGetAuditLog(300);
           auditEntries=rows||[];
+          auditLoaded=true;
           if(!rows){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo.',actions)+'<p class="muted">No se pudo cargar el historial. Verifica que la tabla db_audit_log exista (corre supabase-audit-log-migration.sql) y vuelve a intentar.</p>'; return; }
         }
+        const subtitle=auditShowingAll?'Historial de cambios: quién hizo qué y cuándo. Mostrando el historial completo guardado.':'Historial de cambios: quién hizo qué y cuándo. Muestra los últimos 300 eventos (usa "Ver todos" para cargar el historial completo).';
         const q=(ui.search.audit||'').toLowerCase();
         let list=auditEntries.filter(e=>!q||[e.actor_name,e.actor_role,e.action,e.entity_type,e.entity_label].join(' ').toLowerCase().includes(q));
         list=sort(list,'at','audit');
@@ -4053,7 +4079,7 @@ document.addEventListener('DOMContentLoaded', () => {
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
-        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"export-metrics":exportMetrics,"remove-logo":async()=>{if(state.settings.logoUrl)removeStorageImageByUrl(state.settings.logoUrl);state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{if(state.settings.adImageUrl)removeStorageImageByUrl(state.settings.adImageUrl);state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{if(state.settings.itemIcons[id])removeStorageImageByUrl(state.settings.itemIcons[id]);delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"edit-client":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"refresh-metrics":()=>renderMetrics(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"export-metrics":exportMetrics,"remove-logo":async()=>{if(state.settings.logoUrl)removeStorageImageByUrl(state.settings.logoUrl);state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{if(state.settings.adImageUrl)removeStorageImageByUrl(state.settings.adImageUrl);state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{if(state.settings.itemIcons[id])removeStorageImageByUrl(state.settings.itemIcons[id]);delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
           const scope=$('#export-scope')?.value||'all';
           if(scope!=='all'){
             const scopes={clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};
