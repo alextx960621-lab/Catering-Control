@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
 
-  <!-- Igual que en login.html: config.js/supabase-client.js no cambian en
+  <!-- Igual que en index.html (login): config.js/app.js no cambian en
        nada. React sigue por CDN, sin build (Vite) todavía, pero ya NO se
        carga Babel Standalone (~1MB, transpilaba el JSX en el navegador en
        CADA carga): el JSX de esta página se precompiló una sola vez a JS
@@ -17,7 +17,7 @@
        de más abajo. -->
   <script src="./config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-  <script src="./supabase-client.js" defer></script>
+  <script src="./app.js" defer></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
 
@@ -245,7 +245,7 @@ function boot() {
     function logout() {
         try { window.SupabaseDB?.revokeSession(); } catch (_) { }
         sessionStorage.removeItem(CLIENT_SESSION_KEY);
-        window.location.href = './login.html';
+        window.location.href = './index.html';
     }
     // ---------- Componentes chicos ----------
     function LogoutButton() {
@@ -697,7 +697,7 @@ function boot() {
                     session = null;
                 }
                 if (!session) {
-                    window.location.replace('./login.html');
+                    window.location.replace('./index.html');
                     return;
                 }
                 sessionRef.current = session;
@@ -721,7 +721,7 @@ function boot() {
                 ]);
                 if (needsClientFetch) {
                     if (!fetchedClient) {
-                        window.location.replace('./login.html');
+                        window.location.replace('./index.html');
                         return;
                     }
                     localClient = fetchedClient;
@@ -823,6 +823,5 @@ else {
   </script>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous" defer></script>
-<script src="./pwa-register.js" defer></script>
 </body>
 </html>

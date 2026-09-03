@@ -2,7 +2,7 @@
   "name": "Catering Control",
   "short_name": "Catering",
   "description": "Software de gestión integral para catering: operaciones, clientes y portal de autoservicio.",
-  "start_url": "./login.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",

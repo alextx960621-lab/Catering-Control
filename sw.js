@@ -1,13 +1,12 @@
-const CACHE_NAME = 'catering-control-v1.46.0'; 
+const CACHE_NAME = 'catering-control-v1.49.0'; 
 
 const PRECACHE_URLS = [
-  './login.html',
   './index.html',
+  './panel.html',
   './cliente.html',
-  './index.css',
+  './panel.css',
   './config.js',
-  './supabase-client.js',
-  './pwa-register.js',
+  './app.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -83,7 +82,7 @@ self.addEventListener('fetch', event => {
         const resCopy = res.clone(); // clonar YA, antes de devolver res a la página
         safeCachePut(req, resCopy);
         return res;
-      }).catch(() => caches.match(req).then(cached => cached || caches.match('./login.html')))
+      }).catch(() => caches.match(req).then(cached => cached || caches.match('./index.html')))
     );
     return;
   }
