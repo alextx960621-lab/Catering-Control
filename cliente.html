@@ -9,12 +9,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
 
-  <!-- Igual que en index.html (login): config.js/app.js no cambian en
-       nada. React sigue por CDN, sin build (Vite) todavía, pero ya NO se
-       carga Babel Standalone (~1MB, transpilaba el JSX en el navegador en
-       CADA carga): el JSX de esta página se precompiló una sola vez a JS
-       plano (React.createElement) y quedó pegado directo en el <script>
-       de más abajo. -->
   <script src="./config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="./app.js" defer></script>
@@ -31,7 +25,7 @@
   <meta name="apple-mobile-web-app-title" content="Catering">
 
   <style>
-    /* ===== Contenido de cliente.css, sin cambios de diseño ===== */
+    
     :root{--font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Figtree,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
     body{background:var(--page-bg,#f5f7fb);font-family:var(--font)}
     h1,h2,h3,.btn{font-family:var(--font-display)}
@@ -108,7 +102,7 @@ function boot() {
     const DEFAULT_ITEMS = [['shots', 'Shots'], ['proteins', 'Proteínas'], ['juices', 'Jugos'], ['breakfast', 'Desayuno'], ['snack1', 'Merienda 1'], ['lunch', 'Almuerzo'], ['snack2', 'Merienda 2'], ['dinner', 'Cena']];
     const n = v => Number(v) || 0;
     const fmt = d => d ? d.split('-').reverse().join('/') : '';
-    // ---------- Helpers de negocio (idénticos a los de cliente.js) ----------
+   
     function workDate(data) { return data.currentDate || new Date().toISOString().slice(0, 10); }
     function dayInfo(data, date) { return data.days?.[date] || { laborable: true }; }
     function addDays(date, count) { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate() + count); return d.toISOString().slice(0, 10); }
@@ -192,8 +186,7 @@ function boot() {
             return null;
         }
     }
-    // Igual que en cliente.js: si get_plan_status() no manda todavía el
-    // candado individual del portal, por seguridad se asume bloqueado.
+   
     async function fetchIsPremium() {
         try {
             const info = await window.SupabaseDB?.rpc('get_plan_status', {});
@@ -211,9 +204,7 @@ function boot() {
     }
     async function fetchServerSync(clientId) {
         try {
-            // plans/days/currentDate se leen del catálogo público del
-            // portal (get_portal_catalog RPC) -- no requiere sesión de
-            // staff, es información del mismo tipo que get_branding().
+       
             const [remoteMeta, remoteClient] = await Promise.all([
                 window.SupabaseDB?.getPortalCatalog(),
                 window.SupabaseDB?.dbGetClientRow(clientId)
@@ -227,10 +218,7 @@ function boot() {
     async function saveClient(updatedClient) {
         localStorage.setItem(CLIENT_ROW_KEY, JSON.stringify(updatedClient));
         try {
-            // Guarda solo lo que el portal cliente puede tocar de su propio
-            // perfil (pausa/reactivación/dirección habitual) -- nunca el
-            // objeto completo. El servidor vuelve a filtrar esto igual,
-            // esto acá es nomás para no mandar de más.
+       
             const { pauseStart, returnDate, status, pauseDates, activeAddressId } = updatedClient;
             return await window.SupabaseDB.dbSaveOwnClientProfile(updatedClient.id, { pauseStart, returnDate, status, pauseDates, activeAddressId });
         }
@@ -443,20 +431,7 @@ function boot() {
                 React.createElement("button", { className: "btn btn-primary", onClick: () => onConfirm(mode, returnDate) }, "Confirmar pausa"),
                 React.createElement(MessageAlert, { message: message }))));
     }
-    // Tarjeta de dirección del cliente. Cubre dos casos:
-    //  1) Cambiar la dirección HABITUAL (client.activeAddressId) — desde
-    //     ahora en adelante, eligiendo entre las direcciones que ya tiene
-    //     guardadas. Se guarda con dbSaveOwnClientProfile, igual que la
-    //     pausa/reactivación (el RPC cliente_save_profile valida server-side
-    //     que la sesión sea dueña de esa fila y solo deja tocar los campos
-    //     de la lista blanca -- ver supabase-security-lockdown.sql).
-    //  2) Un cambio puntual SOLO para el próximo día laborable (usa la RPC
-    //     set_client_address_override que ya existía) — útil para una
-    //     excepción sin tocar su dirección de siempre.
-    // Si el cliente quiere una dirección que todavía no tiene guardada,
-    // no hay forma de "agregarla" desde acá a propósito: necesita que el
-    // equipo la tome bien (ubicación exacta, ruta, etc.), así que se le
-    // ofrece un botón directo de WhatsApp para eso.
+ 
     function AddressCard({ client, data, branding, onSaveClient, onSaveTomorrowOverride }) {
         const addresses = client.addresses || [];
         const next = nextWorkDay(data, workDate(data));
@@ -651,7 +626,7 @@ function boot() {
             const overrides = Array.isArray(result) ? result : (client.addressOverrides || []).filter(o => o.date !== next).concat([{ date: next, addressId: selectedAddressId }]);
             const updated = { ...client, addressOverrides: overrides };
             localStorage.setItem(CLIENT_ROW_KEY, JSON.stringify(updated));
-            onSaveClient(updated, true); // true = solo actualizar estado local, ya se guardó vía la RPC de arriba
+            onSaveClient(updated, true); 
             window.SupabaseDB?.dbInsertAudit({ actor_id: client.id, actor_name: client.name, actor_role: 'cliente', action: 'Cliente cambió su dirección de entrega (autoservicio)', entity_type: 'client', entity_label: client.name, entity_id: client.id, details: { fecha: next, addressId: selectedAddressId } });
             return { error: false, text: 'Guardado. Se usará esa dirección para el pedido de mañana.' };
         }
@@ -673,9 +648,8 @@ function boot() {
                 React.createElement(NoteCard, { client: client }),
                 React.createElement(InstagramLink, { branding: branding }))));
     }
-    // ---------- App raíz: maneja sesión, carga y estado premium ----------
     function App() {
-        const [phase, setPhase] = useState('checking'); // checking | locked | portal
+        const [phase, setPhase] = useState('checking'); 
         const [data, setData] = useState(null);
         const [client, setClient] = useState(null);
         const [branding, setBranding] = useState(() => readCachedBranding());
@@ -709,11 +683,7 @@ function boot() {
                 }
                 catch (_) { }
                 const needsClientFetch = !localClient || localClient.id !== session.id;
-                // Estas 3 llamadas no dependen entre sí (branding y el chequeo
-                // Premium no necesitan el cliente para nada) -- antes iban una
-                // tras otra con await, sumando sus tiempos de red uno encima
-                // del otro. Pidiéndolas en paralelo, la pantalla "Cargando tu
-                // portal..." dura lo que tarda la más lenta de las 3, no la suma.
+              
                 const [fetchedClient, freshBranding, isPremium] = await Promise.all([
                     needsClientFetch ? window.SupabaseDB?.dbGetClientRow(session.id) : Promise.resolve(localClient),
                     fetchBrandingRemote(),
@@ -738,8 +708,7 @@ function boot() {
                 }
                 setPhase('portal');
                 window.SupabaseDB?.joinPresence({ id: localClient.id, role: 'cliente', name: localClient.name });
-                // Segunda pasada en segundo plano, igual que el boot() original:
-                // refresca datos del servidor y vuelve a chequear el candado Premium.
+               
                 const [{ remoteMeta, remoteClient }, freshBranding2] = await Promise.all([
                     fetchServerSync(session.id),
                     fetchBrandingRemote()
@@ -779,9 +748,7 @@ function boot() {
                 saveClientTheme(sessionRef.current.id, newTheme);
             setTheme(newTheme);
         }
-        // onLocalUpdateOnly=true: la dirección de mañana ya se guardó vía RPC
-        // propia (set_client_address_override) — acá solo hay que reflejar el
-        // cambio en el estado de React, sin volver a llamar dbSaveOwnClientProfile.
+      
         async function handleSaveClient(updated, onLocalUpdateOnly) {
             if (onLocalUpdateOnly) {
                 setClient(updated);
@@ -801,13 +768,7 @@ function boot() {
         return React.createElement(Portal, { data: data, client: client, branding: branding, theme: theme, onThemeChange: handleThemeChange, onSaveClient: handleSaveClient });
     }
     ReactDOM.createRoot(document.getElementById('portal-root')).render(React.createElement(App, null));
-} // fin de boot()
-// Antes (con Babel) React/ReactDOM cargaban sin defer y ya estaban listos
-// para cuando este bloque corría. Ahora que este script va con JS ya
-// compilado y React/ReactDOM cargan con defer, hay que esperarlos también
-// -- si la red va lenta, boot() podía dispararse antes de que React
-// terminara de descargar y tronaba con "React is not defined", dejando la
-// pantalla en blanco.
+} 
 if (window.APP_CONFIG && window.SupabaseDB && window.React && window.ReactDOM) {
     boot();
 }
@@ -819,9 +780,7 @@ else {
         }
     }, 20);
 }
-
   </script>
-
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous" defer></script>
 </body>
 </html>
