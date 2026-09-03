@@ -163,7 +163,11 @@ function boot() {
                 const cleanPhone = phone.replace(/\D/g, '');
                 const rows = await window.SupabaseDB?.rpc('login_cliente', { p_carnet: cleanCarnet, p_phone: cleanPhone });
                 const client = Array.isArray(rows) ? rows[0] : null;
-                if (!client) {
+                if (client?.locked_seconds > 0) {
+                    onError(`Demasiados intentos fallidos. Espera ${client.locked_seconds} segundos e intenta de nuevo.`);
+                    return;
+                }
+                if (!client || !client.id) {
                     onError('Carnet o teléfono no coinciden con un cliente registrado.');
                     return;
                 }
