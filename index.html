@@ -3033,7 +3033,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const LOCATION_CHANNEL_NAME = 'catering-driver-location';
         const NOMINATIM_DELAY_MS = 1100; // respeta el límite de ~1 solicitud/seg de Nominatim
         let dialog=null, mapBodyEl=null, statusEl=null, legendEl=null, routeSelectWrap=null, refreshRouteBtn=null;
-        let map=null, markersLayer=null, driverMarker=null, routeLayer=null, driverPos=null, lastClientLatlngs=[];
+        let map=null, markersLayer=null, driverMarker=null, routeLayer=null, driverConnectorLayer=null, driverPos=null, lastClientLatlngs=[];
         let locationChannel=null, channelBound=false, currentRouteId='';
         let watchId=null, lastBroadcastAt=0;
         const BROADCAST_MIN_INTERVAL_MS = 4000;
@@ -3208,32 +3208,16 @@ document.addEventListener('DOMContentLoaded', () => {
           return (toDeg(Math.atan2(y,x))+360)%360;
         }
 
-        // Dibuja (o redibuja) la ruta. Prioriza la ruta REAL por calles
-        // (OSRM, ver caché arriba); si no se pudo calcular (sin conexión,
-        // servicio caído, etc.) cae de vuelta a la línea recta de
-        // referencia con flechas, como antes. La posición en vivo del
-        // driver se dibuja aparte como un conector recto y barato hasta la
-        // siguiente parada — no dispara un recálculo de ruta por calles.
-        let routeRequestToken=0;
-        async function drawRouteLine(force){
-          const myToken=++routeRequestToken;
-          if (routeLayer){ routeLayer.remove(); routeLayer=null; }
+        // Dibuja la línea recta de referencia + flechas entre los stops de
+        // lastClientLatlngs, sin llamar a ningún servicio externo (no gasta
+        // llamadas a OSRM). Se usa como vista por defecto al abrir el mapa
+        // (ver renderMapView) y también como respaldo dentro de
+        // drawRouteLine() si el cálculo real por calles falla.
+        function drawStraightFallback(legendText){
           if (!map || !window.L) return;
-          if (lastClientLatlngs.length<2){
-            if (driverPos && lastClientLatlngs.length===1){
-              routeLayer=window.L.layerGroup().addTo(map);
-              window.L.polyline([[driverPos.lat,driverPos.lng], lastClientLatlngs[0]], { color:'#f97316', weight:3, opacity:.8, dashArray:'4,6' }).addTo(routeLayer);
-            }
-            return;
-          }
+          if (routeLayer){ routeLayer.remove(); routeLayer=null; }
           routeLayer=window.L.layerGroup().addTo(map);
-          const road=await computeStopsRoute(force);
-          if (myToken!==routeRequestToken) return; // se pidió otra ruta mientras esperábamos esta
-          if (!routeLayer || !map) return; // el mapa se cerró mientras esperábamos
-          if (road && road.latlngs?.length){
-            window.L.polyline(road.latlngs, { color:'#0d6efd', weight:5, opacity:.75 }).addTo(routeLayer);
-            legendEl.textContent=`Números = orden del cliente. Línea azul = ruta sugerida por calles (${road.km.toFixed(1)} km, ~${Math.round(road.minutes)} min · OpenStreetMap/OSRM, puede diferir del recorrido real).`;
-          } else {
+          if (lastClientLatlngs.length>=2){
             window.L.polyline(lastClientLatlngs, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(routeLayer);
             for (let i=0;i<lastClientLatlngs.length-1;i++){
               const [lat1,lng1]=lastClientLatlngs[i], [lat2,lng2]=lastClientLatlngs[i+1];
@@ -3241,16 +3225,51 @@ document.addEventListener('DOMContentLoaded', () => {
               const icon=window.L.divIcon({ className:'', html:`<div class="mc-arrow" style="transform:rotate(${brng}deg)"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
               window.L.marker([(lat1+lat2)/2, (lng1+lng2)/2], { icon, interactive:false }).addTo(routeLayer);
             }
-            legendEl.textContent='Números = orden del cliente. No se pudo calcular la ruta por calles (sin conexión al servicio de rutas); se muestra una línea recta de referencia.';
           }
+          if (legendEl && legendText!=null) legendEl.textContent=legendText;
+        }
+
+        // Conector recto y barato (sin API) desde la posición en vivo del
+        // driver hasta la siguiente parada pendiente. Vive en su PROPIA
+        // capa (driverConnectorLayer), separada de routeLayer, para poder
+        // redibujarse en cada actualización de GPS sin tocar ni recalcular
+        // la ruta principal (esa solo se recalcula con el botón "↻ Ruta").
+        function drawDriverConnector(){
+          if (!map || !window.L) return;
+          if (driverConnectorLayer){ driverConnectorLayer.remove(); driverConnectorLayer=null; }
           if (driverPos && lastClientLatlngs.length){
-            window.L.polyline([[driverPos.lat,driverPos.lng], lastClientLatlngs[0]], { color:'#f97316', weight:3, opacity:.8, dashArray:'4,6' }).addTo(routeLayer);
+            driverConnectorLayer=window.L.layerGroup().addTo(map);
+            window.L.polyline([[driverPos.lat,driverPos.lng], lastClientLatlngs[0]], { color:'#f97316', weight:3, opacity:.8, dashArray:'4,6' }).addTo(driverConnectorLayer);
+          }
+        }
+
+        // Calcula y dibuja la ruta REAL por calles (OSRM, ver caché arriba).
+        // Ahora SOLO se llama al presionar el botón "↻ Ruta" -- ya no se
+        // dispara sola al abrir el mapa ni con cada actualización de GPS
+        // del driver (eso lo maneja drawDriverConnector, sin costo de red).
+        // Si no se pudo calcular (sin conexión, servicio caído, etc.) cae
+        // de vuelta a la línea recta de referencia con flechas.
+        let routeRequestToken=0;
+        async function drawRouteLine(force){
+          const myToken=++routeRequestToken;
+          if (!map || !window.L) return;
+          if (lastClientLatlngs.length<2) return;
+          const road=await computeStopsRoute(force);
+          if (myToken!==routeRequestToken) return; // se pidió otra ruta mientras esperábamos esta
+          if (!map) return; // el mapa se cerró mientras esperábamos
+          if (road && road.latlngs?.length){
+            if (routeLayer){ routeLayer.remove(); routeLayer=null; }
+            routeLayer=window.L.layerGroup().addTo(map);
+            window.L.polyline(road.latlngs, { color:'#0d6efd', weight:5, opacity:.75 }).addTo(routeLayer);
+            legendEl.textContent=`Números = orden del cliente. Línea azul = ruta sugerida por calles (${road.km.toFixed(1)} km, ~${Math.round(road.minutes)} min · OpenStreetMap/OSRM, puede diferir del recorrido real). Los pendientes de orden ("P") no participan en la ruta.`;
+          } else {
+            drawStraightFallback('Números = orden del cliente. No se pudo calcular la ruta por calles (sin conexión al servicio de rutas); se muestra una línea recta de referencia. Los pendientes de orden ("P") no participan en la ruta.');
           }
         }
 
         function renderMapView(list, date){
           if (!mapBodyEl) return;
-          if (map){ map.remove(); map=null; routeLayer=null; }
+          if (map){ map.remove(); map=null; routeLayer=null; driverConnectorLayer=null; }
           mapBodyEl.innerHTML='';
           if (!window.L){ setStatus('No se pudo cargar el mapa (sin conexión a internet).'); return; }
           const withAddr=list.map(c => ({ c, addr: resolvedAddress(c, date) })).filter(t => t.addr);
@@ -3268,9 +3287,15 @@ document.addEventListener('DOMContentLoaded', () => {
             window.L.marker([addr.lat,addr.lng], { icon }).addTo(markersLayer).bindPopup(`<b>${escapeHtml(c.name)}</b><br>Orden: ${pending?'Pendiente de asignar':ord}<br>${escapeHtml(addr.address||'')}`);
             latlngs.push([addr.lat,addr.lng]);
           });
-          lastClientLatlngs=latlngs;
-          legendEl.textContent=`Números = orden del cliente. Naranja con "P" = todavía sin número asignado. Calculando ruta por calles…${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`;
-          drawRouteLine();
+          // La ruta calculada (recta de referencia acá, o la real por
+          // calles al presionar "↻ Ruta") solo conecta a los clientes que
+          // YA tienen número de orden asignado. Los "P" (pendientes) se ven
+          // como pines sueltos en el mapa pero no entran en el trazado,
+          // porque todavía no se sabe en qué lugar de la secuencia van.
+          lastClientLatlngs=sorted.filter(({c}) => !!n(effectiveOrder(c,date))).map(({addr}) => [addr.lat,addr.lng]);
+          const pendingCount=sorted.length-lastClientLatlngs.length;
+          drawStraightFallback(`Números = orden del cliente. Naranja con "P" = todavía sin número asignado (no participa en la ruta).${pendingCount?` ${pendingCount} cliente(s) pendiente(s) de orden.`:''} Presioná "↻ Ruta" para calcular la ruta real por calles.${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`);
+          drawDriverConnector();
           if (latlngs.length) map.fitBounds(window.L.latLngBounds(latlngs).pad(0.2)); else map.setView([-16.5,-68.15],12);
           setStatus(withCoords.length ? `${withCoords.length}/${list.length} puntos en el mapa.` : 'No se pudo ubicar a ningún cliente en el mapa todavía.');
           setTimeout(() => map && map.invalidateSize(), 50);
@@ -3327,13 +3352,16 @@ document.addEventListener('DOMContentLoaded', () => {
           const icon=window.L.divIcon({ className:'', html:'<div class="mc-driver-icon">🚚</div>', iconSize:[34,34], iconAnchor:[17,17] });
           if (!driverMarker) driverMarker=window.L.marker([lat,lng], { icon, zIndexOffset:1000 }).addTo(map).bindPopup(escapeHtml(name));
           else driverMarker.setLatLng([lat,lng]);
-          drawRouteLine();
+          // Solo redibuja el conector recto hasta la próxima parada -- no
+          // toca ni recalcula la ruta principal (esa solo se recalcula
+          // manualmente con el botón "↻ Ruta", ver drawRouteLine).
+          drawDriverConnector();
         }
 
         function teardown(){
           if (watchId!=null && navigator.geolocation){ navigator.geolocation.clearWatch(watchId); watchId=null; }
           if (map){ map.remove(); map=null; }
-          driverMarker=null; markersLayer=null; routeLayer=null; driverPos=null; lastClientLatlngs=[];
+          driverMarker=null; markersLayer=null; routeLayer=null; driverConnectorLayer=null; driverPos=null; lastClientLatlngs=[];
           lastRoadKey=null; lastRoadResult=null;
         }
 
