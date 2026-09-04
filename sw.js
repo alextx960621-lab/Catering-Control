@@ -1,7 +1,8 @@
-const CACHE_NAME = 'catering-control-v1.53.1'; 
+const CACHE_NAME = 'catering-control-v1.55.0'; 
 
 const PRECACHE_URLS = [
   './index.html',
+  './login.html',
   './panel.html',
   './cliente.html',
   './config.js',
@@ -78,6 +79,15 @@ self.addEventListener('fetch', event => {
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req).then(res => {
+        // Un 404 acá es una respuesta VÁLIDA del servidor (no una falla de
+        // red), así que el .catch() de más abajo nunca se entera -- por
+        // eso una URL vieja/rota bajo este sitio (ej. un ícono de "Añadir a
+        // pantalla de inicio" guardado cuando el login se llamaba
+        // login.html, antes de renombrarse a index.html) terminaba
+        // mostrando la pantalla de error del navegador en vez de la app.
+        // Igual que el router de una SPA: cualquier URL desconocida cae a
+        // index.html en vez de romperse.
+        if (res.status === 404) return caches.match('./index.html').then(cached => cached || fetch('./index.html'));
         const resCopy = res.clone(); // clonar YA, antes de devolver res a la página
         safeCachePut(req, resCopy);
         return res;
