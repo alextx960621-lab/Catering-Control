@@ -615,8 +615,8 @@
     card.className = 'pwa-banner pwa-install';
     card.style.cssText = 'flex-direction:column;align-items:stretch;gap:6px;text-align:left;position:relative;padding-right:34px';
     card.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px">${ICON_SHARE}<b>Instalar esta app</b></div>
-      <span style="font-weight:500;font-size:13px;opacity:.95">Tocá <b>Compartir</b> ${ICON_SHARE} y luego <b>"Añadir a pantalla de inicio"</b>.</span>
+      <div style="display:flex;align-items:center;gap:10px">💾<b>Instalar esta app</b></div>
+      <span style="font-weight:500;font-size:13px;opacity:.95">Tocá <b>Compartir</b> ${ICON_SHARE} <br>y luego <b>"Añadir a pantalla de inicio"</b>.</span>
     `;
     const closeBtn = document.createElement('button');
     closeBtn.setAttribute('aria-label', 'Cerrar');
