@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
   <script src="./config.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin defer></script>
   <script src="./app.js" defer></script>
   <!-- ExcelJS (~1MB) ya no se carga aquí en cada visita: index.js lo pide
        bajo demanda solo cuando el usuario exporta un Excel (procesar día,
@@ -665,6 +665,22 @@
       display: grid;
       grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
       gap: 18px;
+      align-items: start; /* si una tarjeta del par es más alta que la otra
+        (ej. "Empresa" vs "Datos" en Configuración), la más corta ya no se
+        estira para igualar la alta -- eso era lo que dejaba espacio vacío
+        de sobra dentro de la tarjeta corta en vista de escritorio. */
+    }
+    /* Variante de .two-col SOLO para el par Tendencia/Ranking de Métricas
+       (necesita más ancho para la tendencia semanal que para el ranking).
+       Va como CLASE, no como "style" inline en el JS -- un style inline le
+       gana en especificidad a la media query de abajo que colapsa .two-col
+       a una sola columna en pantallas angostas, y esa era la causa real de
+       que "Ranking de drivers" se viera apilado/cortado en el celular y en
+       la PWA (el nombre largo del driver no tenía ancho para acomodarse). */
+    .metrics-split {
+      grid-template-columns: 1.3fr .7fr;
+      gap: 16px;
+      margin-bottom: 16px;
     }
     .form-grid {
       display: grid;
@@ -3307,7 +3323,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ['Costo promedio por ruta', m.costPerKm?`Bs ${m.avgCostPerRoute.toFixed(2)}`:'—', ''],
           ['Drivers activos promedio/día', m.avgActiveDriversPerDay.toFixed(1), '']
         ];
-        return `<div class="summary-grid" style="grid-template-columns:repeat(4,minmax(150px,1fr))">${items.map(([label,val,sub])=>`<div class="card metric"><div class="muted" style="font-size:11px">${esc(label)}</div><strong>${val}</strong>${sub?`<small class="muted" style="display:block">${esc(sub)}</small>`:''}</div>`).join('')}</div>`;
+        return `<div class="summary-grid">${items.map(([label,val,sub])=>`<div class="card metric"><div class="muted" style="font-size:11px">${esc(label)}</div><strong>${val}</strong>${sub?`<small class="muted" style="display:block">${esc(sub)}</small>`:''}</div>`).join('')}</div>`;
       }
       function metricsTrendChart(m){
         const max=Math.max(1,...m.weeklyTrend.map(w=>w.count));
@@ -3390,7 +3406,7 @@ document.addEventListener('DOMContentLoaded', () => {
         el.innerHTML=pageHead('Métricas',subtitleBase,actions)+metricsFilterBar()+staleNote
           +metricsKpiCards(m)
           +(mB?metricsComparisonCard(m,mB):'')
-          +`<div class="two-col" style="display:grid;grid-template-columns:1.3fr .7fr;gap:16px;margin-bottom:16px">${metricsTrendChart(m)}${metricsExtremesCard(m)}</div>`
+          +`<div class="two-col metrics-split">${metricsTrendChart(m)}${metricsExtremesCard(m)}</div>`
           +`<h3 style="font-size:15px;margin:6px 0 8px">Desempeño por driver</h3>`+metricsDriverTable(m)
           +`<h3 style="font-size:15px;margin:16px 0 8px">Desempeño por ruta</h3>`+metricsRouteTable(m)
           +`<p class="muted" style="margin-top:14px;font-size:12px">Los kilómetros son una estimación en línea recta entre las direcciones de los clientes (no siguen calles reales). Métricas de accesos al portal web de clientes y uso de links de WhatsApp/Maps no están disponibles todavía: requieren un módulo de analítica del portal que esta versión no incluye.</p>`;
