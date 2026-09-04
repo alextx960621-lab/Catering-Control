@@ -11,10 +11,6 @@
   <script src="./config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin defer></script>
   <script src="./app.js" defer></script>
-  <!-- ExcelJS (~1MB) ya no se carga aquí en cada visita: index.js lo pide
-       bajo demanda solo cuando el usuario exporta un Excel (procesar día,
-       exportar dietas, exportar orden de ruta). Así el panel carga más
-       liviano y rápido en el uso normal del día a día. -->
   <style>
     :root {
       --bg: #f5f7fb;
@@ -479,9 +475,6 @@
     .col-drag-handle:hover { color: var(--primary); }
     #dispatch-table thead th.drag-over { background: color-mix(in srgb, var(--primary) 18%, transparent); }
 
-    /* En pantallas táctiles el dedo es mucho menos preciso que un mouse:
-       agrandamos el área real de toque de ambos controles (sin agrandar
-       tanto el dibujo visual) para que agarrarlos sea confiable. */
     @media (pointer: coarse) {
       .resize-handle { width: 22px; right: -11px; }
       .col-drag-handle {
@@ -490,18 +483,6 @@
         padding: 10px 8px;
         margin: -10px -4px -10px -8px; /* compensa el padding para no correr el layout */
       }
-      /* Los <label> (que envuelven casi todos los inputs) usan
-         font-size:12px, y como "input,select,textarea{font:inherit}" lo
-         heredan, cualquier campo de texto queda por debajo de 16px. Los
-         navegadores móviles (Safari/Chrome en iOS y Android) hacen zoom
-         automático de toda la página al enfocar un campo así de chico —
-         es su forma de "ayudar" a que se lea el texto que estás
-         escribiendo, pero acá agranda la pantalla entera cada vez que
-         tocas un campo del formulario, cosa molesta que no pasa en
-         escritorio. Forzando 16px (el umbral que evita ese zoom) SOLO en
-         pantallas táctiles, el pellizco manual de dos dedos para
-         agrandar/achicar sigue funcionando igual que siempre — esto solo
-         evita el zoom automático no pedido. */
       input, select, textarea { font-size: 16px; }
     }
 
@@ -514,11 +495,6 @@
       min-width: 64px;
       font-size: 12px;
     }
-    /* Mismo motivo que el bloque @media (pointer: coarse) de más arriba:
-       sin esto, estos inputs de edición rápida (celdas editables de las
-       tablas) se quedarían en 12px y seguirían disparando el zoom
-       automático en móvil — esta regla necesita ir DESPUÉS de la de
-       arriba para ganarle en la cascada (misma especificidad). */
     @media (pointer: coarse) {
       .editable-cell input, .editable-cell select { font-size: 16px; }
     }
@@ -670,13 +646,6 @@
         estira para igualar la alta -- eso era lo que dejaba espacio vacío
         de sobra dentro de la tarjeta corta en vista de escritorio. */
     }
-    /* Variante de .two-col SOLO para el par Tendencia/Ranking de Métricas
-       (necesita más ancho para la tendencia semanal que para el ranking).
-       Va como CLASE, no como "style" inline en el JS -- un style inline le
-       gana en especificidad a la media query de abajo que colapsa .two-col
-       a una sola columna en pantallas angostas, y esa era la causa real de
-       que "Ranking de drivers" se viera apilado/cortado en el celular y en
-       la PWA (el nombre largo del driver no tenía ancho para acomodarse). */
     .metrics-split {
       grid-template-columns: 1.3fr .7fr;
       gap: 16px;
@@ -707,10 +676,6 @@
       max-height: calc(100vh - 24px);
       max-height: calc(100dvh - 24px);
       margin: auto; /* el reset "* { margin:0 }" de arriba anulaba el centrado nativo del <dialog> */
-      /* El navegador solo fija inset vertical (top/bottom) al mostrar el <dialog>
-         como modal; el horizontal queda en "auto" y por spec eso lo ancla a su
-         posición estática (izquierda), no lo centra. Forzamos los 4 insets a 0
-         para que "margin: auto" centre también en horizontal. */
       inset: 0;
     }
     dialog::backdrop {
@@ -797,11 +762,6 @@
       font-weight: 500;
     }
     .toggle-list input { width: auto; min-height: auto; }
-    /* Lista de checkboxes de una sola columna (ej.: "Qué menús requieren
-       Premium"). Reusa el mismo arreglo que .toggle-list para que el
-       checkbox no herede width:100%/padding/border de la regla general de
-       inputs (eso es lo que lo hacía verse "descentrado": el checkbox se
-       estiraba a un rectángulo de ancho completo en vez de una casilla). */
     .toggle-list-col {
       display: grid;
       gap: 8px;
@@ -815,9 +775,6 @@
       font-weight: 500;
     }
     .toggle-list-col input { width: auto; min-height: auto; margin: 0; }
-    /* Celda de Google Maps en Día de trabajo: input para pegar la
-       dirección/URL corta + link "Abrir mapa" debajo cuando ya hay algo
-       guardado. */
     .maps-cell { display: flex; flex-direction: column; gap: 4px; }
     .maps-cell-link { font-size: 11px; white-space: nowrap; }
     input[type="file"] {
@@ -923,10 +880,6 @@
     }
 
     @media (max-width: 850px) {
-      /* Evita que el grid #app estire la fila del header cuando el
-         contenido de la página es corto (Notas, Sueldos, Auditoría,
-         Inventario, etc.). Sin esto, el hueco entre el ☰ y el nombre
-         de usuario variaba según cuánto contenido tuviera cada página. */
       #app { grid-template-rows: auto 1fr; align-content: start; }
       .collapse-toggle { display: none; }
       .notes-grid { grid-template-columns: 1fr; gap: 8px; }
@@ -1128,11 +1081,6 @@
 }
 .btn-premium:hover { filter: brightness(.95); }
 </style>
-  <!-- Leaflet (CSS + JS, ~150KB) ya no se carga aquí en cada visita: se pide
-       bajo demanda solo cuando se abre el mapa de reparto (ver ensureLeaflet
-       en el script principal), igual que ExcelJS. Así se ahorra esa descarga
-       y ese CSS render-blocking en cada carga del panel para roles que casi
-       nunca abren el mapa (cocina, etc). -->
 
   <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#0d6efd">
@@ -1222,10 +1170,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return excelJsLoadPromise;
       }
 
-      // Leaflet (mapa de reparto): igual que ExcelJS, se pide bajo demanda
-      // solo cuando se abre el mapa (ver DriverMap.open más abajo), en vez
-      // de cargar CSS+JS (~150KB) en TODA carga del panel para TODOS los
-      // roles, la mayoría de los cuales nunca abre el mapa.
       let leafletLoadPromise=null;
       function ensureLeaflet(){
         if(window.L) return Promise.resolve(true);
@@ -1254,10 +1198,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const STAFF_USERS_KEY = `${APP_CONFIG.storagePrefix}-staff-users-v1`;
       const STAFF_SESSION_KEY = `${APP_CONFIG.storagePrefix}-staff-session-v1`;
-      // Marca de tiempo de la última sincronización de clientes lograda con
-      // éxito. Se usa para pedir solo los clientes que cambiaron desde esa
-      // fecha en vez de re-bajar el payload completo de todos en cada
-      // carga (ver loadClientRows más abajo).
       const CLIENTS_SYNC_KEY = `${APP_CONFIG.storagePrefix}-clients-sync-at-v1`;
 
       const UI_THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
@@ -1266,21 +1206,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const COL_PREFS_KEY = `${APP_CONFIG.storagePrefix}-col-prefs-v1`;
       const DRIVER_VIEW_DATE_KEY = `${APP_CONFIG.storagePrefix}-driver-viewdate-v1`;
       const $ = (s, root=document) => root.querySelector(s);
-      // Links cortos de Google Maps (maps.app.goo.gl / goo.gl/maps) no se
-      // pueden seguir desde el navegador (CORS). Se resuelven en el servidor
-      // vía una Supabase Edge Function ("resolve-maps-link"), de forma
-      // silenciosa y sin bloquear el guardado del cliente: si la función no
-      // está desplegada o falla, el link igual se guarda tal cual lo pegó el
-      // usuario y el geocoding por texto (Nominatim) sigue de respaldo.
       function isShortMapsLink(text){ return /(?:maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(text||''); }
-      // Huella de qué se usó para resolver la coordenada de una dirección: si
-      // la coordenada manual, el link o el texto de la dirección cambian, la
-      // huella cambia y toca recalcular. Está en el ámbito general (no solo
-      // dentro del mapa interno) porque tanto el resolver de links cortos
-      // como el mapa interno tienen que usar EXACTAMENTE la misma huella —
-      // si no, una función piensa que el dato de la otra está desactualizado
-      // y lo vuelve a calcular por su cuenta, pisando un resultado bueno con
-      // uno peor (esto es justo lo que pasaba antes de este arreglo).
       function srcFingerprint(addr){ return `${addr?.coords||''}|${addr?.maps||''}|${addr?.address||''}`; }
       async function resolveShortMapsLinksForClient(c){
         const db=window.SupabaseDB;
@@ -1292,11 +1218,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const { data, error } = await db.client.functions.invoke('resolve-maps-link', { body:{ url: addr.maps } });
             if(!error && data?.lat!=null && data?.lng!=null){
               addr.lat=data.lat; addr.lng=data.lng;
-              // También se rellena la casilla "Coordenada" visible del
-              // formulario, no solo el caché interno del mapa — así el
-              // driver/admin ve confirmación de que el link sí se resolvió,
-              // y esa misma coordenada queda disponible para "Abrir mapa" en
-              // Clientes (que lee addr.coords, no addr.lat/lng).
               addr.coords=`${data.lat}, ${data.lng}`;
               addr.geoSrc=srcFingerprint(addr);
               changed=true;
@@ -1305,16 +1226,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if(changed) save();
       }
-      // Extrae lat/lng de un link de Google Maps o de un texto "lat,lng" suelto.
-      // Se usa tanto para el mapa interno de despacho como para armar links
-      // "abrir directo en Google Maps" en la página de Clientes.
       function extractLatLngFromMapsField(text){
         if (!text) return null;
-        // Orden importa: primero los patrones más precisos. "!3d..!4d.." es
-        // la coordenada EXACTA del pin dentro de un link de "lugar" de
-        // Google Maps; "@lat,lng" es solo el centro de la cámara del mapa en
-        // el momento de compartir y puede venir corrido de la ubicación real
-        // (por eso antes mandaba "a otra dirección" al pegar un link).
         const patterns=[
           /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,
           /[?&](?:q|ll|daddr)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
@@ -1330,13 +1243,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return null;
       }
-      // El campo "maps" del cliente a veces trae un link completo de Google
-      // Maps y a veces solo unas coordenadas sueltas "lat,lng" (útil para el
-      // mapa interno de despacho, que las lee directo). Para que el link de
-      // la página de Clientes SIEMPRE abra Google Maps y pueda trazar ruta,
-      // si ya es una URL la respetamos tal cual; si son coordenadas sueltas,
-      // armamos un link de direcciones con esas coordenadas como destino; y
-      // si es un texto libre (una dirección escrita), lo mandamos a buscar.
       function googleMapsDirectLink(value){
         const v=String(value||'').trim();
         if (!v) return '';
@@ -1345,10 +1251,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (coords) return `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}`;
         return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v)}`;
       }
-      // Coordenada puesta a mano por el usuario en el campo "Coordenada" de la
-      // dirección. Se prioriza siempre sobre cualquier link/geocoding automático,
-      // porque intentar adivinar coordenadas a partir de texto puede mandar la
-      // ubicación a otro país si el formato no es el esperado.
       function addressMapsLink(a){
         if(!a) return '';
         const coords=String(a.coords||'').trim();
@@ -1382,9 +1284,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       function menuItems(){ return (state?.settings?.menuItems||[]).map(m=>[m.key,m.label]); }
 
-      // Comprime la imagen a JPEG (igual que antes) y devuelve un Blob en vez
-      // de un dataURL base64 -- listo para subir a Storage en vez de
-      // embeberlo en la fila de Postgres.
       function resizeImageToBlob(file, maxDim = 480, quality = 0.82) {
         return new Promise((resolve, reject) => {
           if (!file || !file.type?.startsWith('image/')) { reject(new Error('Archivo no válido')); return; }
@@ -1405,10 +1304,6 @@ document.addEventListener('DOMContentLoaded', () => {
           reader.readAsDataURL(file);
         });
       }
-      // Saca el "path" dentro del bucket a partir de la URL pública guardada
-      // (".../object/public/app-images/logos/xxx.jpg" -> "logos/xxx.jpg"),
-      // para poder borrar el archivo viejo del bucket cuando se reemplaza o
-      // se quita una imagen (si no, quedan huérfanos ocupando espacio).
       function storagePathFromUrl(url) {
         if (!url) return null;
         const bucket = window.SupabaseDB?.IMAGES_BUCKET || 'app-images';
@@ -1420,13 +1315,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const path = storagePathFromUrl(url);
         if (path) window.SupabaseDB?.storageRemoveImage(path);
       }
-      // Reemplaza al viejo readImageAsDataURL: en vez de embeber la imagen
-      // como base64 dentro de la fila de Postgres (lo que hacía que se
-      // volviera a descargar entera en cada lectura de esa fila -- login,
-      // cada guardado, polling de Despacho cada 12s...), la sube al bucket
-      // "app-images" y devuelve la URL pública, que es lo único que se
-      // guarda en la fila. Requiere haber corrido
-      // supabase-storage-setup.sql una vez en el proyecto.
       async function uploadImageFile(file, folder, maxDim = 480, quality = 0.82, oldUrl = '') {
         const blob = await resizeImageToBlob(file, maxDim, quality);
         const path = `${folder}/${uid('img')}.jpg`;
@@ -1618,12 +1506,6 @@ document.addEventListener('DOMContentLoaded', () => {
       function canEditDispatchField(c, field, date=workDate()){
         if (field === 'returnDate' && c.status !== 'Programado') return false;
         if (canEditPage('dispatch')) return true;
-        // Los drivers solo pueden editar mientras ven el día actual en vivo.
-        // Si están mirando un día pasado (procesado o no), estos campos no
-        // son editables: de lo contrario, "editar" un día pasado terminaría
-        // modificando silenciosamente el dato actual/en vivo del cliente
-        // (teléfono, maps, orden), aunque el driver crea que solo estaba
-        // corrigiendo algo de ese día ya cerrado.
         if (isDriverRole()) return date===realToday() && ['maps','phone1','phone2','order'].includes(field) && myRouteIds().includes(effectiveRouteId(c,date));
         return false;
       }
@@ -1680,18 +1562,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       let lastSavedClients=new Map();
       let lastSavedNotes=new Map();
-      // Antes 'clientes'/'personal'/'inventario' se guardaban como un solo
-      // bloque JSON gigante por tabla (fila id='main'). Ahora cada campo
-      // top-level tiene su propia fila (id=nombre del campo) en la misma
-      // tabla, vía dbGetFields/dbSetFields (ver app.js). Eso
-      // permite que save() detecte y suba SOLO el campito que cambió en
-      // vez de todo el bloque -- ya no hace falta bajar el bloque entero
-      // para mezclarlo antes de subir (ver FIELD_MAP más abajo), porque al
-      // vivir cada campo en su propia fila no hay riesgo de pisar otros
-      // campos del mismo bloque como pasaba antes.
-      // lastSyncedFields guarda el último JSON subido/bajado con éxito de
-      // cada campo, para poder compararlo y saber cuáles cambiaron.
       let lastSyncedFields={};
+      let confirmedFields={};
+      let confirmedClientRows=false, confirmedNoteRows=false;
       const FIELD_MAP={
         plans:      { table:'clientes',   get:()=>state.plans,       set:v=>{ state.plans=v; } },
         days:       { table:'clientes',   get:()=>state.days,        set:v=>{ state.days=v; } },
@@ -1702,16 +1575,6 @@ document.addEventListener('DOMContentLoaded', () => {
         staffUsers: { table:'personal',   get:()=>staffUsers,        set:v=>{ if(Array.isArray(v)&&v.length){ staffUsers=v; localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers)); } } },
         inventory:  { table:'inventario', get:()=>state.inventory,   set:v=>{ state.inventory=v; } }
       };
-      // Se setea al arrancar la app (ver el boot al final del archivo) con
-      // la promesa de la PRIMERA loadFromServer(). Mientras esa promesa no
-      // se resuelva, lastSavedClients/lastSavedNotes/lastSyncedFields siguen
-      // vacíos — y si algo llama a save() en ese momento (ej. el driver
-      // marca una entrega apenas abre la app, antes de que termine de bajar
-      // los datos reales por una conexión lenta), se vería "todo cambiado"
-      // y subiría la copia vieja del caché del celular, pisando cualquier
-      // cambio que un editor haya hecho mientras tanto (el orden de
-      // reparto, por ejemplo). save() espera esta promesa antes de subir
-      // nada, para partir siempre de la base real del servidor.
       let initialServerLoadPromise=null;
       function diffClients(){
         const changed=[],currentIds=new Set();
@@ -1759,22 +1622,13 @@ document.addEventListener('DOMContentLoaded', () => {
         setDatabaseStatus('saving');
         operationsSaveQueue=operationsSaveQueue.then(async()=>{
           try{
-            // Blindaje contra la carrera con la primera carga: si todavía
-            // no bajó loadFromServer() por primera vez, se espera acá
-            // (ver comentario en la declaración de initialServerLoadPromise
-            // más arriba). loadFromServer() nunca rechaza (atrapa sus
-            // propios errores), así que este await no se cuelga ni aunque
-            // falle la red — simplemente sigue con lo que haya.
             if (initialServerLoadPromise) { try { await initialServerLoadPromise; } catch(_){} }
             const db=window.SupabaseDB;
             if(!db) throw new Error('Supabase no está disponible');
-            // Solo se sube el campo cuyo JSON cambió desde el último
-            // guardado con éxito -- no hace falta bajar nada del servidor
-            // primero para mezclar, porque cada campo vive en su propia
-            // fila (dbSetFields) y escribirlo no toca los demás.
             const changedByTable={};
             const changedKeys=[];
             for(const key in FIELD_MAP){
+              if(!confirmedFields[key]) continue;
               const val=FIELD_MAP[key].get();
               const json=JSON.stringify(val);
               if(lastSyncedFields[key]!==json){
@@ -1791,13 +1645,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 if(allOk) changedKeys.forEach(key=>{ lastSyncedFields[key]=JSON.stringify(FIELD_MAP[key].get()); });
                 return allOk;
               })(),
-              saveClientRows(),
-              saveNoteRows()
+              confirmedClientRows ? saveClientRows() : Promise.resolve(true),
+              confirmedNoteRows ? saveNoteRows() : Promise.resolve(true)
             ]);
             const ok=okFields&&okClientRows&&okNoteRows;
+            const unconfirmedPending=Object.keys(FIELD_MAP).some(key=>!confirmedFields[key]) || !confirmedClientRows || !confirmedNoteRows;
             if(ok){
               localStorage.setItem(KEY, JSON.stringify(state));
               localStorage.setItem(STAFF_USERS_KEY, JSON.stringify(staffUsers));
+            }
+            if(ok && unconfirmedPending){
+              notice('Guardado localmente. Algunos datos (planes/rutas/drivers/etc.) todavía no se pudieron confirmar contra la base de datos, así que esos cambios no se subieron todavía.', true);
             }
             setDatabaseStatus(ok?'ok':'error');
             if(!ok) notice('Los cambios quedaron locales, pero no se guardaron completamente en Supabase.',true);
@@ -1807,20 +1665,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return operationsSaveQueue;
       }
       function load(){ try { state=JSON.parse(localStorage.getItem(KEY)); } catch { state=null; } normalize(); localStorage.setItem(KEY,JSON.stringify(state)); }
-      // Sincroniza state.clients con el servidor sin volver a bajar el
-      // payload completo de todos los clientes en cada carga. La primera
-      // vez (o si por algún motivo no hay caché local todavía) se hace la
-      // sincronización completa de siempre. De ahí en más, solo se bajan:
-      //  1) los IDs de todos los clientes (liviano, solo para detectar
-      //     bajas comparando contra lo que ya había en caché), y
-      //  2) el payload de los clientes con updated_at >= la última sync
-      //     (los que sí cambiaron).
-      // El resto de los clientes se reutiliza tal cual del caché local.
-      // syncStartedAt se toma ANTES de pedirle nada al servidor: así, si
-      // algún cliente se guarda justo mientras esta consulta está en
-      // vuelo, la próxima sincronización lo vuelve a pedir igual (más
-      // seguro pedir un cliente de más por las dudas, que arriesgarse a
-      // perder uno por una carrera de tiempos).
       async function loadClientRows(){
         const db=window.SupabaseDB;
         const lastSyncAt=localStorage.getItem(CLIENTS_SYNC_KEY);
@@ -1855,18 +1699,14 @@ document.addEventListener('DOMContentLoaded', () => {
             db.dbGetFields('personal',personalKeys), db.dbGetFields('inventario',inventarioKeys)
           ]);
           let gotAny=false;
-          // Migración de cuentas viejas: si todavía no hay filas por campo
-          // (cuenta nunca guardó con la versión nueva) pero sí existe el
-          // bloque legado completo en id='main', se usa ese como respaldo
-          // una única vez. Apenas se llame a save() de nuevo, ya queda
-          // reescrito como filas por campo (el 'main' viejo se ignora de
-          // ahí en más, no hace falta borrarlo).
+          let anyFailed=false;
+
           let clientesData=clientesFields;
-          if(!clientesData || !Object.keys(clientesData).length){
-            const legacy=await db.dbGet('clientes');
-            if(legacy) clientesData=legacy;
+          if(clientesData===null){
+            const legacy=await db.dbGet('clientes'); // null acá también = fallo real
+            if(legacy!==null) clientesData=legacy;
           }
-          if (clientesData && Object.keys(clientesData).length) {
+          if (clientesData!==null) {
             gotAny=true;
             if('plans' in clientesData) state.plans = clientesData.plans ?? state.plans;
             if('days' in clientesData) state.days = clientesData.days ?? state.days;
@@ -1874,23 +1714,32 @@ document.addEventListener('DOMContentLoaded', () => {
             lastSyncedFields.plans=JSON.stringify(state.plans);
             lastSyncedFields.days=JSON.stringify(state.days);
             lastSyncedFields.currentDate=JSON.stringify(state.currentDate);
+            confirmedFields.plans=confirmedFields.days=confirmedFields.currentDate=true;
+          } else {
+            anyFailed=true;
           }
           if (clientRows) {
             gotAny=true;
             state.clients = clientRows;
             lastSavedClients = new Map(clientRows.map(c=>[c.id, JSON.stringify(c)]));
+            confirmedClientRows=true;
+          } else if (clientRows===null) {
+            anyFailed=true;
           }
           if (noteRows) {
             gotAny=true;
             state.notes = noteRows;
             lastSavedNotes = new Map(noteRows.map(nt=>[nt.id, JSON.stringify(nt)]));
+            confirmedNoteRows=true;
+          } else if (noteRows===null) {
+            anyFailed=true;
           }
           let personalData=personalFields;
-          if(!personalData || !Object.keys(personalData).length){
+          if(personalData===null){
             const legacy=await db.dbGet('personal');
-            if(legacy) personalData=legacy;
+            if(legacy!==null) personalData=legacy;
           }
-          if (personalData && Object.keys(personalData).length) {
+          if (personalData!==null) {
             gotAny=true;
             if('drivers' in personalData) state.drivers = personalData.drivers ?? state.drivers;
             if('routes' in personalData) state.routes = personalData.routes ?? state.routes;
@@ -1903,19 +1752,28 @@ document.addEventListener('DOMContentLoaded', () => {
             lastSyncedFields.routes=JSON.stringify(state.routes);
             lastSyncedFields.settings=JSON.stringify(state.settings);
             lastSyncedFields.staffUsers=JSON.stringify(staffUsers);
+            confirmedFields.drivers=confirmedFields.routes=confirmedFields.settings=confirmedFields.staffUsers=true;
+          } else {
+            anyFailed=true;
           }
           let inventarioData=inventarioFields;
-          if(!inventarioData || !Object.keys(inventarioData).length){
+          if(inventarioData===null){
             const legacy=await db.dbGet('inventario');
-            if(legacy) inventarioData=legacy;
+            if(legacy!==null) inventarioData=legacy;
           }
-          if (inventarioData && Object.keys(inventarioData).length) {
+          if (inventarioData!==null) {
             gotAny=true;
             if('inventory' in inventarioData) state.inventory = inventarioData.inventory ?? state.inventory;
             lastSyncedFields.inventory=JSON.stringify(state.inventory);
+            confirmedFields.inventory=true;
+          } else {
+            anyFailed=true;
           }
           if (gotAny) localStorage.setItem(KEY, JSON.stringify(state));
-          setDatabaseStatus('ok');
+          if (anyFailed) {
+            notice('No se pudo sincronizar todo con la base de datos. Algunos cambios no se guardarán hasta reconectar (probá "Sincronizar" o recargar la página).', true);
+          }
+          setDatabaseStatus(anyFailed ? 'error' : 'ok');
           return gotAny;
         } catch (_) { setDatabaseStatus('error'); return false; }
       }
@@ -1924,15 +1782,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const dates=Object.keys(state.days).filter(d=>state.days[d]?.processed);
         return dates.length?dates.sort().at(-1):null;
       }
-      // Si el negocio se salta días sin abrir la app (o sin procesarlos), esos
-      // días quedaban sin `processed` para siempre y lastProcessedDate() no
-      // avanzaba (afectando, por ejemplo, la fecha mínima de retorno). Al
-      // conocer la fecha real de hoy (refDate, viene del servidor) se cierran
-      // automáticamente como "sin actividad" todos los días entre el último
-      // procesado y hoy — sin tocar inventario ni días consumidos, igual que
-      // al cerrar manualmente un día no laborable. Si nunca se procesó nada
-      // todavía (cuenta nueva), no hay nada que rellenar: el primer día que
-      // se procese manualmente ya queda con su propio estado explícito.
       function backfillMissedDays(refDate){
         if(!refDate) return;
         const last=lastProcessedDate();
@@ -1956,13 +1805,7 @@ document.addEventListener('DOMContentLoaded', () => {
       function driverName(id){ const d=driver(id); return d ? `${d.firstName} ${d.lastName}` : 'Sin asignar'; }
       function driverForRoute(routeId){ return state.drivers.find(d=>d.routeId===routeId||(d.extraRouteIds||[]).includes(routeId)); }
       function driverRouteIds(d){ return d?[d.routeId,...(d.extraRouteIds||[])].filter(Boolean):[]; }
-      // Evita que una misma ruta quede asignada a dos drivers a la vez (eso duplicaba
-      // las entregas contabilizadas). Devuelve el driver que YA tiene esa ruta (como
-      // principal o adicional), sin contar al propio driver que se está editando.
       function driverRouteConflict(routeId,excludeDriverId){ return routeId?state.drivers.find(d=>d.id!==excludeDriverId&&driverRouteIds(d).includes(routeId)):null; }
-      // Rutas del driver que inició sesión (normalmente 1, o 2 si está cubriendo un
-      // reemplazo). Se lee del registro del driver (no solo de la sesión) para que
-      // un cambio hecho por un admin se refleje sin tener que volver a iniciar sesión.
       function myRouteIds(){ return isDriverRole() ? (driverRouteIds(driver(activeUser.driverId)).length?driverRouteIds(driver(activeUser.driverId)):[activeUser.routeId].filter(Boolean)) : []; }
       function syncClientRouteAndDriver(data){
         const selectedDriver=driver(data.driverId);
@@ -1972,11 +1815,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       const WEEKDAYS=[{v:1,l:'Lun'},{v:2,l:'Mar'},{v:3,l:'Mié'},{v:4,l:'Jue'},{v:5,l:'Vie'},{v:6,l:'Sáb'},{v:0,l:'Dom'}];
       function weekdayOf(date=state.currentDate){ return new Date(date+'T00:00:00').getDay(); }
-      // --- Direcciones múltiples (c.addresses[] + c.activeAddressId) ---
-      // Migra clientes con el formato viejo (address1/maps/address2/maps2) a
-      // la lista c.addresses[] la primera vez que se cargan. Idempotente: si
-      // el cliente ya tiene c.addresses no hace nada. No borra los campos
-      // viejos por si algo falla (quedan sin usarse).
       function migrateClientAddresses(c){
         if(!Array.isArray(c.addresses) || !c.addresses.length){
           if(c.address1){
@@ -2030,13 +1868,7 @@ document.addEventListener('DOMContentLoaded', () => {
       function effectiveAddress(c,date=state.currentDate){ return resolvedAddress(c,date)?.address || c.address1 || ''; }
       function effectiveMaps(c,date=state.currentDate){ return addressMapsLink(resolvedAddress(c,date)) || (c.maps?googleMapsDirectLink(c.maps):''); }
       function effectiveOrder(c,date=state.currentDate){ const a=resolvedAddress(c,date); return (a && a.order!==undefined && a.order!=='') ? a.order : (c.order??''); }
-      // Escribe el número de orden respetando la misma prioridad que effectiveOrder:
-      // si hay una dirección/override para ese día, se guarda ahí; si no, en el cliente.
       function writeOrderValue(c,date,val){ const addr=resolvedAddress(c,date); if(addr) addr.order=val; else c.order=val; }
-      // Corre un lugar hacia adelante (order+1) a todos los clientes activos de la
-      // misma ruta/día cuyo número sea >= fromValue, para abrir espacio a un
-      // cliente nuevo que se inserta con ese número (opción "correr los siguientes"
-      // del selector de conflicto de orden).
       function shiftOrdersFrom(routeId,date,fromValue,excludeId){
         const targets=state.clients
           .filter(x=>x.id!==excludeId && status(x,date)==='Activo' && effectiveRouteId(x,date)===routeId)
@@ -2044,8 +1876,6 @@ document.addEventListener('DOMContentLoaded', () => {
           .filter(t=>!isNaN(t.val) && t.val>=fromValue);
         targets.forEach(({x,val})=>writeOrderValue(x,date,String(val+1)));
       }
-      // Diálogo chico para cuando dos clientes de la misma ruta/día quedarían con
-      // el mismo número de orden: dejar duplicado, correr la secuencia, o cancelar.
       function askOrderConflictChoice(orderNum){
         return new Promise(resolve=>{
           const dlg=document.createElement('dialog');
@@ -2079,7 +1909,6 @@ document.addEventListener('DOMContentLoaded', () => {
           return `${days}: ${esc(r)}`;
         }).join(' · ');
       }
-      // --- Editor de direcciones (filas dinámicas en clientForm) ---
       function addressRowHtml(a={},idx){
         const id=a.id||uid('a');
         const drv=a.routeId?driverForRoute(a.routeId):null;
@@ -2115,12 +1944,6 @@ document.addEventListener('DOMContentLoaded', () => {
             row.querySelector('.addr-text').oninput=()=>{ renderActiveSelector(); form._refreshScheduleOptions?.(); };
           });
         }
-        // Antes de destruir y volver a construir el HTML de las filas (al
-        // agregar/quitar una dirección), hay que guardar en "list" lo que el
-        // usuario ya escribió en el DOM. Si no, render() vuelve a dibujar
-        // todo desde "list" tal cual estaba al abrir el formulario y se
-        // pierde lo tecleado (ej.: llenar Dirección 1 y luego presionar
-        // "+ Añadir dirección" borraba esa Dirección 1).
         function captureListFromDom(){
           const rows=[...container.querySelectorAll('.client-address-row')];
           rows.forEach((row,i)=>{
@@ -2199,6 +2022,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return c.status || 'Activo';
       }
       function badge(s){ const cl=({Activo:'active',Pausado:'paused','Retorno pendiente':'pending',Programado:'pending','No laborable':'off'})[s] || 'done'; return `<span class="badge ${cl}">${esc(s)}</span>`; }
+      function deliveryStatusBadge(status){
+        if (status === 'entregado') return '<span class="badge active">Entregado</span>';
+        if (status === 'no_entregado') return '<span class="badge danger">No entregado</span>';
+        return '<span class="badge off">Pendiente</span>';
+      }
       function syncReturnDates(date=state.currentDate){
         if(pageNeedsPremium('returnDate')) return; // reactivación automática
         let changed=false;
@@ -2386,7 +2214,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const date = workDate();
         const rec = deliveryRecord(date, clientId);
         const st = rec?.status;
-        const statusBadge = st === 'entregado' ? '<span class="badge active">Entregado</span>' : st === 'no_entregado' ? '<span class="badge danger">No entregado</span>' : '<span class="badge off">Pendiente</span>';
+        const statusBadge = deliveryStatusBadge(st);
         const metaBits = [];
         if (rec?.by) metaBits.push(`Marcado por ${esc(rec.by)}`);
         if (rec?.at) metaBits.push(new Date(rec.at).toLocaleString('es-BO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
@@ -2417,12 +2245,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const file = f.elements['photoFile']?.files?.[0];
           let image = existing?.status === kind ? (existing.image || '') : '';
           if (file) {
-            // Fotos de respaldo de entrega: solo sirven para comprobar el
-            // paquete/puerta ante un reclamo, no hace falta que sean nítidas.
-            // Ahora se suben al bucket de Storage (antes iban como base64
-            // dentro de la fila de Postgres, y se re-descargaban enteras
-            // cada 12s mientras Despacho está abierto). 360px y calidad
-            // 0.55 siguen siendo perfectamente legibles para eso.
             try { image = await uploadImageFile(file, 'delivery', 360, .55, image); }
             catch (_) { notice('No se pudo procesar la foto.', true); return false; }
           }
@@ -2473,7 +2295,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ...(myRoutes.length>1?[{key:'route',label:'Ruta',cell:c=>esc(routeName(effectiveRouteId(c,date)))}]:[]),
           {key:'status',label:'Estado de entrega',cell:c=>{
             const rec=deliveryRecord(date,c.id), st=rec?.status;
-            const statusBadge = st === 'entregado' ? '<span class="badge active">Entregado</span>' : st === 'no_entregado' ? '<span class="badge danger">No entregado</span>' : '<span class="badge off">Pendiente</span>';
+            const statusBadge = deliveryStatusBadge(st);
             const detailBits = [];
             if (rec?.at) detailBits.push(new Date(rec.at).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' }));
             if (rec?.reason) detailBits.push(esc(rec.reason));
@@ -2616,7 +2438,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const choice=await askOrderConflictChoice(newVal);
                 if(choice==='cancel'||!choice){ i.value=prevVal; return; }
                 if(choice==='shift') shiftOrdersFrom(routeId,date,Number(newVal),c.id);
-                // 'duplicate': se deja tal cual, los dos quedan con el mismo número.
               }
             }
             writeOrderValue(c,date,newVal);
@@ -3147,22 +2968,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       function monthDates(month){const [y,m]=month.split('-').map(Number),end=new Date(y,m,0).getDate();return Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
-      // ===================== MÉTRICAS =====================
-      // Panel de estadísticas de reparto. Se calcula en el navegador a
-      // partir de los datos ya disponibles: registros de entrega
-      // (deliveryRecord: status/at por cliente y día), clientes/rutas/
-      // drivers y las coordenadas de dirección que ya usa el mapa de
-      // despacho (DriverMap). No hay una tabla de "logs" separada: cada
-      // marca de entregado/no-entregado ya trae su timestamp ("at").
-      //
-      // Limitaciones honestas (se muestran en el panel, no se inventan
-      // datos): los kilómetros son una ESTIMACIÓN en línea recta entre
-      // las direcciones de los clientes en el orden de la ruta (no sigue
-      // calles reales); no hay todavía un registro histórico de la
-      // posición GPS real del driver (solo se transmite en vivo mientras
-      // el mapa de despacho está abierto, y no se guarda); y no existe un
-      // portal web de clientes con analítica de accesos en esta versión,
-      // así que esas métricas se muestran como "No disponible".
       function dateRangeArray(start,end){
         const out=[]; let d=new Date(start+'T00:00:00'); const last=new Date(end+'T00:00:00');
         if(isNaN(d)||isNaN(last)||d>last) return out;
@@ -3182,10 +2987,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if(preset==='last90'){ const dt=new Date(t+'T00:00:00'); dt.setDate(dt.getDate()-89); return {start:dt.toISOString().slice(0,10), end:t}; }
         return {start:t.slice(0,8)+'01', end:t}; // 'month' (por defecto)
       }
-      // Rango "equivalente anterior": mismo número de días, justo antes del
-      // periodo actual. Se usa como valor por defecto al activar
-      // "Comparar periodos" (ej.: si el periodo actual es una semana, el de
-      // comparación es la semana inmediatamente anterior).
       function shiftedPreviousRange(start,end){
         const s=new Date(start+'T00:00:00'), e=new Date(end+'T00:00:00');
         const days=Math.max(1, Math.round((e-s)/86400000)+1);
@@ -3342,7 +3143,6 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>`;
       }
       function heatColor(rate){
-        // Verde = buena tasa de éxito, rojo = mala. Solo cambia el fondo de la celda (mini "mapa de calor" tabular).
         if(rate>=0.9) return 'background:#dff7ed';
         if(rate>=0.7) return 'background:#fff2d9';
         return 'background:#ffe1e6';
@@ -3414,10 +3214,6 @@ document.addEventListener('DOMContentLoaded', () => {
           +`<p class="muted" style="margin-top:14px;font-size:12px">Los kilómetros son una estimación en línea recta entre las direcciones de los clientes (no siguen calles reales). Métricas de accesos al portal web de clientes y uso de links de WhatsApp/Maps no están disponibles todavía: requieren un módulo de analítica del portal que esta versión no incluye.</p>`;
         bindMetricsFilters();
       }
-      // Los filtros SOLO actualizan el estado en memoria (ui.metrics) y
-      // re-renderizan la barra/página con lo último ya calculado -- NUNCA
-      // disparan una consulta a Supabase por sí solos. Eso pasa nada más
-      // cuando el usuario aprieta "Actualizar" (o "Ver todos" en Auditoría).
       function bindMetricsFilters(){
         const markStaleAndRerender=()=>{ if(metricsLoaded) metricsStale=true; renderMetrics(false); };
         const presetSel=$('#metrics-preset');
@@ -3496,13 +3292,10 @@ document.addEventListener('DOMContentLoaded', () => {
         a.download=`metricas-${ui.metrics.start}-a-${ui.metrics.end}.xlsx`; a.click();
         setTimeout(()=>URL.revokeObjectURL(a.href),1000);
       }
-      // ===================== FIN MÉTRICAS =====================
 
       function renderPayroll(){ if(!canAccessPage('payroll')) return; if(pageNeedsPremium('payroll')){ $('#payroll-page').innerHTML=pageHead('Sueldos','Cálculo de tarifas por driver.')+premiumLockHtml('Sueldos'); return; } const dates=monthDates(ui.month);let list=isDriverRole()?state.drivers.filter(d=>d.id===activeUser.driverId):state.drivers;const dayValues=d=>dates.map(date=>{const rec=day(date);return rec.processed?state.clients.filter(c=>effectiveDriverId(c,date)===d.id&&status(c,date)==='Activo').reduce((a,c)=>a+n(c.career||1),0):'';});const rows=d=>{const values=dayValues(d);const total=values.reduce((a,v)=>a+n(v),0);const rate=n(day(state.currentDate).rates[d.id]??4.5);const rateCell=canEditPage('payroll')?`<input class="rate-edit" type="number" min="0" step="0.01" data-id="${d.id}" value="${rate.toFixed(2)}">`:`${rate.toFixed(2)}`;return `<tr><td><b>${esc(d.firstName)} ${esc(d.lastName)}</b><br><small class="muted">${esc(routeName(d.routeId))}</small></td>${values.map(v=>`<td>${v===''?'—':v}</td>`).join('')}<td>${total}</td><td>${rateCell}</td><td>${(total*rate).toFixed(2)}</td></tr>`};
         const dayTotals=dates.map((date,i)=>list.reduce((sum,d)=>sum+n(dayValues(d)[i]),0));
         const grandTotal=dayTotals.reduce((a,v)=>a+v,0);
-        // Total de todos los sueldos (Monto Bs) sumando cada driver, para que
-        // el administrador vea de un vistazo cuánto se pagó en total el mes.
         const grandAmount=list.reduce((sum,d)=>{
           const total=dayValues(d).reduce((a,v)=>a+n(v),0);
           const rate=n(day(state.currentDate).rates[d.id]??4.5);
@@ -3907,19 +3700,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const d=day();
         if(d.processed){notice('Este día ya fue procesado.',true);return;}
         if(!d.laborable){
-          // Un día no laborable no reparte nada ni descuenta inventario, pero
-          // igual hay que "cerrarlo" (marcarlo processed) para que no se
-          // quede colgado/abierto — si no, lastProcessedDate() nunca avanza
-          // y cosas como la fecha de retorno mínima quedan pegadas en el
-          // último día laborable antes del feriado.
           if(!confirm(`¿Cerrar el día ${state.currentDate.split('-').reverse().join('/')} como no laborable? No se procesan pedidos ni se descuenta inventario.`))return;
           d.processed=true;d.processedClientIds=[];delete dispatchHistorialCache[state.currentDate];save();renderDispatch();
           notice('Día no laborable cerrado.');
           logAudit('Día cerrado (no laborable)','day',state.currentDate,state.currentDate,{});
-          // Sin esto, un día no laborable procesado nunca guarda constancia:
-          // al volver a verlo (ya como día pasado) no hay snapshot con qué
-          // mostrar el historial, y tampoco queda editable (quedaba "colgado",
-          // sin poder verse de ninguna de las dos formas).
           window.SupabaseDB?.dbUpsertSnapshot(state.currentDate,buildDaySnapshotPayload(state.currentDate,[]));
           return;
         }
@@ -3932,11 +3716,6 @@ document.addEventListener('DOMContentLoaded', () => {
         logAudit('Día procesado','day',state.currentDate,state.currentDate,{clientesAtendidos:processedIds.length});
         window.SupabaseDB?.dbUpsertSnapshot(state.currentDate,buildDaySnapshotPayload(state.currentDate,processedIds));
         exportProcessedDaySnapshot(state.currentDate,processedIds);
-        // El navegador solo deja disparar una descarga "de golpe" por gesto de
-        // usuario; si se piden dos casi al mismo tiempo suele bloquear la
-        // segunda. Por eso el respaldo JSON sale con un pequeño retraso.
-        // Incluye state completo (clients, plans, settings.menuItems, etc.)
-        // tal cual esté en ese momento, así que ya recoge cualquier menú nuevo.
         setTimeout(()=>downloadStateJsonBackup(`dia-procesado-${state.currentDate}`),700);
       }
       function downloadStateJsonBackup(filenameBase){
@@ -4107,10 +3886,6 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           notice('Preparando respaldo completo (incluye auditoría, despachos y snapshots de los últimos 2 años)…');
           const db=window.SupabaseDB;
-          // Limitar el respaldo completo a los últimos 2 años: evita que el
-          // archivo crezca sin límite con el tiempo y, de paso, garantiza
-          // quedar siempre por debajo del límite de 1000 filas por consulta
-          // que aplica Supabase por defecto (2 años ≈ 730 días como máximo).
           const cutoff=new Date(); cutoff.setFullYear(cutoff.getFullYear()-2);
           const cutoffDate=cutoff.toISOString().slice(0,10);
           const [auditLog,deliveryStatus,snapshots]=await Promise.all([
@@ -4194,11 +3969,6 @@ document.addEventListener('DOMContentLoaded', () => {
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
         window.SupabaseDB?.setSessionToken(activeUser?.sessionToken || null, 'staff');
       if(!activeUser){ window.location.replace('./index.html'); return; }
-      // Antes este mismo archivo se servía desde dos HTML distintos
-      // (panel.html para admin/editor/kitchen y driver.html para el driver)
-      // y acá se rebotaba a cada quien a su página. Ya no hace falta: todos
-      // entran por panel.html y las páginas/acciones se muestran u ocultan
-      // según el rol (ver isDriverRole()/canAccessPage() en todo el archivo).
       load(); applyBranding(); initialServerLoadPromise=loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate(isDriverRole()?'delivery':'dispatch');
       window.SupabaseDB?.joinPresence({id:activeUser.id, role:isDriverRole()?'driver':'staff', name:activeUser.name}, st=>{
         presenceCounts=computePresenceCounts(st);
@@ -4207,13 +3977,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       window.addEventListener('beforeunload', e => { if (saveInFlight) { e.preventDefault(); e.returnValue = ''; } });
 
-      // ===================================================================
-      // Mapa de reparto (OpenStreetMap / Leaflet) — versión ADMIN.
-      // Código propio de index.js: no depende de ningún otro archivo .js de
-      // la app (está duplicado en driver-app.js a propósito, ver nota ahí).
-      // El admin solo ESCUCHA la ubicación en vivo que transmite el driver
-      // (no la transmite él mismo).
-      // ===================================================================
       (() => {
         const LOCATION_CHANNEL_NAME = 'catering-driver-location';
         const NOMINATIM_DELAY_MS = 1100; // respeta el límite de ~1 solicitud/seg de Nominatim
@@ -4223,27 +3986,6 @@ document.addEventListener('DOMContentLoaded', () => {
         let watchId=null, lastBroadcastAt=0;
         const BROADCAST_MIN_INTERVAL_MS = 4000;
 
-        // -----------------------------------------------------------------
-        // Ruta real por calles (OSRM, servidor público y gratuito de
-        // demostración: router.project-osrm.org). Es gratis y no pide API
-        // key, pero según sus propios términos está pensado para pruebas,
-        // no para tráfico de producción pesado — por eso el diseño de abajo
-        // llama a la API lo menos posible:
-        //  1) La ruta por calles se calcula UNA sola vez por las paradas de
-        //     la ruta (no cambia aunque el driver se mueva), y se guarda en
-        //     caché en localStorage. Como las rutas de reparto casi siempre
-        //     repiten las mismas direcciones día a día, la mayoría de las
-        //     veces la respuesta sale de la caché y no se llama a la API.
-        //  2) La posición en vivo del driver NO recalcula la ruta completa:
-        //     solo se dibuja un conector recto (barato, sin API) desde su
-        //     punto actual hasta la siguiente parada pendiente.
-        //  3) Hay un botón "↻ Ruta" para forzar recalcular ignorando la
-        //     caché (por si una calle cambió).
-        // Si el uso crece mucho, lo más sano a futuro es un servidor OSRM
-        // propio (también gratis y de código abierto, se puede correr en
-        // un VPS barato) en vez de depender del demo público. Mapbox/Google
-        // Directions son la alternativa de pago si se necesita más
-        // capacidad o mejores tiempos estimados de tráfico.
         const ROAD_ROUTE_CACHE_KEY = `${APP_CONFIG.storagePrefix}-road-route-cache-v1`;
         const ROAD_ROUTE_CACHE_MAX = 300;
         function loadRoadRouteCache(){ try{ return JSON.parse(localStorage.getItem(ROAD_ROUTE_CACHE_KEY)) || {}; } catch(_){ return {}; } }
@@ -4284,7 +4026,6 @@ document.addEventListener('DOMContentLoaded', () => {
           lastRoadKey=key; lastRoadResult=result;
           return result;
         }
-        // -----------------------------------------------------------------
 
         function ensureStyles(){
           if (document.getElementById('driver-map-style')) return;
@@ -4330,17 +4071,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function setStatus(text){ if (statusEl) statusEl.textContent=text; }
 
-        // srcFingerprint ya está definida arriba, en el ámbito general — la
-        // usa también resolveShortMapsLinksForClient(), así las dos
-        // funciones siempre están de acuerdo sobre cuándo una coordenada
-        // quedó desactualizada.
         function extractCoords(text){ return extractLatLngFromMapsField(text); }
 
-        // Coordenada puesta a mano en el campo "Coordenada" de la dirección.
-        // Se prioriza siempre sobre el link y la dirección de texto (igual
-        // que en addressMapsLink más arriba), porque es el dato más
-        // confiable: no depende de que el link tenga el formato esperado ni
-        // de que el geocoder adivine bien un texto libre.
         function parseCoordsField(coords){
           const m=String(coords||'').trim().match(/^(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/);
           if(!m) return null;
@@ -4361,10 +4093,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-        // Resuelve coordenadas de la dirección "efectiva" de cada cliente para
-        // la fecha dada. Las coordenadas se guardan en el objeto de esa
-        // dirección (c.addresses[i].lat/lng/geoSrc), no a nivel de cliente,
-        // porque cada dirección tiene su propia ubicación.
         async function resolveCoords(list, date){
           const targets=list.map(c => ({ c, addr: resolvedAddress(c, date) })).filter(t => t.addr);
           const pending=targets.filter(({addr}) => addr.lat==null || addr.lng==null || addr.geoSrc!==srcFingerprint(addr));
@@ -4384,8 +4112,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function escapeHtml(v){ return String(v ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[ch])); }
 
-        // Ángulo (bearing) en grados entre dos puntos, medido desde el norte
-        // en sentido horario — lo que espera CSS rotate().
         function bearingDeg(lat1,lng1,lat2,lng2){
           const toRad=d=>d*Math.PI/180, toDeg=r=>r*180/Math.PI;
           const y=Math.sin(toRad(lng2-lng1))*Math.cos(toRad(lat2));
@@ -4393,11 +4119,6 @@ document.addEventListener('DOMContentLoaded', () => {
           return (toDeg(Math.atan2(y,x))+360)%360;
         }
 
-        // Dibuja la línea recta de referencia + flechas entre los stops de
-        // lastClientLatlngs, sin llamar a ningún servicio externo (no gasta
-        // llamadas a OSRM). Se usa como vista por defecto al abrir el mapa
-        // (ver renderMapView) y también como respaldo dentro de
-        // drawRouteLine() si el cálculo real por calles falla.
         function drawStraightFallback(legendText){
           if (!map || !window.L) return;
           if (routeLayer){ routeLayer.remove(); routeLayer=null; }
@@ -4414,11 +4135,6 @@ document.addEventListener('DOMContentLoaded', () => {
           if (legendEl && legendText!=null) legendEl.textContent=legendText;
         }
 
-        // Conector recto y barato (sin API) desde la posición en vivo del
-        // driver hasta la siguiente parada pendiente. Vive en su PROPIA
-        // capa (driverConnectorLayer), separada de routeLayer, para poder
-        // redibujarse en cada actualización de GPS sin tocar ni recalcular
-        // la ruta principal (esa solo se recalcula con el botón "↻ Ruta").
         function drawDriverConnector(){
           if (!map || !window.L) return;
           if (driverConnectorLayer){ driverConnectorLayer.remove(); driverConnectorLayer=null; }
@@ -4428,12 +4144,6 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
 
-        // Calcula y dibuja la ruta REAL por calles (OSRM, ver caché arriba).
-        // Ahora SOLO se llama al presionar el botón "↻ Ruta" -- ya no se
-        // dispara sola al abrir el mapa ni con cada actualización de GPS
-        // del driver (eso lo maneja drawDriverConnector, sin costo de red).
-        // Si no se pudo calcular (sin conexión, servicio caído, etc.) cae
-        // de vuelta a la línea recta de referencia con flechas.
         let routeRequestToken=0;
         async function drawRouteLine(force){
           const myToken=++routeRequestToken;
@@ -4472,11 +4182,6 @@ document.addEventListener('DOMContentLoaded', () => {
             window.L.marker([addr.lat,addr.lng], { icon }).addTo(markersLayer).bindPopup(`<b>${escapeHtml(c.name)}</b><br>Orden: ${pending?'Pendiente de asignar':ord}<br>${escapeHtml(addr.address||'')}`);
             latlngs.push([addr.lat,addr.lng]);
           });
-          // La ruta calculada (recta de referencia acá, o la real por
-          // calles al presionar "↻ Ruta") solo conecta a los clientes que
-          // YA tienen número de orden asignado. Los "P" (pendientes) se ven
-          // como pines sueltos en el mapa pero no entran en el trazado,
-          // porque todavía no se sabe en qué lugar de la secuencia van.
           lastClientLatlngs=sorted.filter(({c}) => !!n(effectiveOrder(c,date))).map(({addr}) => [addr.lat,addr.lng]);
           const pendingCount=sorted.length-lastClientLatlngs.length;
           drawStraightFallback(`Números = orden del cliente. Naranja con "P" = todavía sin número asignado (no participa en la ruta).${pendingCount?` ${pendingCount} cliente(s) pendiente(s) de orden.`:''} Presioná "↻ Ruta" para calcular la ruta real por calles.${withoutCoords?` ${withoutCoords} cliente(s) sin ubicación resuelta.`:''}`);
@@ -4508,10 +4213,6 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
 
-        // Lado driver: TRANSMITE su ubicación en vivo (GPS del celular)
-        // mientras el diálogo del mapa está abierto, para que el/los admin(s)
-        // viendo esa(s) misma(s) ruta(s) vean su posición en tiempo real
-        // (ver startListening arriba, que es quien la recibe).
         function startBroadcast(routeIds, name){
           const channel=ensureLocationChannel();
           if (!channel || !navigator.geolocation) return;
@@ -4521,10 +4222,6 @@ document.addEventListener('DOMContentLoaded', () => {
             drawDriverMarker(pos.coords.latitude, pos.coords.longitude, name || 'Tú');
             if (now - lastBroadcastAt < BROADCAST_MIN_INTERVAL_MS) return;
             lastBroadcastAt=now;
-            // routeIds (plural) para que el mapa del admin reconozca la
-            // transmisión sin importar cuál de las rutas del driver esté
-            // viendo; se manda también routeId (la primera) por si algún
-            // lado viejo todavía compara con el campo singular.
             channel.send({ type:'broadcast', event:'loc', payload:{ routeId:routeIds[0], routeIds, lat:pos.coords.latitude, lng:pos.coords.longitude, name, at:now } });
           }, err => {
             setStatus(err.code===1 ? 'Activa el permiso de ubicación para compartir tu posición en vivo.' : 'No se pudo obtener tu ubicación en vivo.');
@@ -4537,9 +4234,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const icon=window.L.divIcon({ className:'', html:'<div class="mc-driver-icon">🚚</div>', iconSize:[34,34], iconAnchor:[17,17] });
           if (!driverMarker) driverMarker=window.L.marker([lat,lng], { icon, zIndexOffset:1000 }).addTo(map).bindPopup(escapeHtml(name));
           else driverMarker.setLatLng([lat,lng]);
-          // Solo redibuja el conector recto hasta la próxima parada -- no
-          // toca ni recalcula la ruta principal (esa solo se recalcula
-          // manualmente con el botón "↻ Ruta", ver drawRouteLine).
           drawDriverConnector();
         }
 
@@ -4576,9 +4270,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const date=workDate();
           await ensureDeliveryLoaded(date);
           const fullList=deliveryListFor(asDriver?routeIds:currentRouteId, date);
-          // Solo se muestran en el mapa los pedidos aún pendientes: en cuanto
-          // se marca "entregado" o "no entregado", el número desaparece del
-          // mapa para que solo queden los que faltan por entregar.
           const list=fullList.filter(c => (deliveryRecord(date, c.id)?.status || 'pendiente') === 'pendiente');
           if (!list.length){
             if (map){ map.remove(); map=null; }
@@ -4601,9 +4292,6 @@ document.addEventListener('DOMContentLoaded', () => {
           if(!await ensureLeaflet()){ setStatus('No se pudo cargar el mapa (sin conexión a internet).'); return; }
           setTimeout(() => map && map.invalidateSize(), 30);
           if (isDriverRole()){
-            // El driver solo ve sus propias rutas: sin selector, siempre
-            // myRouteIds() (o las que vengan explícitas desde el botón que
-            // abrió el mapa).
             if (routeSelectWrap) routeSelectWrap.hidden=true;
             const routeIds=(routeIdParam?String(routeIdParam).split(',').filter(Boolean):null) || myRouteIds();
             await loadAndRender(routeIds);
