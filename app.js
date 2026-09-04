@@ -615,8 +615,8 @@
     card.className = 'pwa-banner pwa-install';
     card.style.cssText = 'flex-direction:column;align-items:stretch;gap:6px;text-align:left;position:relative;padding-right:34px';
     card.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px">💾<b>Instalar esta app</b></div>
-      <span style="font-weight:500;font-size:13px;opacity:.95">Tocá <b>Compartir</b> ${ICON_SHARE} <br>y luego <b>"Añadir a pantalla de inicio"</b>.</span>
+      <div style="display:flex;align-items:center;gap:10px">${ICON_SHARE}<b>Instalar esta app</b></div>
+      <span style="font-weight:500;font-size:13px;opacity:.95">Tocá <b>Compartir</b> ${ICON_SHARE} y luego <b>"Añadir a pantalla de inicio"</b>.</span>
     `;
     const closeBtn = document.createElement('button');
     closeBtn.setAttribute('aria-label', 'Cerrar');
@@ -668,7 +668,39 @@
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (refreshing) return;
       refreshing = true;
-      window.location.reload();
+      // Pequeña espera antes de recargar: en iOS/Safari, si el reload cae
+      // en el instante exacto en que el Service Worker nuevo todavía está
+      // terminando de "activarse" (clients.claim() + borrado de cachés
+      // viejos), la navegación puede fallar y mostrar una pantalla de
+      // error (se ve como un 404) en vez de la página -- Safari es mucho
+      // menos tolerante que Chrome con esa carrera. Este margen no lo
+      // elimina al 100% (es una limitación de iOS, no de este código),
+      // pero reduce bastante la ventana en la que puede pasar.
+      setTimeout(() => {
+        // location.replace() en vez de reload(): fuerza una navegación
+        // "limpia" a la URL actual sin arrastrar ningún estado de la
+        // navegación anterior, y de paso no deja una entrada nueva en el
+        // historial (así el botón "atrás" no vuelve a la versión vieja).
+        window.location.replace(window.location.pathname + window.location.search);
+      }, 300);
+    });
+
+    // Red de seguridad: si por lo que sea la navegación de arriba no llegó
+    // a completarse (p. ej. Safari la bloqueó silenciosamente en segundo
+    // plano, sin mostrar ni error ni recargar), a los pocos segundos seguís
+    // viendo esta misma página -- justo el caso donde antes había que
+    // cerrar la pestaña/app y volver a entrar a mano. Este aviso ofrece un
+    // botón para reintentar sin tener que salir de la app.
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      setTimeout(() => {
+        if (!refreshing || document.getElementById('pwa-reload-fallback')) return;
+        const fallback = document.createElement('button');
+        fallback.id = 'pwa-reload-fallback';
+        fallback.className = 'pwa-banner pwa-update';
+        fallback.innerHTML = `${ICON_REFRESH}<span>La actualización no cargó — tocar para reintentar</span>`;
+        fallback.addEventListener('click', () => window.location.reload());
+        ensureStack().prepend(fallback);
+      }, 4000);
     });
   });
 })();
