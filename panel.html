@@ -1547,13 +1547,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ['payroll','Sueldos'],
         ['inventory','Inventario'],
         ['audit','Auditoría'],
+        ['metrics','Métricas'],
         ['delivery','Despacho'],
         ['returnDate','Fecha de retorno (reactivación automática)'],
         ['weeklySchedule','Horario semanal (cliente)'],
         ['exportDiets','Imprimir dietas especiales'],
         ['clientPortal','Portal web de clientes']
       ];
-      const PREMIUM_DEFAULT_LOCKED = {notes:true,payroll:true,inventory:true,audit:true,delivery:false,returnDate:true,weeklySchedule:true,exportDiets:true,clientPortal:true};
+      const PREMIUM_DEFAULT_LOCKED = {notes:true,payroll:true,inventory:true,audit:true,metrics:true,delivery:false,returnDate:true,weeklySchedule:true,exportDiets:true,clientPortal:true};
       function isPagePremiumLocked(page){
         const cfg = state.settings.premiumLockedPages;
         if (!cfg || !(page in cfg)) return !!PREMIUM_DEFAULT_LOCKED[page];
@@ -3384,6 +3385,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if(!canAccessPage('metrics')) return;
         const el=$('#metrics-page');
         const subtitleBase='Estadísticas de reparto: tiempos, cumplimiento, kilómetros estimados y desempeño de drivers y rutas.';
+        if(pageNeedsPremium('metrics')){ el.innerHTML=pageHead('Métricas',subtitleBase)+premiumLockHtml('Métricas'); return; }
         const actions=`<button class="refresh" data-action="refresh-metrics">${REFRESH_ICON}Actualizar</button>`;
         if(forceRefresh){
           el.innerHTML=pageHead('Métricas',subtitleBase,actions)+metricsFilterBar()+'<p class="muted">Calculando…</p>';

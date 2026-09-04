@@ -242,10 +242,20 @@ function boot() {
             if (redirected.current)
                 return;
             try {
-                const existing = JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY));
-                if (existing) {
+                const existingStaff = JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY));
+                if (existingStaff) {
                     redirected.current = true;
-                    window.location.href = staffDestination(existing.role);
+                    window.location.href = staffDestination(existingStaff.role);
+                    return;
+                }
+                // Mismo chequeo que ya existía para staff, pero para cliente --
+                // antes esta rama no existía, así que un cliente que ya había
+                // iniciado sesión (con la pestaña/PWA todavía viva) igual veía
+                // el formulario de login en vez de ir directo a su portal.
+                const existingClient = JSON.parse(sessionStorage.getItem(CLIENT_SESSION_KEY));
+                if (existingClient) {
+                    redirected.current = true;
+                    window.location.href = CLIENT_PORTAL_URL;
                 }
             }
             catch (_) { }

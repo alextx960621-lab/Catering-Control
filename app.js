@@ -587,6 +587,57 @@
   });
   window.addEventListener('appinstalled', hideInstallButton);
 
+  // --------------------------------------------------------------------
+  // iOS (Safari) nunca dispara "beforeinstallprompt" -- Apple no expone esa
+  // API. Sin este bloque, en iPhone/iPad el botón de instalar simplemente
+  // no aparecía nunca, sin ninguna alternativa. Acá detectamos iOS "a
+  // mano" y mostramos los pasos manuales (Compartir → Añadir a inicio) en
+  // su lugar, con un botón para no volver a mostrarla si ya la vieron.
+  // --------------------------------------------------------------------
+  const IOS_DISMISS_KEY = `${window.APP_CONFIG?.storagePrefix || 'catering-app'}-ios-install-dismissed-v1`;
+  const ICON_SHARE = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v13"/><path d="m8 6 4-4 4 4"/><path d="M4 13v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/></svg>';
+  const ICON_CLOSE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+
+  function isIos() {
+    // iPadOS 13+ se anuncia como "Macintosh" en el user-agent, así que el
+    // chequeo clásico de /iPhone|iPad|iPod/ no alcanza -- se distingue de
+    // una Mac de verdad porque además tiene pantalla táctil.
+    const ua = navigator.userAgent || '';
+    return /iPhone|iPad|iPod/.test(ua) || (ua.includes('Macintosh') && navigator.maxTouchPoints > 1);
+  }
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  }
+  function showIosInstallCard() {
+    if (document.getElementById('pwa-ios-card')) return;
+    const card = document.createElement('div');
+    card.id = 'pwa-ios-card';
+    card.className = 'pwa-banner pwa-install';
+    card.style.cssText = 'flex-direction:column;align-items:stretch;gap:6px;text-align:left;position:relative;padding-right:34px';
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px">${ICON_SHARE}<b>Instalar esta app</b></div>
+      <span style="font-weight:500;font-size:13px;opacity:.95">Tocá <b>Compartir</b> ${ICON_SHARE} y luego <b>"Añadir a pantalla de inicio"</b>.</span>
+    `;
+    const closeBtn = document.createElement('button');
+    closeBtn.setAttribute('aria-label', 'Cerrar');
+    closeBtn.style.cssText = 'position:absolute;top:8px;right:8px;background:rgba(255,255,255,.25);border:none;border-radius:8px;color:#fff;width:24px;height:24px;display:grid;place-items:center;cursor:pointer;padding:0';
+    closeBtn.innerHTML = ICON_CLOSE;
+    closeBtn.addEventListener('click', () => {
+      card.remove();
+      try { localStorage.setItem(IOS_DISMISS_KEY, String(Date.now())); } catch (_) {}
+    });
+    card.appendChild(closeBtn);
+    ensureStack().appendChild(card);
+  }
+  window.addEventListener('load', () => {
+    if (!isIos() || isStandalone()) return;
+    let dismissedAt = 0;
+    try { dismissedAt = Number(localStorage.getItem(IOS_DISMISS_KEY)) || 0; } catch (_) {}
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    if (dismissedAt && Date.now() - dismissedAt < THIRTY_DAYS) return; // ya la cerró hace poco
+    showIosInstallCard();
+  });
+
   function showUpdateToast(worker) {
     const toast = document.createElement('button');
     toast.className = 'pwa-banner pwa-update';
