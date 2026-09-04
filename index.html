@@ -130,6 +130,49 @@ function boot() {
                 React.createElement("option", { value: "night" }, "Nocturno"),
                 React.createElement("option", { value: "forest" }, "Bosque"))));
     }
+    // ---------- Botón "Compartir" ----------
+    // Solo tiene sentido cuando la PWA está instalada: ahí no hay barra de
+    // direcciones de la que copiar el link (display-mode: standalone), así
+    // que no hay ninguna otra forma de pasarle el acceso a otra persona
+    // (un cliente nuevo, un driver nuevo, etc.). Si se abre en una pestaña
+    // normal del navegador, ya tienen la barra de arriba: no lo mostramos
+    // para no ensuciar la pantalla con un botón redundante.
+    function isStandalonePwa() {
+        return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    }
+    const ICON_SHARE = React.createElement("svg", { width: "17", height: "17", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" },
+        React.createElement("circle", { cx: "18", cy: "5", r: "3" }),
+        React.createElement("circle", { cx: "6", cy: "12", r: "3" }),
+        React.createElement("circle", { cx: "18", cy: "19", r: "3" }),
+        React.createElement("line", { x1: "8.6", y1: "10.6", x2: "15.4", y2: "6.4" }),
+        React.createElement("line", { x1: "8.6", y1: "13.4", x2: "15.4", y2: "17.6" }));
+    const ICON_CHECK = React.createElement("svg", { width: "17", height: "17", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", strokeLinejoin: "round" },
+        React.createElement("path", { d: "M20 6 9 17l-5-5" }));
+    function ShareAppButton({ brandName }) {
+        const [copied, setCopied] = useState(false);
+        if (!isStandalonePwa())
+            return null;
+        const shareUrl = `${location.origin}${location.pathname}`;
+        async function handleShare() {
+            const shareData = { title: brandName, text: `Ingresá a ${brandName}`, url: shareUrl };
+            if (navigator.share) {
+                try {
+                    await navigator.share(shareData);
+                    return;
+                }
+                catch (_) {
+                    return;
+                } // el usuario canceló el panel de compartir: no hacemos nada más
+            }
+            try {
+                await navigator.clipboard.writeText(shareUrl);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            }
+            catch (_) { }
+        }
+        return (React.createElement("button", { type: "button", className: "btn btn-outline-secondary btn-sm rounded-circle d-inline-flex align-items-center justify-content-center flex-shrink-0", style: { width: 36, height: 36 }, onClick: handleShare, title: copied ? 'Link copiado' : 'Compartir esta app', "aria-label": copied ? 'Link copiado' : 'Compartir esta app' }, copied ? ICON_CHECK : ICON_SHARE));
+    }
     // ---------- Formulario "Soy cliente" ----------
     function ClientForm({ active, onError, onClearError }) {
         const [carnet, setCarnet] = useState('');
@@ -293,7 +336,8 @@ function boot() {
                         React.createElement(BrandMark, { logo: brandLogo, name: brandName })),
                     React.createElement("div", { className: "brand-info" },
                         React.createElement("h1", { className: "h5 mb-1", id: "brand-title" }, brandName),
-                        React.createElement(ThemeSelect, { theme: theme, onChange: setTheme }))),
+                        React.createElement(ThemeSelect, { theme: theme, onChange: setTheme })),
+                    React.createElement(ShareAppButton, { brandName: brandName })),
                 React.createElement("nav", { className: "nav nav-pills nav-fill bg-body-tertiary rounded-pill p-1 mb-4", "aria-label": "Tipo de acceso" },
                     React.createElement("button", { type: "button", className: `nav-link${accessType === 'client' ? ' active' : ''}`, onClick: () => { setAccessType('client'); setErrorMsg(''); } }, "Soy cliente"),
                     React.createElement("button", { type: "button", className: `nav-link${accessType === 'staff' ? ' active' : ''}`, onClick: () => { setAccessType('staff'); setErrorMsg(''); } }, "Soy del equipo")),
