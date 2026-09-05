@@ -34,12 +34,14 @@
   // `security definer` que reciben este token y lo validan contra
   // db_sessions antes de tocar cualquier tabla.
   //
-  // login.html llama a setSessionToken(token, 'staff'|'cliente') apenas
-  // login_staff/login_cliente devuelven session_token, y lo guarda en
-  // sessionStorage junto con el resto de la sesión. index.html/
-  // cliente.html vuelven a llamar setSessionToken() al arrancar, leyendo
-  // ese mismo valor de sessionStorage (sessionStorage sobrevive a un
-  // F5, pero no a cerrar la pestaña -- igual que el resto de la sesión).
+  // index.html (la pantalla de login, unificada ahí desde que login.html
+  // pasó a ser solo un redirect sin lógica propia) llama a
+  // setSessionToken(token, 'staff'|'cliente') apenas login_staff/
+  // login_cliente devuelven session_token, y lo guarda en sessionStorage
+  // junto con el resto de la sesión. panel.html/cliente.html vuelven a
+  // llamar setSessionToken() al arrancar, leyendo ese mismo valor de
+  // sessionStorage (sessionStorage sobrevive a un F5, pero no a cerrar la
+  // pestaña -- igual que el resto de la sesión).
   let currentToken = null;
   let currentTokenType = null; // 'staff' | 'cliente'
 
@@ -416,6 +418,25 @@
 
   // --- Presencia en línea (sin cambios: no toca ninguna tabla db_*) ------
   let presenceChannel = null;
+  function deviceLabel() {
+    // Etiqueta corta a partir del user-agent, solo para poder reconocer
+    // "cuál es cuál" en la lista de Personas conectadas -- no reemplaza
+    // una IP real (eso necesitaría captura del lado del servidor, no está
+    // disponible desde el navegador con Supabase Realtime Presence).
+    const ua = navigator.userAgent || '';
+    let os = 'Dispositivo';
+    if (/Android/i.test(ua)) os = 'Android';
+    else if (/iPhone|iPad|iPod/i.test(ua)) os = 'iPhone/iPad';
+    else if (/Windows/i.test(ua)) os = 'Windows';
+    else if (/Mac OS X/i.test(ua)) os = 'Mac';
+    else if (/Linux/i.test(ua)) os = 'Linux';
+    let browser = '';
+    if (/Edg\//i.test(ua)) browser = 'Edge';
+    else if (/Chrome\//i.test(ua)) browser = 'Chrome';
+    else if (/Firefox\//i.test(ua)) browser = 'Firefox';
+    else if (/Safari\//i.test(ua)) browser = 'Safari';
+    return browser ? `${browser} en ${os}` : os;
+  }
   function joinPresence(info, onChange) {
     try {
       if (presenceChannel) return presenceChannel;
@@ -428,7 +449,7 @@
       }
       presenceChannel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          try { await presenceChannel.track({ role: info.role, name: info.name || '' }); } catch (_) {}
+          try { await presenceChannel.track({ role: info.role, name: info.name || '', id: info.id || '', device: deviceLabel(), at: new Date().toISOString() }); } catch (_) {}
         }
       });
       return presenceChannel;

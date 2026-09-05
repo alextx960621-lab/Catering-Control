@@ -1327,7 +1327,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = state?.settings?.companyName?.trim() || APP_CONFIG.companyName;
         const logo = state?.settings?.logoUrl || '';
         const nameEl = $('#brand-name'); if (nameEl) nameEl.textContent = name;
-        const markEl = $('#brand-mark'); if (markEl) markEl.innerHTML = logo ? `<img loading="lazy" decoding="async" src="${logo}" alt="${esc(name)}">` : '🍽';
+        const markEl = $('#brand-mark'); if (markEl) markEl.innerHTML = logo ? `<img loading="lazy" decoding="async" src="${esc(logo)}" alt="${esc(name)}">` : '🍽';
         document.title = `${name} · Operaciones`;
       }
 
@@ -1340,17 +1340,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let activeUser = null;
       let presenceCounts = {cliente:0, driver:0, staff:0, total:0};
+      let presenceDetail = [];
+      const ROLE_ICON = {cliente:'🧑‍🍳', driver:'🚚', staff:'🧑‍💼'};
       function computePresenceCounts(presenceState){
         const counts={cliente:0, driver:0, staff:0};
+        const detail=[];
         Object.values(presenceState||{}).forEach(metas=>{
-          (metas||[]).forEach(m=>{ if(counts[m.role]!==undefined) counts[m.role]++; });
+          (metas||[]).forEach(m=>{
+            if(counts[m.role]!==undefined) counts[m.role]++;
+            detail.push(m);
+          });
         });
+        detail.sort((a,b)=>(a.role||'').localeCompare(b.role||'') || String(b.at||'').localeCompare(String(a.at||'')));
+        presenceDetail = detail;
         return {...counts, total:counts.cliente+counts.driver+counts.staff};
       }
       function presenceCountsHTML(){
         const c=presenceCounts;
         const item=(label,val)=>`<div class="metric" style="min-width:110px"><div class="muted" style="font-size:11px">${label}</div><strong style="font-size:22px">${val}</strong></div>`;
         return item('Clientes',c.cliente)+item('Drivers',c.driver)+item('Personal',c.staff)+item('Total',c.total);
+      }
+      function presenceDetailHTML(){
+        if(!presenceDetail.length) return '<p class="muted" style="margin-top:8px">Nadie conectado ahora mismo.</p>';
+        const row=m=>{
+          const roleLabel = m.role==='cliente'?'Cliente':m.role==='driver'?'Driver':'Personal';
+          const since = m.at ? new Date(m.at).toLocaleTimeString('es-BO',{hour:'2-digit',minute:'2-digit'}) : '—';
+          return `<tr><td>${ROLE_ICON[m.role]||'●'} ${esc(roleLabel)}</td><td><b>${esc(m.name||'(sin nombre)')}</b>${m.id?`<br><small class="muted">${esc(m.id)}</small>`:''}</td><td>${esc(m.device||'—')}</td><td>${since}</td></tr>`;
+        };
+        return `<div class="sheet" style="margin-top:8px"><table><thead><tr><th>Tipo</th><th>Quién</th><th>Dispositivo</th><th>Conectado desde</th></tr></thead><tbody>${presenceDetail.map(row).join('')}</tbody></table></div>`;
       }
       let staffUsers = readStaffUsers();
 
@@ -1405,14 +1422,32 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       function readDriverViewDateStore(){ try{ return JSON.parse(localStorage.getItem(DRIVER_VIEW_DATE_KEY))||{}; }catch(_){ return {}; } }
       function realToday(){ return cachedServerDate || today(); }
-      function driverViewDateOverride(){ return isDriverRole() ? (readDriverViewDateStore()[activeUser.id] || '') : ''; }
+      function driverViewDateOverride(){
+        if(!isDriverRole()) return '';
+        const entry=readDriverViewDateStore()[activeUser.id];
+        if(!entry) return '';
+        if(entry.setOn !== realToday()) return '';
+        return entry.date || '';
+      }
       function setDriverViewDate(dateStr){
         if(!isDriverRole()) return;
         const store=readDriverViewDateStore();
-        if(dateStr) store[activeUser.id]=dateStr; else delete store[activeUser.id];
+        if(dateStr) store[activeUser.id]={date:dateStr, setOn:realToday()}; else delete store[activeUser.id];
         localStorage.setItem(DRIVER_VIEW_DATE_KEY,JSON.stringify(store));
       }
       function workDate(){ return isDriverRole() ? (driverViewDateOverride() || state.currentDate) : state.currentDate; }
+      function handleWorkDateChange(newDate){
+        if(isDriverRole()){ setDriverViewDate(newDate); ui.forceLiveDispatch=false; renderDispatch(); return; }
+        if(!canEditPage('dispatch'))return;
+        const last=lastProcessedDate(), maxAllowed=last?nextDay(last):null;
+        if(maxAllowed && newDate>maxAllowed){
+          notice(`Primero hay que procesar ${last.split('-').reverse().join('/')} -- no se puede saltar a ${newDate.split('-').reverse().join('/')} dejando días sin cerrar entre medio.`,true);
+          renderDispatch();
+          return;
+        }
+        state.currentDate=newDate; day(newDate); ui.forceLiveDispatch=false; save(); renderDispatch();
+      }
+      function resetDriverViewToToday(){ setDriverViewDate(realToday()); ui.forceLiveDispatch=false; renderDispatch(); }
 
       const ROLE_LABELS = {admin:'Administrador', editor:'Editor', kitchen:'Cocina', driver:'Driver', superadmin:'Super Administrador'};
       const NAV_PERMS = {
@@ -2236,8 +2271,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       function openDeliveryMark(clientId, kind){
         if (!canEditPage('delivery')) { notice('No tienes permiso para marcar entregas.', true); return; }
-        const c = state.clients.find(x => x.id === clientId); if (!c) return;
         const date = workDate();
+        if (day(date)?.processed) { notice('Ese día ya fue procesado y quedó congelado -- no se pueden marcar más entregas. Si hace falta corregir algo, un admin/editor puede "Desprocesar día" desde Día de trabajo.', true); return; }
+        const c = state.clients.find(x => x.id === clientId); if (!c) return;
         const existing = deliveryRecord(date, clientId);
         const title = (kind === 'no_entregado' ? 'No entregado — ' : 'Entregado — ') + c.name;
         showModal(title, deliveryMarkForm(kind, existing), async f => {
@@ -2260,6 +2296,7 @@ document.addEventListener('DOMContentLoaded', () => {
       async function clearDelivery(clientId){
         if (!canEditPage('delivery')) { notice('No tienes permiso para hacer esto.', true); return; }
         const date = workDate(), c = state.clients.find(x => x.id === clientId);
+        if (day(date)?.processed) { notice('Ese día ya fue procesado y quedó congelado -- no se puede modificar la entrega.', true); return; }
         if (!confirm('¿Quitar la marca de entrega de este pedido?')) return;
         const prev = deliveryRecord(date, clientId);
         if (prev?.image) removeStorageImageByUrl(prev.image);
@@ -2344,7 +2381,7 @@ document.addEventListener('DOMContentLoaded', () => {
       async function renderDispatch(){
         syncReturnDates(state.currentDate);
         const date=workDate(), d=day(date);
-        if(d.processed && date!==today() && !ui.forceLiveDispatch){
+        if(d.processed && !ui.forceLiveDispatch){
           if(!(date in dispatchHistorialCache)){
             $('#dispatch-page').innerHTML=pageHead('Día de trabajo','Cargando historial de este día…');
             const snap=(await window.SupabaseDB?.dbGetSnapshot(date))||null;
@@ -2419,11 +2456,8 @@ document.addEventListener('DOMContentLoaded', () => {
         $('#dispatch-page').innerHTML=pageHead('Día de trabajo',isDriverRole()?'Puedes elegir qué día ver: el día actual (en vivo) o una fecha pasada (verás lo que quedó guardado ese día).':'La fecha seleccionada define la base de datos operativa y los clientes activos del día.',`${canEditPage('dispatch')?(d.processed?'<button class="outline" data-action="unprocess-day">Desprocesar día</button>':'<button class="primary" data-action="process-day">Procesar día</button>'):''}${printButtons}`)+
           `<div class="toolbar"><label class="field">Día de trabajo${dateField}</label>${routeField}<label class="field">Estado del pedido<select id="dispatch-status"><option value="all" ${sf==='all'?'selected':''}>Todos</option>${['Activo','Pausado','Programado','Retorno pendiente','No laborable'].map(s=>`<option value="${s}" ${sf===s?'selected':''}>${s}</option>`).join('')}</select></label><label class="field">Estado del día<select id="work-status" ${canEditPage('dispatch')?'':'disabled'}><option value="work" ${d.laborable?'selected':''}>Laborable</option><option value="off" ${!d.laborable?'selected':''}>No laborable</option></select></label><input id="dispatch-search" class="search" placeholder="Buscar cliente, teléfono o dieta…" value="${esc(ui.search.dispatch||'')}"><span class="spacer"></span><span class="muted">${list.length} pedidos visibles</span></div>`+
           `<div class="sheet"><table id="dispatch-table">${colgroupHtml(columns.map(c=>[c.label,c.key]),'dispatch')}<thead><tr>${columns.map(col=>th(col.label,col.key,'dispatch')).join('')}</tr></thead><tbody>${list.length?list.map(rows).join(''):`<tr><td colspan="${columns.length}" class="empty">No hay pedidos para los filtros seleccionados.</td></tr>`}</tbody>${totals}</table></div>`;
-        $('#work-date')?.addEventListener('change',e=>{
-          if(isDriverRole()){ setDriverViewDate(e.target.value); ui.forceLiveDispatch=false; renderDispatch(); return; }
-          if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch();
-        });
-        $('#work-date-today')?.addEventListener('click',()=>{ setDriverViewDate(realToday()); ui.forceLiveDispatch=false; renderDispatch(); });
+        $('#work-date')?.addEventListener('change',e=>handleWorkDateChange(e.target.value));
+        $('#work-date-today')?.addEventListener('click',resetDriverViewToToday);
         $('#dispatch-route')?.addEventListener('change',e=>{ui.route=e.target.value;renderDispatch();}); $('#dispatch-status')?.addEventListener('change',e=>{ui.dispatchStatus=e.target.value;renderDispatch();}); $('#work-status')?.addEventListener('change',e=>{if(!canEditPage('dispatch'))return;day().laborable=e.target.value==='work';save();renderDispatch();}); bindSearch('dispatch-search','dispatch',renderDispatch);
         $$('.day-edit').forEach(i=>i.onchange=async()=>{
           const c=state.clients.find(x=>x.id===i.dataset.id); if(!c)return;
@@ -2493,11 +2527,8 @@ document.addEventListener('DOMContentLoaded', () => {
         $('#dispatch-page').innerHTML=pageHead('Día de trabajo',`Historial guardado el ${savedAt} · ${rows.length} pedidos atendidos ese día. Son datos congelados: no cambian aunque después edites al cliente.`,canEditPage('dispatch')?'<button class="outline" data-action="dispatch-force-live">Ver datos actuales en vez del historial</button>':'')+
           `<div class="toolbar"><label class="field">Día de trabajo${dateFieldHist}</label><span class="spacer"></span><span class="badge off" title="Estos datos vienen del historial guardado, no de la ficha actual del cliente">📷 Viendo historial</span></div>`+
           `<div class="sheet"><table>${colgroupHtml(headCols.map(h=>[h,h]),'dispatch-historial')}<thead><tr>${headCols.map(h=>th(h,h,'dispatch-historial')).join('')}</tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="${headCols.length}" class="empty">Ese día no tuvo pedidos atendidos.</td></tr>`}</tbody>${rows.length?histTotals:''}</table></div>`;
-        $('#work-date')?.addEventListener('change',e=>{
-          if(isDriverRole()){ setDriverViewDate(e.target.value); ui.forceLiveDispatch=false; renderDispatch(); return; }
-          if(!canEditPage('dispatch'))return; state.currentDate=e.target.value; day(e.target.value); ui.forceLiveDispatch=false; save(); renderDispatch();
-        });
-        $('#work-date-today')?.addEventListener('click',()=>{ setDriverViewDate(realToday()); ui.forceLiveDispatch=false; renderDispatch(); });
+        $('#work-date')?.addEventListener('change',e=>handleWorkDateChange(e.target.value));
+        $('#work-date-today')?.addEventListener('click',resetDriverViewToToday);
       }
       function bindSearch(id,key,fn){
         const el=$('#'+id);
@@ -3487,7 +3518,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <label>Nombre de la empresa<input id="company-name" value="${esc(state.settings.companyName||APP_CONFIG.companyName)}" placeholder="${esc(APP_CONFIG.companyName)}"></label>
             <label>Logo
               <div style="display:flex;align-items:center;gap:10px">
-                <div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${logo?`<img loading="lazy" decoding="async" src="${logo}" alt="Logo" style="width:100%;height:100%;object-fit:contain">`:'🍽'}</div>
+                <div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${logo?`<img loading="lazy" decoding="async" src="${esc(logo)}" alt="Logo" style="width:100%;height:100%;object-fit:contain">`:'🍽'}</div>
                 <input type="file" id="logo-file" accept="image/*">
                 ${logo?'<button type="button" class="outline" data-action="remove-logo">Quitar logo</button>':''}
               </div>
@@ -3502,7 +3533,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <p class="muted">Esta imagen se muestra a todos los clientes en su portal, justo antes de "Tu plan actual". Ideal para promociones o novedades.</p>
             <label>Imagen publicitaria
               <div style="display:flex;align-items:center;gap:10px">
-                <div style="width:88px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${state.settings.adImageUrl?`<img loading="lazy" decoding="async" src="${state.settings.adImageUrl}" alt="Publicidad" style="width:100%;height:100%;object-fit:cover">`:'📣'}</div>
+                <div style="width:88px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${state.settings.adImageUrl?`<img loading="lazy" decoding="async" src="${esc(state.settings.adImageUrl)}" alt="Publicidad" style="width:100%;height:100%;object-fit:cover">`:'📣'}</div>
                 <input type="file" id="ad-image-file" accept="image/*">
                 ${state.settings.adImageUrl?'<button type="button" class="outline" data-action="remove-ad-image">Quitar imagen</button>':''}
               </div>
@@ -3515,6 +3546,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <h3>Personas conectadas ahora</h3>
             <p class="muted">Cuenta en vivo de sesiones abiertas en el portal de clientes, la app de drivers y el panel de operaciones. Se actualiza sola, no hace falta recargar.</p>
             <div id="presence-counts" style="display:flex;gap:10px;flex-wrap:wrap">${presenceCountsHTML()}</div>
+            <div id="presence-detail">${presenceDetailHTML()}</div>
           </div>
           <div class="card card-pad stack">
             <h3>Datos</h3>
@@ -3699,24 +3731,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if(!canEditPage('dispatch')){notice('No tienes permiso para procesar el día.',true);return;}
         const d=day();
         if(d.processed){notice('Este día ya fue procesado.',true);return;}
+        const processedDate=state.currentDate;
         if(!d.laborable){
-          if(!confirm(`¿Cerrar el día ${state.currentDate.split('-').reverse().join('/')} como no laborable? No se procesan pedidos ni se descuenta inventario.`))return;
-          d.processed=true;d.processedClientIds=[];delete dispatchHistorialCache[state.currentDate];save();renderDispatch();
-          notice('Día no laborable cerrado.');
-          logAudit('Día cerrado (no laborable)','day',state.currentDate,state.currentDate,{});
-          window.SupabaseDB?.dbUpsertSnapshot(state.currentDate,buildDaySnapshotPayload(state.currentDate,[]));
+          if(!confirm(`¿Cerrar el día ${processedDate.split('-').reverse().join('/')} como no laborable? No se procesan pedidos ni se descuenta inventario.`))return;
+          d.processed=true;d.processedClientIds=[];delete dispatchHistorialCache[processedDate];
+          state.currentDate=nextDay(processedDate); day(state.currentDate);
+          save();renderDispatch();
+          notice(`Día no laborable cerrado. El día de trabajo pasó a ${state.currentDate.split('-').reverse().join('/')}.`);
+          logAudit('Día cerrado (no laborable)','day',processedDate,processedDate,{});
+          window.SupabaseDB?.dbUpsertSnapshot(processedDate,buildDaySnapshotPayload(processedDate,[]));
           return;
         }
-        if(!confirm(`¿Procesar el día ${state.currentDate.split('-').reverse().join('/')}?`))return;
+        if(!confirm(`¿Procesar el día ${processedDate.split('-').reverse().join('/')}?`))return;
         const activeClients=state.clients.filter(c=>status(c)==='Activo');
         const processedIds=activeClients.map(c=>c.id);
         activeClients.forEach(c=>c.consumedDays=n(c.consumedDays)+1);
-        applyInventoryForProcessedDay(state.currentDate);
-        d.processed=true;d.processedClientIds=processedIds;delete dispatchHistorialCache[state.currentDate];save();renderDispatch();notice('Día procesado e inventario actualizado. Descargando constancia (Excel) y respaldo (JSON)…');
-        logAudit('Día procesado','day',state.currentDate,state.currentDate,{clientesAtendidos:processedIds.length});
-        window.SupabaseDB?.dbUpsertSnapshot(state.currentDate,buildDaySnapshotPayload(state.currentDate,processedIds));
-        exportProcessedDaySnapshot(state.currentDate,processedIds);
-        setTimeout(()=>downloadStateJsonBackup(`dia-procesado-${state.currentDate}`),700);
+        applyInventoryForProcessedDay(processedDate);
+        d.processed=true;d.processedClientIds=processedIds;delete dispatchHistorialCache[processedDate];
+        state.currentDate=nextDay(processedDate); day(state.currentDate);
+        save();renderDispatch();notice(`Día procesado e inventario actualizado. El día de trabajo pasó a ${state.currentDate.split('-').reverse().join('/')}. Descargando constancia (Excel) y respaldo (JSON)…`);
+        logAudit('Día procesado','day',processedDate,processedDate,{clientesAtendidos:processedIds.length});
+        window.SupabaseDB?.dbUpsertSnapshot(processedDate,buildDaySnapshotPayload(processedDate,processedIds));
+        exportProcessedDaySnapshot(processedDate,processedIds);
+        setTimeout(()=>downloadStateJsonBackup(`dia-procesado-${processedDate}`),700);
       }
       function downloadStateJsonBackup(filenameBase){
         const data={...state,staffUsers};
@@ -3974,6 +4011,8 @@ document.addEventListener('DOMContentLoaded', () => {
         presenceCounts=computePresenceCounts(st);
         const box=document.getElementById('presence-counts');
         if(box) box.innerHTML=presenceCountsHTML();
+        const detailBox=document.getElementById('presence-detail');
+        if(detailBox) detailBox.innerHTML=presenceDetailHTML();
       });
       window.addEventListener('beforeunload', e => { if (saveInFlight) { e.preventDefault(); e.returnValue = ''; } });
 
