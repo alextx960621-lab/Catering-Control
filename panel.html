@@ -112,6 +112,24 @@
       box-shadow: none;
     }
     button.outline:hover { background: var(--surface-2); box-shadow: none; }
+    button.success {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 78%, white 22%), var(--accent));
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 38%, transparent);
+    }
+    button.success:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 42%, transparent); }
+    button.warning {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--warning) 78%, white 22%), var(--warning));
+      color: #402a00;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--warning) 38%, transparent);
+    }
+    button.warning:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--warning) 42%, transparent); }
+    button.info {
+      background: linear-gradient(135deg, color-mix(in srgb, #0ea5b7 78%, white 22%), #0ea5b7);
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, #0ea5b7 38%, transparent);
+    }
+    button.info:hover { box-shadow: 0 8px 22px color-mix(in srgb, #0ea5b7 42%, transparent); }
     button:disabled {
       cursor: not-allowed;
       opacity: .52;
@@ -173,6 +191,28 @@
     h1, h2, h3 { font-family: var(--font-display); font-weight: 700; }
     .muted { color: var(--muted); }
     .stack { display: grid; gap: 12px; }
+    .plan-options { display: grid; gap: 10px; }
+    .plan-option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--line);
+      transition: border-color .15s, background .15s;
+    }
+    .plan-option-info { display: flex; flex-direction: column; gap: 2px; }
+    .plan-option-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+    .plan-option.is-active {
+      border-color: var(--primary);
+      background: color-mix(in srgb, var(--primary) 9%, transparent);
+    }
+    .plan-option.is-alt {
+      border-color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 6%, transparent);
+    }
     label { display: grid; gap: 5px; font-weight: 650; font-size: 12px; min-width: 0; }
 
     #app {
@@ -305,7 +345,6 @@
       box-shadow: var(--shadow);
       border: 1px solid var(--line);
     }
-    .mobile-sync-group { display: contents; }
     #sync-pill { grid-area: status; }
     #logout-btn, #manual-sync-btn {
       grid-area: logout;
@@ -968,7 +1007,7 @@
       }
       .aside-bottom-actions {
         position: fixed;
-        top: 58px;
+        top: 10px;
         right: 10px;
         bottom: auto;
         left: auto;
@@ -986,11 +1025,9 @@
         box-shadow: var(--shadow);
         border: 1px solid var(--line);
       }
-      .mobile-sync-group {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-wrap: nowrap;
+      .aside-bottom-actions .menu-toggle {
+        padding: 4px 6px;
+        font-size: 20px;
       }
       .btn-text, .sync-text-label { display: none; }
       .aside-bottom button { padding: 6px 8px; font-size: 14px; min-height: 30px; }
@@ -1098,7 +1135,6 @@
       <div class="aside-title">
         <div class="brand"><div class="brand-mark" id="brand-mark">🍽</div><strong id="brand-name">Catering Control</strong></div>
         <button class="collapse-toggle" id="sidebar-collapse-btn" aria-label="Contraer menú" title="Contraer menú">«</button>
-        <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú">☰</button>
       </div>
       <nav id="nav">
         <button data-page="dispatch" data-roles="admin,editor,kitchen,driver" class="active"><span class="nav-icon">📅</span><span class="nav-label">Día de trabajo</span></button>
@@ -1121,11 +1157,10 @@
           <div><b id="current-name">Operaciones</b><small class="muted" id="current-role" style="display:block;font-size:10px;">Administrador</small></div>
         </div>
         <div class="aside-bottom-actions">
+          <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú">☰</button>
+          <button class="refresh" id="manual-sync-btn" title="Actualizar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span class="btn-text"> Actualizar</span></button>
+          <div class="sync-pill" id="sync-pill" title="Estado de sincronización"><span class="sync-dot" id="sync-dot"></span><span id="sync-text" class="sync-text-label">Listo</span></div>
           <button class="danger" id="logout-btn" title="Cerrar sesión"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg><span class="btn-text"> Salir</span></button>
-          <div class="mobile-sync-group">
-            <div class="sync-pill" id="sync-pill" title="Estado de sincronización"><span class="sync-dot" id="sync-dot"></span><span id="sync-text" class="sync-text-label">Listo</span></div>
-            <button class="refresh" id="manual-sync-btn" title="Sincronizar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span class="btn-text"> Sincronizar</span></button>
-          </div>
         </div>
       </div>
     </aside>
@@ -1811,7 +1846,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           if (gotAny) localStorage.setItem(KEY, JSON.stringify(state));
           if (anyFailed) {
-            notice('No se pudo sincronizar todo con la base de datos. Algunos cambios no se guardarán hasta reconectar (probá "Sincronizar" o recargar la página).', true);
+            notice('No se pudo sincronizar todo con la base de datos. Algunos cambios no se guardarán hasta reconectar (probá "Actualizar" o recargar la página).', true);
           }
           setDatabaseStatus(anyFailed ? 'error' : 'ok');
           return gotAny;
@@ -2986,7 +3021,7 @@ document.addEventListener('DOMContentLoaded', () => {
           {key:'id',label:'Acciones',cell:m=>canEditPage('inventory')&&m.type!=='delivery'?`<button class="icon-btn" data-action="edit-inventory-movement" data-id="${m.id}">Editar</button><button class="icon-btn delete" data-action="delete-inventory-movement" data-id="${m.id}">×</button>`:'—'}
         ];
         const recent=state.inventory.movements.slice(0,12);
-        const actions=canEditPage('inventory')?`<button class="primary" data-action="add-inventory-item">+ Producto de cocina</button><button class="outline" data-action="add-inventory-entry">+ Ingreso</button><button class="outline" data-action="add-inventory-use">− Uso</button><button class="outline" data-action="add-inventory-waste">− Merma</button><button class="outline" data-action="add-inventory-link">Vincular consumo</button>`:'';
+        const actions=canEditPage('inventory')?`<button class="primary" data-action="add-inventory-item">+ Producto de cocina</button><button class="success" data-action="add-inventory-entry">+ Ingreso</button><button class="warning" data-action="add-inventory-use">− Uso</button><button class="danger" data-action="add-inventory-waste">− Merma</button><button class="info" data-action="add-inventory-link">Vincular consumo</button>`:'';
         $('#inventory-page').innerHTML=pageHead('Inventario','Controla existencias de cocina. Los vínculos descuentan insumos automáticamente al procesar pedidos activos.',actions)+`<div class="two-col"><div class="card card-pad"><h3 style="margin-bottom:12px">Productos de cocina</h3>${orderedTable(state.inventory.items,itemDefs,'inventory')}</div><div class="card card-pad"><h3 style="margin-bottom:12px">Vínculos de consumo</h3>${orderedTable(state.inventory.links,linkDefs,'inventory-links')}</div></div><div class="card card-pad" style="margin-top:18px"><h3 style="margin-bottom:12px">Últimos movimientos</h3>${orderedTable(recent,movementDefs,'inventory-movements')}</div>`;
       }
       function applyInventoryForProcessedDay(date){
@@ -3576,14 +3611,24 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           ${isSuperAdmin()?`<div class="card card-pad stack">
             <h3>Plan de la cuenta</h3>
-            <p class="muted">Solo tú, como Super Administrador, puedes cambiar esto. En plan Básico, Sueldos, Inventario, Auditoría, Horario semanal, Imprimir dietas especiales, el Portal de clientes y la reactivación automática por fecha de retorno quedan bloqueados para el resto del equipo.</p>
-            <p class="muted">El vencimiento se calcula contra la fecha del servidor de Supabase, no contra el reloj de esta PC o celular — así nadie lo altera cambiando la fecha del dispositivo. Necesita la función <code>get_server_date</code> creada en Supabase (ver instrucciones del desarrollador).</p>
+            <p class="muted">Solo el Super Administrador puede cambiar el plan. En Básico, varias funciones avanzadas quedan bloqueadas para el equipo.</p>
             <p>Plan actual: <b>${isPremium()?'Premium':'Básico'}</b>${isPremium()&&state.settings.premiumUntil?` · vence el ${state.settings.premiumUntil.split('-').reverse().join('/')} (${Math.max(0,Math.ceil((new Date(state.settings.premiumUntil)-new Date(cachedServerDate))/86400000))} días restantes)`:''}${isPremium()&&!state.settings.premiumUntil?' · sin vencimiento':''}</p>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-              <label class="field" style="width:150px">Días de Premium<input type="number" id="premium-days" min="1" placeholder="Ej: 30"></label>
-              <button type="button" class="primary" id="activate-premium-days-btn">Activar por esos días</button>
-              <button type="button" class="outline" id="activate-premium-btn" ${isPremium()&&!state.settings.premiumUntil?'disabled':''}>Activar sin vencimiento</button>
-              <button type="button" class="outline" id="activate-basic-btn" ${!isPremium()?'disabled':''}>Volver a Básico ahora</button>
+            <div class="plan-options">
+              <div class="plan-option ${isPremium()&&state.settings.premiumUntil?'is-active':'is-alt'}">
+                <div class="plan-option-info"><b>Activar por días</b><span class="muted">Vence sola en la fecha que definas.</span></div>
+                <div class="plan-option-actions">
+                  <input type="number" id="premium-days" min="1" placeholder="Días" style="width:80px">
+                  <button type="button" class="${isPremium()&&state.settings.premiumUntil?'primary':'danger'}" id="activate-premium-days-btn">Activar</button>
+                </div>
+              </div>
+              <div class="plan-option ${isPremium()&&!state.settings.premiumUntil?'is-active':'is-alt'}">
+                <div class="plan-option-info"><b>Activar sin vencimiento</b><span class="muted">Premium indefinido hasta que lo cambies.</span></div>
+                <button type="button" class="${isPremium()&&!state.settings.premiumUntil?'primary':'danger'}" id="activate-premium-btn" ${isPremium()&&!state.settings.premiumUntil?'disabled':''}>Activar</button>
+              </div>
+              <div class="plan-option ${!isPremium()?'is-active':'is-alt'}">
+                <div class="plan-option-info"><b>Volver a Básico</b><span class="muted">Bloquea las funciones avanzadas para el equipo.</span></div>
+                <button type="button" class="${!isPremium()?'primary':'danger'}" id="activate-basic-btn" ${!isPremium()?'disabled':''}>Cambiar</button>
+              </div>
             </div>
             <h3 style="margin-top:10px">WhatsApp para upgrade a Premium</h3>
             <p class="muted">Este es TU número (el proveedor de Catering Control), no el de la empresa. Es el que ve el equipo y los clientes cuando tocan "Contactar por WhatsApp" para pasar a Premium — el número de la empresa de arriba se usa para todo lo demás (soporte a sus clientes).</p>
