@@ -1,4 +1,4 @@
-const CACHE_NAME = 'catering-control-v1.56.3'; 
+const CACHE_NAME = 'catering-control-v1.56.4'; 
 
 const PRECACHE_URLS = [
   './index.html',
