@@ -130,6 +130,12 @@
       box-shadow: 0 4px 14px color-mix(in srgb, #0ea5b7 38%, transparent);
     }
     button.info:hover { box-shadow: 0 8px 22px color-mix(in srgb, #0ea5b7 42%, transparent); }
+    button.excel {
+      background: linear-gradient(135deg, color-mix(in srgb, #217346 78%, white 22%), #217346);
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, #217346 38%, transparent);
+    }
+    button.excel:hover { box-shadow: 0 8px 22px color-mix(in srgb, #217346 42%, transparent); }
     button:disabled {
       cursor: not-allowed;
       opacity: .52;
@@ -146,6 +152,16 @@
       outline: none;
       min-height: 36px;
       transition: border-color .15s, box-shadow .15s;
+    }
+    input[type="checkbox"], input[type="radio"] {
+      width: auto;
+      min-height: auto;
+      min-width: auto;
+      padding: 0;
+      border: 1px solid var(--line);
+      accent-color: var(--primary);
+      flex: 0 0 auto;
+      vertical-align: -2px;
     }
     select option { color: var(--text); background: var(--surface); }
     input:focus, select:focus, textarea:focus {
@@ -2924,7 +2940,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('#drivers-page').innerHTML=pageHead('Drivers','Personal de entrega registrado.',canEditPage('drivers')?'<button class="primary" data-action="add-driver">+ Añadir driver</button>':'')+`<div class="toolbar"><input id="drivers-search" class="search" placeholder="Buscar driver…" value="${esc(ui.search.drivers||'')}"></div>`+orderedTable(list,definitions,'drivers');
         bindSearch('drivers-search','drivers',renderDrivers);
       }
-      function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label class="wide">Rutas adicionales (solo para cubrir un reemplazo temporal)<select name="extraRouteIds" multiple size="4">${state.routes.map(r=>`<option value="${esc(r.id)}" ${(d.extraRouteIds||[]).includes(r.id)?'selected':''}>${esc(r.name)}</option>`).join('')}</select><small class="muted">Ctrl/Cmd + clic para elegir varias. Una ruta no puede estar a la vez en dos drivers (ni como principal ni como adicional) — si necesitas moverla, quítala primero del otro driver.</small></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="outline" data-action="remove-driver-photo" data-id="${d.id}">Quitar foto</button>`:''}</div></label></div>`;}
+      function driverForm(d={}){return `<div class="form-grid"><label>Nombre *<input name="firstName" required value="${esc(d.firstName)}"></label><label>Apellido *<input name="lastName" required value="${esc(d.lastName)}"></label><label>Carnet *<input name="carnet" required value="${esc(d.carnet)}"></label><label>Teléfono *<input name="phone" required value="${esc(d.phone)}"></label><label class="wide">Dirección de domicilio *<input name="address" required value="${esc(d.address)}"></label><label>Ruta asignada<select name="routeId">${options(state.routes,d.routeId,'Ruta abierta')}</select></label><label class="wide">Rutas adicionales (solo para cubrir un reemplazo temporal)<select name="extraRouteIds" multiple size="4">${state.routes.map(r=>`<option value="${esc(r.id)}" ${(d.extraRouteIds||[]).includes(r.id)?'selected':''}>${esc(r.name)}</option>`).join('')}</select><small class="muted">Ctrl/Cmd + clic para elegir varias. Una ruta no puede estar a la vez en dos drivers (ni como principal ni como adicional) — si necesitas moverla, quítala primero del otro driver.</small></label><label class="wide">Foto de perfil<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:50%;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${d.photoUrl?`<img loading="lazy" decoding="async" src="${d.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'👤'}</div><input type="file" name="photoFile" accept="image/*">${d.id&&d.photoUrl?`<button type="button" class="danger" data-action="remove-driver-photo" data-id="${d.id}">Quitar foto</button>`:''}</div></label></div>`;}
       async function removeDriverPhoto(id){const d=driver(id);if(!d)return;if(d.photoUrl)removeStorageImageByUrl(d.photoUrl);d.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openDriver(id);}
       function openDriver(id){const isNew=!id;const d0=id?driver(id):null;showModal(d0?'Editar driver':'Añadir driver',driverForm(d0||{}),async f=>{
         const data=Object.fromEntries(new FormData(f));
@@ -2977,7 +2993,7 @@ document.addEventListener('DOMContentLoaded', () => {
           {key:'label',label:'Artículo',cell:m=>esc(m.label)},
           {key:'id',label:'Acciones',cell:m=>canEditPage('plans')?`<button class="icon-btn" data-action="edit-menu-item" data-id="${m.key}">Editar</button><button class="icon-btn delete" data-action="delete-menu-item" data-id="${m.key}">×</button>`:'—'}
         ];
-        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="primary" data-action="add-plan">+ Crear plan</button><button class="info" data-action="reassign-plan">Reasignar clientes de plan</button><button class="outline" data-action="open-item-icons">Asignar imagen a artículos</button><button class="outline" data-action="add-menu-item">+ Crear artículo</button>':'')+orderedTable(planList,definitions,'plans')
+        $('#plans-page').innerHTML=pageHead('Planes','Configuración de artículos incluidos por plan. Arrastra el borde de una columna para ajustar su ancho.',canEditPage('plans')?'<button class="primary" data-action="add-plan">+ Crear plan</button><button class="info" data-action="reassign-plan">Reasignar clientes de plan</button><button class="warning" data-action="open-item-icons">Asignar imagen a artículos</button><button class="info" data-action="add-menu-item">+ Crear artículo</button>':'')+orderedTable(planList,definitions,'plans')
           +pageHead('Artículos del menú','Aparecen como columnas en Día de trabajo, en el Excel del día procesado y en el portal del cliente. Se pueden crear, renombrar o eliminar artículos (incluidos los que vienen por defecto).')
           +orderedTable(state.settings.menuItems||[],menuDefs,'menu-items',m=>m.key);
       }
@@ -3032,7 +3048,7 @@ document.addEventListener('DOMContentLoaded', () => {
       function openItemIconsHandlers(){
         $$('[data-item-icon]').forEach(input=>input.onchange=async e=>{const file=e.target.files[0];if(!file)return;const key=input.dataset.itemIcon;try{const oldUrl=state.settings.itemIcons[key];state.settings.itemIcons[key]=await uploadImageFile(file,'icons',160,.8,oldUrl);const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono actualizado.':'Se guardó localmente, pero no en la base de datos.',!saved);}catch(_){notice('No se pudo procesar la imagen.',true);}});
       }
-      function planForm(p={}){return `<div class="form-grid"><label>Nombre *<input name="name" required value="${esc(p.name)}"></label><label>Costo (Bs)<input type="number" min="0" step="0.01" name="cost" value="${esc(p.cost)}"></label><label>Días de servicio incluidos<input type="number" min="1" step="1" name="serviceDays" placeholder="Ej: 20" value="${esc(p.serviceDays)}"></label><label class="wide"><input type="checkbox" name="availableForPurchase" ${p.availableForPurchase?'checked':''} style="width:auto;min-height:auto;vertical-align:-2px;margin-right:6px"> Disponible en "Adquirir nuevo plan" (portal del cliente)</label><label class="wide">Foto del plan<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><input type="file" name="photoFile" accept="image/*">${p.id&&p.photoUrl?`<button type="button" class="outline" data-action="remove-plan-photo" data-id="${p.id}">Quitar foto</button>`:''}</div></label><div class="wide"><label>Artículos incluidos</label>${itemFields(p.items)}</div></div>`;}
+      function planForm(p={}){return `<div class="form-grid"><label>Nombre *<input name="name" required value="${esc(p.name)}"></label><label>Costo (Bs)<input type="number" min="0" step="0.01" name="cost" value="${esc(p.cost)}"></label><label>Días de servicio incluidos<input type="number" min="1" step="1" name="serviceDays" placeholder="Ej: 20" value="${esc(p.serviceDays)}"></label><label class="wide"><input type="checkbox" name="availableForPurchase" ${p.availableForPurchase?'checked':''} style="width:auto;min-height:auto;vertical-align:-2px;margin-right:6px"> Disponible en "Adquirir nuevo plan" (portal del cliente)</label><label class="wide">Foto del plan<div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg);flex:0 0 auto">${p.photoUrl?`<img loading="lazy" decoding="async" src="${p.photoUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🍽️'}</div><input type="file" name="photoFile" accept="image/*">${p.id&&p.photoUrl?`<button type="button" class="danger" data-action="remove-plan-photo" data-id="${p.id}">Quitar foto</button>`:''}</div></label><div class="wide"><label>Artículos incluidos</label>${itemFields(p.items)}</div></div>`;}
       async function removePlanPhoto(id){const p=plan(id);if(!p)return;if(p.photoUrl)removeStorageImageByUrl(p.photoUrl);p.photoUrl='';const saved=await save();notice(saved?'Foto eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);openPlan(id);}
       function openPlan(id){const isNew=!id;const p0=id?plan(id):null;showModal(p0?'Editar plan':'Crear plan',planForm(p0||{}),async f=>{const data=Object.fromEntries(new FormData(f));const file=f.elements['photoFile']?.files?.[0];delete data.photoFile;data.availableForPurchase=!!f.elements.availableForPurchase?.checked;data.items=formItems(f);if(file){try{data.photoUrl=await uploadImageFile(file,'plans',320,.82,p0?.photoUrl||'');}catch(_){notice('No se pudo procesar la foto.',true);}}let p=p0;if(p)Object.assign(p,data);else{p={id:uid('p'),...data};state.plans.push(p);}const saved=await save();if(!saved)return false;renderPlans();notice('Plan guardado.');logAudit(isNew?'Plan creado':'Plan editado','plan',p.name,p.id,{});});}
       function openPlanReassign(){
@@ -3296,7 +3312,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <label class="field">Driver<select id="metrics-driver">${options(state.drivers,ui.metrics.driverId,'Todos los drivers')}</select></label>
           <label class="field" style="width:150px">Costo por km (Bs)${isAdmin()?`<input type="number" min="0" step="0.01" id="metrics-cost-km" value="${n(state.settings.costPerKm)}">`:`<div class="field-locked">${n(state.settings.costPerKm).toFixed(2)}</div>`}</label>
           <span class="spacer"></span>
-          <button class="outline" data-action="export-metrics">Exportar Excel</button>
+          <button class="excel" data-action="export-metrics">Exportar Excel</button>
         </div>
         <div class="toolbar" style="flex-wrap:wrap">
           <label class="field" style="display:flex;align-items:center;gap:6px;width:auto;flex-direction:row"><input type="checkbox" id="metrics-compare-toggle" ${ui.metrics.compare.enabled?'checked':''}> <span>Comparar con otro periodo</span></label>
@@ -3520,7 +3536,7 @@ document.addEventListener('DOMContentLoaded', () => {
           {key:'id',label:'Acciones',cell:r=>`<button class="icon-btn" data-action="edit-role" data-id="${r.id}">Editar</button><button class="icon-btn delete" data-action="delete-role" data-id="${r.id}">×</button>`}
         ];
         const visibleUsers=isSuperAdmin()?staffUsers:staffUsers.filter(u=>u.role!=='superadmin');
-        $('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Roles fijos: Administrador, Editor, Cocina y Driver. También se pueden crear roles a medida.', '<button class="primary" data-action="add-user">+ Crear usuario</button><button class="outline" data-action="add-role">+ Crear rol</button>')
+        $('#users-page').innerHTML=pageHead('Usuarios y permisos','Esta es una base independiente de clientes y operaciones. Roles fijos: Administrador, Editor, Cocina y Driver. También se pueden crear roles a medida.', '<button class="primary" data-action="add-user">+ Crear usuario</button><button class="info" data-action="add-role">+ Crear rol</button>')
           +orderedTable(visibleUsers,userDefs,'users')
           +pageHead('Roles personalizados','Qué páginas puede ver y editar cada rol creado a medida. Administrador, Editor, Cocina y Driver son fijos y no aparecen aquí.')
           +orderedTable(state.settings.customRoles||[],roleDefs,'roles',r=>r.id);
@@ -3543,7 +3559,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if(pageNeedsPremium('audit')){ $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios.')+premiumLockHtml('Auditoría'); return; }
         if(forceRefresh){ auditShowingAll=false; auditLoaded=false; }
         const actions='<button class="refresh" data-action="refresh-audit">'+REFRESH_ICON+'Actualizar</button>'
-          +(auditShowingAll?'':' <button class="outline" data-action="load-all-audit">Ver todos los eventos guardados</button>');
+          +(auditShowingAll?'':' <button class="info" data-action="load-all-audit">Ver todos los eventos guardados</button>');
         if(!auditLoaded){
           if(!forceRefresh){
             $('#audit-page').innerHTML=pageHead('Auditoría','Historial de cambios: quién hizo qué y cuándo.',actions)+'<p class="muted">Presiona Actualizar para cargar el historial. No se consulta la base de datos hasta entonces.</p>';
@@ -3688,7 +3704,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <div style="display:flex;align-items:center;gap:10px">
                 <div style="width:52px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${logo?`<img loading="lazy" decoding="async" src="${esc(logo)}" alt="Logo" style="width:100%;height:100%;object-fit:contain">`:'🍽'}</div>
                 <input type="file" id="logo-file" accept="image/*">
-                ${logo?'<button type="button" class="outline" data-action="remove-logo">Quitar logo</button>':''}
+                ${logo?'<button type="button" class="danger" data-action="remove-logo">Quitar logo</button>':''}
               </div>
             </label>
             <label>Número de WhatsApp<input id="whatsapp-number" value="${esc(state.settings.whatsappNumber)}" placeholder="${esc(APP_CONFIG.whatsappNumber||'Ej: 59171234567')}"></label>
@@ -3701,7 +3717,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <div style="display:flex;align-items:center;gap:10px">
                 <div style="width:64px;height:64px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${state.settings.paymentQrUrl?`<img loading="lazy" decoding="async" src="${esc(state.settings.paymentQrUrl)}" alt="QR de pago" style="width:100%;height:100%;object-fit:contain">`:'📱'}</div>
                 <input type="file" id="payment-qr-file" accept="image/*">
-                ${state.settings.paymentQrUrl?'<button type="button" class="outline" data-action="remove-payment-qr">Quitar QR</button>':''}
+                ${state.settings.paymentQrUrl?'<button type="button" class="danger" data-action="remove-payment-qr">Quitar QR</button>':''}
               </div>
             </label>
           </div>
@@ -3712,7 +3728,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <div style="display:flex;align-items:center;gap:10px">
                 <div style="width:88px;height:52px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--bg)">${state.settings.adImageUrl?`<img loading="lazy" decoding="async" src="${esc(state.settings.adImageUrl)}" alt="Publicidad" style="width:100%;height:100%;object-fit:cover">`:'📣'}</div>
                 <input type="file" id="ad-image-file" accept="image/*">
-                ${state.settings.adImageUrl?'<button type="button" class="outline" data-action="remove-ad-image">Quitar imagen</button>':''}
+                ${state.settings.adImageUrl?'<button type="button" class="danger" data-action="remove-ad-image">Quitar imagen</button>':''}
               </div>
             </label>
             <h3 style="margin-top:10px">Aviso de renovación</h3>

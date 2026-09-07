@@ -29,7 +29,7 @@
     :root{--font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Figtree,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--bs-primary:#3867f4;--bs-primary-rgb:56,103,244;--bs-link-color:#3867f4;--bs-link-color-rgb:56,103,244;--bs-link-hover-color:#2a52d6;--bs-link-hover-color-rgb:42,82,214}
     body{background:var(--page-bg,#f5f7fb);font-family:var(--font)}
     h1,h2,h3,.btn{font-family:var(--font-display)}
-    .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#3867f4,#15a77f);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.hidden{display:none!important}
+    .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#3867f4,#15a77f);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.btn-whatsapp{background:#25D366!important;border-color:transparent!important;color:#fff!important;font-weight:650}.btn-whatsapp:hover{background:#20bd5a!important;color:#fff!important}a.link-whatsapp{color:#1da851;font-weight:650;text-decoration:none}a.link-whatsapp:hover{color:#178a42;text-decoration:underline}.hidden{display:none!important}
     .pause-mode-card{border-radius:1rem;cursor:pointer;transition:border-color .15s ease,background .15s ease,box-shadow .15s ease}
     .btn-check:checked+.pause-mode-card{border-color:var(--bs-primary)!important;background:color-mix(in srgb,var(--bs-primary) 8%,var(--bs-body-bg));box-shadow:0 0 0 2px color-mix(in srgb,var(--bs-primary) 25%,transparent)}
     .pause-mode-card:hover{border-color:color-mix(in srgb,var(--bs-primary) 45%,var(--bs-border-color))}
@@ -354,7 +354,7 @@ function boot() {
                 React.createElement("div", { className: "card-body p-4 d-flex flex-column" },
                     React.createElement("h2", { className: "h5" }, "Atenci\u00F3n al cliente"),
                     React.createElement("p", { className: "text-secondary" }, "Para renovar o cambiar tu plan, escr\u00EDbenos directamente."),
-                    wa ? React.createElement("a", { className: "btn btn-success mt-auto", href: wa, target: "_blank", rel: "noopener" }, "Contactar por WhatsApp")
+                    wa ? React.createElement("a", { className: "btn btn-whatsapp mt-auto", href: wa, target: "_blank", rel: "noopener" }, "Contactar por WhatsApp")
                         : React.createElement("p", { className: "text-secondary small mb-0" }, "Contacta a tu proveedor para m\u00E1s informaci\u00F3n.")))));
     }
     function MessageAlert({ message }) {
@@ -650,7 +650,7 @@ function boot() {
                                 React.createElement("span", { className: "fs-1 d-block mb-2" }, "\u2705"),
                                 React.createElement("p", { className: "mb-1" }, "El equipo está procesando tu solicitud."),
                                 React.createElement("p", { className: "text-secondary small" }, "Te vamos a contactar en cuanto la revisemos."),
-                                wa && React.createElement("p", { className: "small" }, "¿Urgente? ", React.createElement("a", { href: wa, target: "_blank", rel: "noopener" }, "Escríbenos por WhatsApp")),
+                                wa && React.createElement("p", { className: "small" }, "¿Urgente? ", React.createElement("a", { className: "link-whatsapp", href: wa, target: "_blank", rel: "noopener" }, "Escríbenos por WhatsApp")),
                                 React.createElement("button", { className: "btn btn-primary mt-2", onClick: onClose }, "Cerrar"))))))));
     }
     function InstagramLink({ branding }) {
