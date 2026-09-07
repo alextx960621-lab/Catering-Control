@@ -129,6 +129,26 @@ function boot() {
     function waLink(branding, text) { const num = whatsappNumber(branding); return num ? `https://wa.me/${num}?text=${encodeURIComponent(text)}` : '#'; }
     function renewalWarningDays(branding) { return Number.isFinite(branding.renewalWarningDays) ? branding.renewalWarningDays : 3; }
     function menuItemsList(branding) { return branding.menuItems && branding.menuItems.length ? branding.menuItems : DEFAULT_ITEMS; }
+    function resizeImageToBlob(file, maxDim = 1100, quality = 0.72) {
+        return new Promise((resolve, reject) => {
+            if (!file || !file.type?.startsWith('image/')) { reject(new Error('Archivo no válido')); return; }
+            const img = new Image();
+            const reader = new FileReader();
+            reader.onload = () => {
+                img.onload = () => {
+                    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+                    const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+                    const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+                    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('No se pudo comprimir la imagen')), 'image/jpeg', quality);
+                };
+                img.onerror = () => reject(new Error('No se pudo leer la imagen'));
+                img.src = reader.result;
+            };
+            reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+            reader.readAsDataURL(file);
+        });
+    }
     function readCachedBranding() {
         try {
             return JSON.parse(localStorage.getItem(BRANDING_KEY)) || {};
@@ -173,7 +193,7 @@ function boot() {
                 companyName: settings.companyName, logoUrl: settings.logoUrl,
                 itemIcons: settings.itemIcons || {}, whatsappNumber: settings.whatsappNumber,
                 instagramUrl: settings.instagramUrl, instagramHandle: settings.instagramHandle,
-                adImageUrl: settings.adImageUrl, renewalWarningDays: settings.renewalWarningDays,
+                adImageUrl: settings.adImageUrl, paymentQrUrl: settings.paymentQrUrl, renewalWarningDays: settings.renewalWarningDays,
                 menuItems: (settings.menuItems || []).map(m => [m.key, m.label])
             };
             try {
@@ -281,11 +301,10 @@ function boot() {
         return React.createElement("section", { className: "ad-banner rounded-4 shadow-sm overflow-hidden mb-3" },
             React.createElement("img", { loading: "lazy", decoding: "async", src: branding.adImageUrl, alt: "Publicidad", className: "d-block" }));
     }
-    function RenewalBanner({ data, client, branding, plan, state, remaining }) {
+    function RenewalBanner({ data, client, branding, plan, state, remaining, onOpenPlanChange }) {
         const show = n(client.paidDays) > 0 && remaining <= renewalWarningDays(branding) && !['Pausado', 'Programado', 'No laborable'].includes(state);
         if (!show)
             return null;
-        const wa = whatsappNumber(branding) ? waLink(branding, `Hola, soy ${client.name}. ${remaining <= 0 ? 'Mi plan ya terminó y' : `Me quedan ${remaining} día(s) y`} quiero renovarlo.`) : '';
         return (React.createElement("section", { className: "renewal-banner rounded-4 shadow-sm p-4 mb-3 d-flex align-items-center justify-content-between flex-wrap gap-3" },
             React.createElement("div", { className: "d-flex align-items-center gap-3" },
                 React.createElement("span", { className: "bounce fs-1" }, "\uD83E\uDD64"),
@@ -295,7 +314,7 @@ function boot() {
                     React.createElement("p", { className: "mb-0 opacity-90" },
                         remaining <= 0 ? 'Renueva ahora para no perder tus entregas.' : 'Renueva ahora y no te quedes sin tus entregas.',
                         " \u00A1Es rapid\u00EDsimo! \uD83C\uDF89"))),
-            wa && React.createElement("a", { className: "btn btn-light rounded-pill px-4", href: wa, target: "_blank", rel: "noopener" }, "Quiero renovar")));
+            React.createElement("button", { className: "btn btn-light rounded-pill px-4", onClick: onOpenPlanChange }, "Quiero renovar")));
     }
     function PlanCard({ client, branding, plan, state, remaining, included }) {
         const items = menuItemsList(branding).filter(([key]) => n(included[key]) > 0);
@@ -538,6 +557,102 @@ function boot() {
                     React.createElement("button", { className: "btn btn-primary", onClick: handleSend, disabled: sending }, sending ? 'Enviando…' : 'Enviar mensaje'),
                     feedback && React.createElement("div", { className: `alert mt-3 mb-0 alert-${feedback.error ? 'danger' : 'success'}` }, feedback.text)))));
     }
+    function PlanChangeButton({ onOpen }) {
+        return (React.createElement("div", { className: "col-12" },
+            React.createElement("button", { className: "btn btn-primary btn-lg w-100 rounded-4 shadow-sm py-3", onClick: onOpen },
+                "\u00BFQuieres renovar o cambiar de plan?")));
+    }
+    function PlanChangeModal({ show, onClose, data, client, branding, plan }) {
+        const [step, setStep] = useState('choose'); // choose | pay | sent
+        const [requestType, setRequestType] = useState(null); // renew | newplan
+        const [selectedPlanId, setSelectedPlanId] = useState('');
+        const [file, setFile] = useState(null);
+        const [sending, setSending] = useState(false);
+        const [error, setError] = useState('');
+        useEffect(() => {
+            if (show) { setStep('choose'); setRequestType(null); setSelectedPlanId(''); setFile(null); setError(''); }
+        }, [show]);
+        if (!show)
+            return null;
+        const availablePlans = (data.plans || []).filter(p => p.availableForPurchase);
+        const targetPlan = requestType === 'renew' ? plan : availablePlans.find(p => p.id === selectedPlanId);
+        function chooseRenew() { setRequestType('renew'); setStep('pay'); }
+        function choosePlan(p) { setRequestType('newplan'); setSelectedPlanId(p.id); setStep('pay'); }
+        async function handleDownloadQr() {
+            try {
+                const res = await fetch(branding.paymentQrUrl);
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'qr-pago.jpg';
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+            } catch (_) { window.open(branding.paymentQrUrl, '_blank'); }
+        }
+        function handleFile(e) {
+            const f = e.target.files[0];
+            if (f && !f.type?.startsWith('image/')) { setError('Solo se aceptan imágenes (no PDF ni otros archivos).'); return; }
+            setError(''); setFile(f || null);
+        }
+        async function handleSubmit() {
+            if (!file) { setError('Sube una imagen de tu comprobante antes de enviar.'); return; }
+            setSending(true); setError('');
+            try {
+                const blob = await resizeImageToBlob(file, 1100, 0.72);
+                const path = `comprobantes/${client.id}_${Date.now()}.jpg`;
+                const url = await window.SupabaseDB?.storageUploadImage(path, blob, 'image/jpeg');
+                if (!url) throw new Error('upload');
+                const label = requestType === 'renew' ? `renovar su plan actual ("${plan?.name || 'sin plan'}")` : `cambiar al plan "${targetPlan?.name || ''}"`;
+                const amountText = targetPlan?.cost ? `Bs ${targetPlan.cost}` : 'monto no definido';
+                const text = `Solicitud de plan: ${client.name} quiere ${label}. Monto: ${amountText}. Comprobante: ${url}`;
+                const result = await window.SupabaseDB?.rpc('crear_nota_cliente', { p_token: window.SupabaseDB?.getSessionToken(), p_client_id: client.id, p_texto: text });
+                if (!result) throw new Error('note');
+                setStep('sent');
+            } catch (_) {
+                setError('No se pudo enviar. Intenta nuevamente o contáctanos por WhatsApp.');
+            }
+            setSending(false);
+        }
+        const wa = whatsappNumber(branding) ? waLink(branding, `Hola, soy ${client.name}. Tuve un problema al subir mi comprobante de pago.`) : '';
+        return (React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "modal-backdrop fade show" }),
+            React.createElement("div", { className: "modal fade show", style: { display: 'block' }, tabIndex: -1, role: "dialog" },
+                React.createElement("div", { className: "modal-dialog modal-dialog-centered", role: "document" },
+                    React.createElement("div", { className: "modal-content rounded-4" },
+                        React.createElement("div", { className: "modal-header" },
+                            React.createElement("h5", { className: "modal-title" }, step === 'sent' ? '¡Listo!' : '¿Quieres renovar o cambiar de plan?'),
+                            React.createElement("button", { type: "button", className: "btn-close", onClick: onClose })),
+                        React.createElement("div", { className: "modal-body" },
+                            step === 'choose' && React.createElement("div", { className: "d-grid gap-2" },
+                                React.createElement("button", { className: "btn btn-primary btn-lg", onClick: chooseRenew }, "Quiero renovar mi plan"),
+                                React.createElement("button", { className: "btn btn-outline-primary btn-lg", onClick: () => setStep('newplan') }, "Quiero un nuevo plan")),
+                            step === 'newplan' && React.createElement("div", { className: "d-grid gap-2" },
+                                availablePlans.length ? availablePlans.map(p => (React.createElement("button", { key: p.id, className: "btn btn-outline-primary btn-lg text-start", onClick: () => choosePlan(p) },
+                                    React.createElement("b", null, p.name),
+                                    p.cost ? React.createElement("span", { className: "float-end" }, `Bs ${p.cost}`) : null)))
+                                    : React.createElement("p", { className: "text-secondary mb-0" }, "Por ahora no hay planes disponibles para elegir. Contáctanos directamente."),
+                                React.createElement("button", { className: "btn btn-link", onClick: () => setStep('choose') }, "\u2190 Volver")),
+                            step === 'pay' && React.createElement("div", null,
+                                React.createElement("p", { className: "mb-1" }, requestType === 'renew' ? `Vas a renovar tu plan actual: ` : `Vas a cambiar al plan: `, React.createElement("b", null, targetPlan?.name || '—')),
+                                React.createElement("p", { className: "h4 mb-3" }, targetPlan?.cost ? `Bs ${targetPlan.cost}` : 'Monto a confirmar con el equipo'),
+                                branding.paymentQrUrl ? React.createElement("div", { className: "text-center mb-3" },
+                                    React.createElement("img", { src: branding.paymentQrUrl, alt: "QR de pago", style: { maxWidth: 220, width: '100%' }, className: "rounded-3 border mb-2" }),
+                                    React.createElement("p", { className: "text-secondary small mb-2" }, "Paga a este QR y sube tu comprobante."),
+                                    React.createElement("button", { type: "button", className: "btn btn-sm btn-outline-secondary mb-3", onClick: handleDownloadQr }, "Descargar QR"))
+                                    : React.createElement("p", { className: "text-secondary small" }, "El equipo aún no cargó un QR de pago. Contáctanos para coordinar el pago."),
+                                React.createElement("label", { className: "form-label small text-secondary" }, "Comprobante de pago (solo imagen)"),
+                                React.createElement("input", { type: "file", accept: "image/*", className: "form-control mb-3", onChange: handleFile }),
+                                error && React.createElement("div", { className: "alert alert-danger py-2 small" }, error),
+                                React.createElement("div", { className: "d-flex gap-2" },
+                                    React.createElement("button", { className: "btn btn-link px-0", onClick: () => setStep(requestType === 'renew' ? 'choose' : 'newplan') }, "\u2190 Volver"),
+                                    React.createElement("button", { className: "btn btn-primary ms-auto", onClick: handleSubmit, disabled: sending }, sending ? 'Enviando…' : 'Enviar comprobante'))),
+                            step === 'sent' && React.createElement("div", { className: "text-center py-2" },
+                                React.createElement("span", { className: "fs-1 d-block mb-2" }, "\u2705"),
+                                React.createElement("p", { className: "mb-1" }, "El equipo está procesando tu solicitud."),
+                                React.createElement("p", { className: "text-secondary small" }, "Te vamos a contactar en cuanto la revisemos."),
+                                wa && React.createElement("p", { className: "small" }, "¿Urgente? ", React.createElement("a", { href: wa, target: "_blank", rel: "noopener" }, "Escríbenos por WhatsApp")),
+                                React.createElement("button", { className: "btn btn-primary mt-2", onClick: onClose }, "Cerrar"))))))));
+    }
     function InstagramLink({ branding }) {
         const url = branding.instagramUrl || APP_CONFIG.instagramUrl;
         if (!url)
@@ -554,6 +669,7 @@ function boot() {
     // ---------- Portal completo (una vez cargado todo) ----------
     function Portal({ data, client, branding, theme, onThemeChange, onSaveClient }) {
         const [message, setMessage] = useState(null); // { text, error, showSupport, wa }
+        const [showPlanChange, setShowPlanChange] = useState(false);
         const date = workDate(data);
         const next = nextWorkDay(data, date);
         const state = stateFor(data, client, date);
@@ -635,9 +751,10 @@ function boot() {
             React.createElement(Header, { branding: branding, theme: theme, onThemeChange: onThemeChange, showThemeSelect: true }),
             React.createElement(Hero, { client: client }),
             React.createElement(AdBanner, { branding: branding }),
-            React.createElement(RenewalBanner, { data: data, client: client, branding: branding, plan: plan, state: state, remaining: remaining }),
+            React.createElement(RenewalBanner, { data: data, client: client, branding: branding, plan: plan, state: state, remaining: remaining, onOpenPlanChange: () => setShowPlanChange(true) }),
             React.createElement("section", { className: "row g-3" },
                 React.createElement(PlanCard, { client: client, branding: branding, plan: plan, state: state, remaining: remaining, included: included }),
+                React.createElement(PlanChangeButton, { onOpen: () => setShowPlanChange(true) }),
                 React.createElement(SupportCard, { client: client, branding: branding }),
                 React.createElement("div", { className: "col-12" }, state === 'Pausado'
                     ? (client.returnDate && client.returnDate > date
@@ -646,7 +763,8 @@ function boot() {
                     : React.createElement(PauseForm, { next: next, message: message, onConfirm: handlePause })),
                 React.createElement(AddressCard, { client: client, data: data, branding: branding, onSaveClient: onSaveClient, onSaveTomorrowOverride: handleAddressOverride }),
                 React.createElement(NoteCard, { client: client }),
-                React.createElement(InstagramLink, { branding: branding }))));
+                React.createElement(InstagramLink, { branding: branding })),
+            React.createElement(PlanChangeModal, { show: showPlanChange, onClose: () => setShowPlanChange(false), data: data, client: client, branding: branding, plan: plan })));
     }
     function App() {
         const [phase, setPhase] = useState('checking'); 
