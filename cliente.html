@@ -282,7 +282,7 @@ function boot() {
             React.createElement("img", { loading: "lazy", decoding: "async", src: branding.adImageUrl, alt: "Publicidad", className: "d-block" }));
     }
     function RenewalBanner({ data, client, branding, plan, state, remaining }) {
-        const show = plan && n(client.paidDays) > 0 && remaining <= renewalWarningDays(branding) && !['Pausado', 'Programado', 'No laborable'].includes(state);
+        const show = n(client.paidDays) > 0 && remaining <= renewalWarningDays(branding) && !['Pausado', 'Programado', 'No laborable'].includes(state);
         if (!show)
             return null;
         const wa = whatsappNumber(branding) ? waLink(branding, `Hola, soy ${client.name}. ${remaining <= 0 ? 'Mi plan ya terminó y' : `Me quedan ${remaining} día(s) y`} quiero renovarlo.`) : '';
