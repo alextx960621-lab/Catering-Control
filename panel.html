@@ -1143,7 +1143,7 @@
 </style>
 
   <link rel="manifest" href="./manifest.json">
-  <meta name="theme-color" content="#0d6efd">
+  <meta name="theme-color" content="#3867f4">
   <link rel="icon" href="./icons/favicon-32.png" type="image/png">
   <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2518,8 +2518,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const filteredActive=list.filter(c=>status(c,date)==='Activo');
         const totals=`<tfoot>${totalRow(`Totales filtrados (${filteredActive.length} clientes activos)`,filteredActive,'filtered')}${totalRow(`Totales generales (${activeOrders.length} clientes activos)`,activeOrders,'general')}</tfoot>`;
         const printButtons=isDriverRole()
-          ?`<button class="outline" data-action="export-diets">Imprimir orden de ruta</button>`
-          :`<button class="outline" data-action="export-diets">Imprimir dietas especiales</button><button class="outline" data-action="export-route-order">Imprimir orden de ruta</button>`;
+          ?`<button class="excel" data-action="export-diets">Imprimir orden de ruta</button>`
+          :`<button class="excel" data-action="export-diets">Imprimir dietas especiales</button><button class="excel" data-action="export-route-order">Imprimir orden de ruta</button>`;
         const routeField=isDriverRole()?`<label class="field">Ruta<div class="field-locked" aria-disabled="true">${esc(myRoutes.map(routeName).join(' + ')||'Sin ruta')}</div></label>`:`<label class="field">Ruta<select id="dispatch-route">${options(state.routes,rf,'Todas las rutas')}</select></label>`;
         const dateField=isDriverRole()
           ?`<div class="date-input-wrap"><input type="date" id="work-date" value="${date}"></div><button type="button" class="outline" id="work-date-today" style="margin-top:6px" title="Volver a ver el día actual, sin procesar">Ver hoy</button>`
@@ -3459,7 +3459,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const wb=new ExcelJS.Workbook();
         wb.creator=state.settings.companyName||APP_CONFIG.companyName;
         const thinLine={style:'thin',color:{argb:'FFD9DEE7'}};
-        const headerFill=(ws)=>ws.getRow(1).eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        const headerFill=(ws)=>ws.getRow(1).eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF3867F4'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
         const zebra=(ws)=>ws.eachRow((row,i)=>{ if(i===1) return; row.eachCell(cell=>{cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:i%2===0?'FFF3F6FB':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});});
         const ws1=wb.addWorksheet('Resumen');
         ws1.columns=[{header:'KPI',key:'k',width:36},{header:'Valor',key:'v',width:24}];
@@ -3901,7 +3901,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ];
         const CARRERAS_COL=ws.columns.length; 
         const CARRERAS_FILL={argb:'FFFFC857'}; 
-        ws.getRow(1).eachCell((cell,colNumber)=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===CARRERAS_COL?'FFB8860B':'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        ws.getRow(1).eachCell((cell,colNumber)=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===CARRERAS_COL?'FFB8860B':'FF3867F4'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
         const sumField=(clients,key)=>clients.reduce((a,c)=>a+clientRow(c)[key],0);
         const styleDataRow=(row,i)=>row.eachCell((cell,colNumber)=>{cell.fill={type:'pattern',pattern:'solid',fgColor:colNumber===CARRERAS_COL?CARRERAS_FILL.argb:{argb:i%2===0?'FFF3F6FB':'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};cell.alignment={vertical:'top'};});
         const styleTotalRow=(row,argb)=>row.eachCell((cell,colNumber)=>{cell.font={bold:true};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:colNumber===CARRERAS_COL?'FFB8860B':argb}};if(colNumber===CARRERAS_COL)cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
@@ -3911,7 +3911,7 @@ document.addEventListener('DOMContentLoaded', () => {
           styleTotalRow(totalRow,'FFE3E7EE');
         });
         const grandTotalRow=ws.addRow({nombre:'TOTAL GENERAL',ruta:'',clientes:activeClients.length,...Object.fromEntries(NUMERIC_KEYS.map(k=>[k,sumField(activeClients,k)]))});
-        styleTotalRow(grandTotalRow,'FF0D6EFD');
+        styleTotalRow(grandTotalRow,'FF3867F4');
         grandTotalRow.eachCell((cell,colNumber)=>{if(colNumber!==CARRERAS_COL)cell.font={bold:true,color:{argb:'FFFFFFFF'}};});
         if(movimientosDelDia.length){
           const ws2=wb.addWorksheet('Inventario descontado',{views:[{state:'frozen',ySplit:1}]});
@@ -4026,7 +4026,7 @@ document.addEventListener('DOMContentLoaded', () => {
         headerRow.height=22;
         headerRow.eachCell(cell=>{
           cell.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
-          cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0D6EFD'}};
+          cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF3867F4'}};
           cell.alignment={vertical:'middle',horizontal:'left'};
           cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
         });
@@ -4062,7 +4062,7 @@ document.addEventListener('DOMContentLoaded', () => {
           totalRow.eachCell(cell=>{cell.font={bold:true};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE3E7EE'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
         });
         const grandTotalRow=ws.addRow({ruta:'',cliente:`TOTAL GENERAL: ${activeClients.length} clientes`,plan:'',items:'',notes:''});
-        grandTotalRow.eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0D6EFD'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
+        grandTotalRow.eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF3867F4'}};cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};});
         const buffer=await wb.xlsx.writeBuffer();
         const a=document.createElement('a');
         a.href=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
@@ -4121,7 +4121,7 @@ document.addEventListener('DOMContentLoaded', () => {
             cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine};
             cell.alignment={vertical:'top',horizontal:'left',wrapText:true};
           });
-          row.getCell('maps').font={color:{argb:'FF0D6EFD'},underline:true};
+          row.getCell('maps').font={color:{argb:'FF3867F4'},underline:true};
         });
         const totalRow=ws.addRow({order:'',cliente:`Total: ${activeClients.length} clientes`,address:'',phone:'',maps:'',bags:activeClients.reduce((a,c)=>a+n(c.bags),0),career:activeClients.reduce((a,c)=>a+n(c.career||1),0),notes:''});
         totalRow.eachCell(cell=>{ cell.font={bold:true}; cell.border={top:thinLine,left:thinLine,bottom:thinLine,right:thinLine}; });
@@ -4302,11 +4302,11 @@ document.addEventListener('DOMContentLoaded', () => {
             #map-dialog .mmap-legend{padding:4px 16px;font-size:11.5px;color:var(--text);opacity:.6}
             #map-dialog .mmap-body{position:relative;width:100%;height:calc(100% - 96px)}
             #map-dialog select{padding:5px 8px;border-radius:8px;border:1px solid var(--line);font-size:13px;background:var(--surface);color:var(--text)}
-            .mc-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;background:#0d6efd;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transform:rotate(-45deg);display:flex;align-items:center;justify-content:center}
+            .mc-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;background:#3867f4;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transform:rotate(-45deg);display:flex;align-items:center;justify-content:center}
             .mc-pin span{transform:rotate(45deg);color:#fff;font-weight:700;font-size:12px}
             .mc-pin.mc-pin-pending{background:#f97316}
             .mc-driver-icon{width:34px;height:34px;border-radius:50%;background:#f97316;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:16px}
-            .mc-arrow{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:11px solid #0d6efd;opacity:.85;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
+            .mc-arrow{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:11px solid #3867f4;opacity:.85;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
             @media (max-width:520px){#map-dialog{width:100vw;height:100vh;border-radius:0}}
           `;
           document.head.appendChild(style);
@@ -4384,7 +4384,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (routeLayer){ routeLayer.remove(); routeLayer=null; }
           routeLayer=window.L.layerGroup().addTo(map);
           if (lastClientLatlngs.length>=2){
-            window.L.polyline(lastClientLatlngs, { color:'#0d6efd', weight:4, opacity:.65, dashArray:'8,6' }).addTo(routeLayer);
+            window.L.polyline(lastClientLatlngs, { color:'#3867f4', weight:4, opacity:.65, dashArray:'8,6' }).addTo(routeLayer);
             for (let i=0;i<lastClientLatlngs.length-1;i++){
               const [lat1,lng1]=lastClientLatlngs[i], [lat2,lng2]=lastClientLatlngs[i+1];
               const brng=bearingDeg(lat1,lng1,lat2,lng2);
@@ -4415,7 +4415,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (road && road.latlngs?.length){
             if (routeLayer){ routeLayer.remove(); routeLayer=null; }
             routeLayer=window.L.layerGroup().addTo(map);
-            window.L.polyline(road.latlngs, { color:'#0d6efd', weight:5, opacity:.75 }).addTo(routeLayer);
+            window.L.polyline(road.latlngs, { color:'#3867f4', weight:5, opacity:.75 }).addTo(routeLayer);
             legendEl.textContent=`Números = orden del cliente. Línea azul = ruta sugerida por calles (${road.km.toFixed(1)} km, ~${Math.round(road.minutes)} min · OpenStreetMap/OSRM, puede diferir del recorrido real). Los pendientes de orden ("P") no participan en la ruta.`;
           } else {
             drawStraightFallback('Números = orden del cliente. No se pudo calcular la ruta por calles (sin conexión al servicio de rutas); se muestra una línea recta de referencia. Los pendientes de orden ("P") no participan en la ruta.');
