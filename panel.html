@@ -1029,6 +1029,13 @@
         padding: 4px 6px;
         font-size: 20px;
       }
+      .btn-sep {
+        color: var(--muted);
+        opacity: .5;
+        font-size: 14px;
+        line-height: 1;
+        user-select: none;
+      }
       .btn-text, .sync-text-label { display: none; }
       .aside-bottom button { padding: 6px 8px; font-size: 14px; min-height: 30px; }
       .sync-pill { padding: 4px; }
@@ -1158,6 +1165,7 @@
         </div>
         <div class="aside-bottom-actions">
           <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú">☰</button>
+          <span class="btn-sep" aria-hidden="true">•</span>
           <button class="refresh" id="manual-sync-btn" title="Actualizar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span class="btn-text"> Actualizar</span></button>
           <div class="sync-pill" id="sync-pill" title="Estado de sincronización"><span class="sync-dot" id="sync-dot"></span><span id="sync-text" class="sync-text-label">Listo</span></div>
           <button class="danger" id="logout-btn" title="Cerrar sesión"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg><span class="btn-text"> Salir</span></button>
@@ -2830,6 +2838,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const m = String(text||'').match(/Comprobante:\s*(https?:\/\/\S+)/);
         return m ? m[1] : null;
       }
+      async function cleanupOldProofImages(){
+        if(!canEditPage('notes')) return;
+        const PROOF_MAX_AGE_MS=7*24*60*60*1000;
+        const now=Date.now();
+        const stale=state.notes.filter(nt=>{
+          if(!nt.createdAt) return false;
+          const url=extractProofUrl(nt.text);
+          if(!url) return false;
+          const age=now-new Date(nt.createdAt).getTime();
+          return Number.isFinite(age) && age>PROOF_MAX_AGE_MS;
+        });
+        if(!stale.length) return;
+        for(const nt of stale){
+          const url=extractProofUrl(nt.text);
+          try{ await removeStorageImageByUrl(url); }catch(_){}
+          nt.text=nt.text.replace(/\s*Comprobante:\s*https?:\/\/\S+/,'').trim()+' (comprobante eliminado automáticamente: pasaron más de 7 días)';
+        }
+        const saved=await save();
+        if(ui.page==='notes') renderNotes();
+        if(!saved) console.warn('No se pudo guardar la limpieza de comprobantes vencidos.');
+      }
       function renderNotes(){
         if(!canAccessPage('notes')) return;
         if(pageNeedsPremium('notes')){ $('#notes-page').innerHTML=pageHead('Notas','Recordatorios internos y mensajes que dejan los clientes desde su portal.')+premiumLockHtml('Notas'); return; }
@@ -2856,7 +2885,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const canEditClient=nt.clientId && canEditPage('clients') && state.clients.some(x=>x.id===nt.clientId);
           const proofUrl=extractProofUrl(nt.text);
           const displayText=proofUrl?nt.text.replace(/\s*Comprobante:\s*https?:\/\/\S+/,'').trim():nt.text;
-          const actions=canEdit?`<div class="note-actions">${nt.status!=='cumplida'?`<button class="outline" data-action="note-done" data-id="${nt.id}">✓ Cumplida</button><button class="outline" data-action="note-reschedule" data-id="${nt.id}">Reprogramar</button>`:`<button class="outline" data-action="note-reschedule" data-id="${nt.id}">Reabrir</button>`}${canEditClient?`<button class="info" data-action="edit-client-from-note" data-id="${nt.clientId}">Editar cliente</button>`:''}<button class="icon-btn delete" data-action="delete-note" data-id="${nt.id}" title="Eliminar">×</button></div>`:'';
+          const actions=canEdit?`<div class="note-actions">${nt.status!=='cumplida'?`<button class="success" data-action="note-done" data-id="${nt.id}">✓ Cumplida</button><button class="warning" data-action="note-reschedule" data-id="${nt.id}">Reprogramar</button>`:`<button class="warning" data-action="note-reschedule" data-id="${nt.id}">Reabrir</button>`}${canEditClient?`<button class="info" data-action="edit-client-from-note" data-id="${nt.clientId}">Editar cliente</button>`:''}<button class="icon-btn delete" data-action="delete-note" data-id="${nt.id}" title="Eliminar">×</button></div>`:'';
           return `<div class="note-card${overdue?' note-overdue':''}">
             <div class="note-card-top">${statusBadge}${sourceBadge}<span class="muted note-date">${esc(nt.dueDate.split('-').reverse().join('/'))}</span></div>
             <p class="note-text">${esc(displayText)}</p>
@@ -3708,7 +3737,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <option value="inventario">Solo Inventario</option>
               </select>
             </label>
-            <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="outline" data-action="export-json">Exportar JSON</button><button class="outline" data-action="import-json">Importar JSON</button></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="info" data-action="export-json">Exportar JSON</button><button class="warning" data-action="import-json">Importar JSON</button></div>
           </div>
           ${isSuperAdmin()?`<div class="card card-pad stack">
             <h3>Plan de la cuenta</h3>
@@ -4142,7 +4171,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try{ await window.SupabaseDB?.revokeSession(); }catch(_){}
         sessionStorage.removeItem(STAFF_SESSION_KEY);
         location.href='./index.html';
-      };$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();const sd=await serverToday();normalize(sd);deliveryCache={};render();applyBranding();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{
+      };$('#manual-sync-btn').onclick=async()=>{const synced=await loadFromServer();const sd=await serverToday();normalize(sd);deliveryCache={};render();applyBranding();cleanupOldProofImages();notice(synced?'Datos sincronizados con el servidor.':'No se pudo leer la base de datos.',!synced);};$('#import-file').onchange=e=>{
         const file=e.target.files[0];if(!file)return;
         const r=new FileReader();
         r.onload=async()=>{
@@ -4182,7 +4211,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try { activeUser=JSON.parse(sessionStorage.getItem(STAFF_SESSION_KEY)); } catch (_) { activeUser=null; }
         window.SupabaseDB?.setSessionToken(activeUser?.sessionToken || null, 'staff');
       if(!activeUser){ window.location.replace('./index.html'); return; }
-      load(); applyBranding(); initialServerLoadPromise=loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); }); render(); activate(isDriverRole()?'delivery':'dispatch');
+      load(); applyBranding(); initialServerLoadPromise=loadFromServer().then(async () => { const sd=await serverToday(); normalize(sd); render(); applyBranding(); cleanupOldProofImages(); }); render(); activate(isDriverRole()?'delivery':'dispatch');
       window.SupabaseDB?.joinPresence({id:activeUser.id, role:isDriverRole()?'driver':'staff', name:activeUser.name}, st=>{
         presenceCounts=computePresenceCounts(st);
         const box=document.getElementById('presence-counts');
