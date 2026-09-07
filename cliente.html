@@ -16,7 +16,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
 
   <link rel="manifest" href="./manifest.json">
-  <meta name="theme-color" content="#0d6efd">
+  <meta name="theme-color" content="#3867f4">
   <link rel="icon" href="./icons/favicon-32.png" type="image/png">
   <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
   <meta name="mobile-web-app-capable" content="yes">
@@ -26,10 +26,10 @@
 
   <style>
     
-    :root{--font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Figtree,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+    :root{--font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Figtree,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--bs-primary:#3867f4;--bs-primary-rgb:56,103,244;--bs-link-color:#3867f4;--bs-link-color-rgb:56,103,244;--bs-link-hover-color:#2a52d6;--bs-link-hover-color-rgb:42,82,214}
     body{background:var(--page-bg,#f5f7fb);font-family:var(--font)}
     h1,h2,h3,.btn{font-family:var(--font-display)}
-    .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#0d6efd,#198754);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.hidden{display:none!important}
+    .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#3867f4,#15a77f);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.hidden{display:none!important}
     .pause-mode-card{border-radius:1rem;cursor:pointer;transition:border-color .15s ease,background .15s ease,box-shadow .15s ease}
     .btn-check:checked+.pause-mode-card{border-color:var(--bs-primary)!important;background:color-mix(in srgb,var(--bs-primary) 8%,var(--bs-body-bg));box-shadow:0 0 0 2px color-mix(in srgb,var(--bs-primary) 25%,transparent)}
     .pause-mode-card:hover{border-color:color-mix(in srgb,var(--bs-primary) 45%,var(--bs-border-color))}
@@ -74,9 +74,9 @@
     .portal .btn{border-radius:999px;font-weight:650;box-shadow:0 3px 10px rgba(0,0,0,.08);transition:transform .15s ease,box-shadow .15s ease,filter .15s ease}
     .portal .btn:hover{transform:translateY(-2px);filter:brightness(1.03)}
     .portal .btn:active{transform:translateY(0) scale(.98)}
-    .portal .btn-primary{background:linear-gradient(135deg,#4c8bff,#0d6efd);border-color:transparent;box-shadow:0 4px 14px rgba(13,110,253,.35)}
+    .portal .btn-primary{background:linear-gradient(135deg,color-mix(in srgb,#3867f4 78%,white 22%),#3867f4);border-color:transparent;box-shadow:0 4px 14px rgba(56,103,244,.35)}
     .portal .btn-primary:hover{box-shadow:0 8px 22px rgba(13,110,253,.4)}
-    .portal .btn-success{background:linear-gradient(135deg,#28b16b,#198754);border-color:transparent;box-shadow:0 4px 14px rgba(25,135,84,.32)}
+    .portal .btn-success{background:linear-gradient(135deg,color-mix(in srgb,#15a77f 78%,white 22%),#15a77f);border-color:transparent;box-shadow:0 4px 14px rgba(21,167,127,.32)}
     .portal .btn-success:hover{box-shadow:0 8px 22px rgba(25,135,84,.38)}
     .premium-lock{max-width:460px;margin:40px auto;padding:28px 24px;text-align:center;border-radius:1rem;color:#fff;background:linear-gradient(120deg,#e4002b,#ff4b3e);box-shadow:0 10px 30px rgba(228,0,43,.25)}
     .premium-lock .premium-lock-icon{font-size:32px;margin-bottom:8px}
@@ -631,7 +631,7 @@ function boot() {
                                     React.createElement("b", null, p.name),
                                     p.cost ? React.createElement("span", { className: "float-end" }, `Bs ${p.cost}`) : null)))
                                     : React.createElement("p", { className: "text-secondary mb-0" }, "Por ahora no hay planes disponibles para elegir. Contáctanos directamente."),
-                                React.createElement("button", { className: "btn btn-link", onClick: () => setStep('choose') }, "\u2190 Volver")),
+                                React.createElement("button", { className: "btn btn-danger", onClick: () => setStep('choose') }, "\u2190 Volver")),
                             step === 'pay' && React.createElement("div", null,
                                 React.createElement("p", { className: "mb-1" }, requestType === 'renew' ? `Vas a renovar tu plan actual: ` : `Vas a cambiar al plan: `, React.createElement("b", null, targetPlan?.name || '—')),
                                 React.createElement("p", { className: "h4 mb-3" }, targetPlan?.cost ? `Bs ${targetPlan.cost}` : 'Monto a confirmar con el equipo'),
@@ -644,7 +644,7 @@ function boot() {
                                 React.createElement("input", { type: "file", accept: "image/*", className: "form-control mb-3", onChange: handleFile }),
                                 error && React.createElement("div", { className: "alert alert-danger py-2 small" }, error),
                                 React.createElement("div", { className: "d-flex gap-2" },
-                                    React.createElement("button", { className: "btn btn-link px-0", onClick: () => setStep(requestType === 'renew' ? 'choose' : 'newplan') }, "\u2190 Volver"),
+                                    React.createElement("button", { className: "btn btn-danger", onClick: () => setStep(requestType === 'renew' ? 'choose' : 'newplan') }, "\u2190 Volver"),
                                     React.createElement("button", { className: "btn btn-primary ms-auto", onClick: handleSubmit, disabled: sending }, sending ? 'Enviando…' : 'Enviar comprobante'))),
                             step === 'sent' && React.createElement("div", { className: "text-center py-2" },
                                 React.createElement("span", { className: "fs-1 d-block mb-2" }, "\u2705"),

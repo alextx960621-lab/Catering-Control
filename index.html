@@ -21,7 +21,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
 
   <link rel="manifest" href="./manifest.json">
-  <meta name="theme-color" content="#0d6efd">
+  <meta name="theme-color" content="#3867f4">
   <link rel="icon" href="./icons/favicon-32.png" type="image/png">
   <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
   <meta name="mobile-web-app-capable" content="yes">
@@ -33,11 +33,17 @@
 
     html { font-size:15px; }
     :root {
-      --brand:#0d6efd;
+      --brand:#3867f4;
       --font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
       --font-display:Figtree,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+      --bs-primary:#3867f4;
+      --bs-primary-rgb:56,103,244;
+      --bs-link-color:#3867f4;
+      --bs-link-color-rgb:56,103,244;
+      --bs-link-hover-color:#2a52d6;
+      --bs-link-hover-color-rgb:42,82,214;
     }
-    body { min-height:100vh; font-family:var(--font); background:radial-gradient(circle at 20% 20%,rgba(13,110,253,.2),transparent 34%),#f5f7fb; }
+    body { min-height:100vh; font-family:var(--font); background:radial-gradient(circle at 20% 20%,rgba(56,103,244,.2),transparent 34%),#f5f7fb; }
     #brand-title, .btn, .nav-pills .nav-link { font-family:var(--font-display); }
     .btn-primary {
       --bs-btn-bg: var(--brand);
