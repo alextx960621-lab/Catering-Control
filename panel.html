@@ -2926,12 +2926,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasRemainingBalance=n(c.paidDays)>n(c.consumedDays);
         const remaining=Math.max(0,n(c.paidDays)-n(c.consumedDays));
         const isChangeMode=initialMode==='change';
-        const otherPlan=state.plans.find(p=>p.id!==c.planId);
-        const defaultPlanId=isChangeMode?(otherPlan?.id||c.planId):c.planId;
-        const showChoiceByDefault=isChangeMode && defaultPlanId!==c.planId && hasRemainingBalance;
+        // En modo "Añadir nuevo plan" no se preselecciona ningún plan (antes
+        // elegía automáticamente el primero distinto al actual, lo que se
+        // sentía como un plan "adivinado" al azar); se deja en blanco para
+        // que el usuario elija a propósito.
+        const defaultPlanId=isChangeMode?'':c.planId;
+        const showChoiceByDefault=isChangeMode && defaultPlanId && defaultPlanId!==c.planId && hasRemainingBalance;
         const html=`<div class="form-grid">
           <div class="wide plan-summary-row" style="margin:0"><div class="plan-option-info"><b>${esc(c.name)}</b><span class="muted">Plan actual: ${esc(planName(c.planId))} · ${hasRemainingBalance?`le quedan ${remaining} día(s)`:'sin días restantes (Retorno pendiente)'}</span></div></div>
-          <label>${isChangeMode?'Nuevo plan':'Plan a renovar'}<select name="planId">${options(state.plans,defaultPlanId,'Sin plan')}</select></label>
+          <label>${isChangeMode?'Nuevo plan':'Plan a renovar'}<select name="planId">${options(state.plans,defaultPlanId,isChangeMode?'Elige un plan…':'Sin plan')}</select></label>
           <label>Días a agregar *<input name="days" type="number" min="1" step="1" required value="${n(plan(defaultPlanId)?.serviceDays)||''}"></label>
           <div class="wide" id="renew-plan-change-choice" ${showChoiceByDefault?'':'hidden'}><div class="plan-options"><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Cambiar de inmediato</b><span class="muted">Se pierden los días restantes del plan actual; el nuevo plan y sus días empiezan a contar desde hoy.</span></div><input type="radio" name="planChangeMode" value="immediate" ${showChoiceByDefault?'':'checked'}></label><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Conservar los días actuales y sumar</b><span class="muted">Termina primero el plan actual y pasa al nuevo recién cuando se acaben esos días.</span></div><input type="radio" name="planChangeMode" value="carry" ${showChoiceByDefault?'checked':''}></label></div></div>
         </div>`;

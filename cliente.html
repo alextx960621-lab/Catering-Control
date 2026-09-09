@@ -59,6 +59,22 @@
     .modal-header,.modal-footer{border-color:var(--bs-border-color-translucent,rgba(0,0,0,.08))}
     .modal-header{padding:1.1rem 1.5rem}
     .modal-body{padding:1.25rem 1.5rem}
+    /* Etiquetas de formulario mas parecidas a panel.html: en negrita y con
+       el color normal del texto (no gris apagado), en vez del gris chico
+       que usa Bootstrap por defecto. */
+    .form-label{font-weight:700;font-size:.85rem;color:var(--bs-body-color,#212529)!important}
+    /* Lista para elegir plan nuevo: en vez de botones grandes celestes,
+       filas simples con borde (mismo estilo que las opciones de plan en
+       panel.html), para que no se sienta como un boton de accion mas. */
+    .plan-pick-btn{
+      background:var(--bs-body-bg,#fff);
+      border:1.5px solid var(--bs-border-color,#dee2e6)!important;
+      border-radius:12px!important;
+      color:var(--bs-body-color,#212529)!important;
+      font-weight:650;
+      box-shadow:none;
+    }
+    .plan-pick-btn:hover{border-color:var(--bs-primary,#3867f4)!important;background:color-mix(in srgb,var(--bs-primary) 6%,var(--bs-body-bg))}
     body{background:var(--page-bg,#f5f7fb);font-family:var(--font)}
     h1,h2,h3,.btn{font-family:var(--font-display)}
     .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#3867f4,#15a77f);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.btn-whatsapp{background:#25D366!important;border-color:transparent!important;color:#fff!important;font-weight:650}.btn-whatsapp:hover{background:#20bd5a!important;color:#fff!important}a.link-whatsapp{color:#1da851;font-weight:650;text-decoration:none}a.link-whatsapp:hover{color:#178a42;text-decoration:underline}.hidden{display:none!important}
@@ -702,7 +718,7 @@ function boot() {
                                 React.createElement("button", { className: "btn btn-primary btn-lg", onClick: chooseRenew }, "Quiero renovar mi plan"),
                                 React.createElement("button", { className: "btn btn-outline-primary btn-lg", onClick: () => setStep('newplan') }, "Quiero un nuevo plan")),
                             step === 'newplan' && React.createElement("div", { className: "d-grid gap-2" },
-                                availablePlans.length ? availablePlans.map(p => (React.createElement("button", { key: p.id, className: "btn btn-outline-primary btn-lg text-start", onClick: () => choosePlan(p) },
+                                availablePlans.length ? availablePlans.map(p => (React.createElement("button", { key: p.id, className: "btn plan-pick-btn btn-lg text-start", onClick: () => choosePlan(p) },
                                     React.createElement("b", null, p.name),
                                     p.cost ? React.createElement("span", { className: "float-end" }, `Bs ${p.cost}`) : null)))
                                     : React.createElement("p", { className: "text-secondary mb-0" }, "Por ahora no hay planes disponibles para elegir. Contáctanos directamente."),
