@@ -48,6 +48,17 @@
       transition:background .15s;
     }
     input[type="file"].form-control::file-selector-button:hover{background:var(--bs-secondary-bg,#e9ecef)}
+    /* El modal de "Renovar/Cambiar plan" es el unico popup real de todo el
+       portal (el resto son tarjetas simples en la pagina) -- se lo estiliza
+       para que se sienta de la misma familia: mismo tipo de letra en el
+       titulo (Figtree, igual que el resto de encabezados), sin bordes
+       Bootstrap por defecto, y la misma sombra suave que usan las tarjetas
+       ("shadow-sm border-0"). */
+    .modal-title{font-family:var(--font-display);font-weight:700}
+    .modal-content{border:0;box-shadow:0 .75rem 2rem rgba(0,0,0,.16)}
+    .modal-header,.modal-footer{border-color:var(--bs-border-color-translucent,rgba(0,0,0,.08))}
+    .modal-header{padding:1.1rem 1.5rem}
+    .modal-body{padding:1.25rem 1.5rem}
     body{background:var(--page-bg,#f5f7fb);font-family:var(--font)}
     h1,h2,h3,.btn{font-family:var(--font-display)}
     .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#3867f4,#15a77f);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.btn-whatsapp{background:#25D366!important;border-color:transparent!important;color:#fff!important;font-weight:650}.btn-whatsapp:hover{background:#20bd5a!important;color:#fff!important}a.link-whatsapp{color:#1da851;font-weight:650;text-decoration:none}a.link-whatsapp:hover{color:#178a42;text-decoration:underline}.hidden{display:none!important}
