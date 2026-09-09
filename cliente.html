@@ -34,6 +34,11 @@
     .btn:not(.btn-close):not(.btn-check){border-radius:999px!important;font-weight:650}
     .form-control,.form-select{border-radius:8px}
     input[type="file"].form-control{padding:6px 10px;font-size:.8rem;color:var(--bs-secondary-color,#6c757d)}
+    /* Safari/iOS le da a los campos de fecha un ancho minimo de contenido
+       que ignora el "width:100%" de Bootstrap en cuanto el input vive
+       dentro de una columna flex (como las de "Pausar servicio"): el
+       campo se sale de su recuadro en vez de encogerse. */
+    input[type="date"], input[type="month"], input[type="time"], input[type="datetime-local"]{min-width:0}
     input[type="file"].form-control::file-selector-button{
       font-family:var(--font-display);
       font-weight:650;
@@ -91,6 +96,19 @@
       transform:none!important;
     }
     .btn-close:hover{background-color:var(--bs-secondary-bg,#e9ecef);opacity:1}
+    /* En tema nocturno, Bootstrap invierte los colores del boton de cerrar
+       (filter:invert(...)) para que la "x" se vea blanca sobre fondos
+       oscuros -- pero ese filtro tambien invierte el fondo circular que le
+       pusimos arriba, y un gris oscuro invertido queda casi blanco: el
+       boton entero se ve en blanco y la "x" (tambien blanca) desaparece.
+       Se anula ese filtro y se define a mano un circulo oscuro con la "x"
+       en un color claro, igual que el resto de inputs del tema nocturno. */
+    [data-theme="night"] .btn-close{
+      filter:none;
+      background-color:#2b3648;
+      background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23e7ecf5'%3e%3cpath d='M.293.293a1 1 0 0 1 1.414 0L8 6.586 14.293.293a1 1 0 1 1 1.414 1.414L9.414 8l6.293 6.293a1 1 0 0 1-1.414 1.414L8 9.414l-6.293 6.293a1 1 0 0 1-1.414-1.414L6.586 8 .293 1.707a1 1 0 0 1 0-1.414z'/%3e%3c/svg%3e");
+    }
+    [data-theme="night"] .btn-close:hover{background-color:#374259}
     body{background:var(--page-bg,#f5f7fb);font-family:var(--font)}
     h1,h2,h3,.btn{font-family:var(--font-display)}
     .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#3867f4,#15a77f);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.btn-whatsapp{background:#25D366!important;border-color:transparent!important;color:#fff!important;font-weight:650}.btn-whatsapp:hover{background:#20bd5a!important;color:#fff!important}a.link-whatsapp{color:#1da851;font-weight:650;text-decoration:none}a.link-whatsapp:hover{color:#178a42;text-decoration:underline}.hidden{display:none!important}
@@ -164,8 +182,10 @@ function boot() {
     const OPERATIONS_KEY = `${APP_CONFIG.storagePrefix}-operaciones-v3`;
     const CLIENT_ROW_KEY = `${APP_CONFIG.storagePrefix}-client-row-v1`;
     const CLIENT_SESSION_KEY = `${APP_CONFIG.storagePrefix}-client-session-v1`;
-    const THEME_KEY = `${APP_CONFIG.storagePrefix}-client-theme-v1`;
-    const CLIENT_THEME_STORE_KEY = `${APP_CONFIG.storagePrefix}-client-theme-store-v1`;
+    // Misma llave que usan login.html y panel.html: el tema es unico por
+    // dispositivo/navegador, no por cliente -- si se cambia en cualquiera
+    // de los 3, debe verse igual en los otros.
+    const THEME_KEY = `${APP_CONFIG.storagePrefix}-ui-theme-v1`;
     const BRANDING_KEY = `${APP_CONFIG.storagePrefix}-client-branding-v1`;
     const DEFAULT_ITEMS = [['shots', 'Shots'], ['proteins', 'Proteínas'], ['juices', 'Jugos'], ['breakfast', 'Desayuno'], ['snack1', 'Merienda 1'], ['lunch', 'Almuerzo'], ['snack2', 'Merienda 2'], ['dinner', 'Cena']];
     const n = v => Number(v) || 0;
@@ -237,30 +257,15 @@ function boot() {
             return {};
         }
     }
-    function readClientThemeStore() {
-        try {
-            return JSON.parse(localStorage.getItem(CLIENT_THEME_STORE_KEY)) || {};
-        }
-        catch (_) {
-            return {};
-        }
-    }
+    // El tema es unico por dispositivo (ver THEME_KEY arriba): se ignora
+    // el clientId a proposito para que sea el mismo tema que ven
+    // login.html y panel.html en ese navegador.
     function getClientTheme(clientId) {
-        const store = readClientThemeStore(), key = clientId || 'default';
-        if (!store[key]) {
-            store[key] = localStorage.getItem(THEME_KEY) || 'light';
-            try {
-                localStorage.setItem(CLIENT_THEME_STORE_KEY, JSON.stringify(store));
-            }
-            catch (_) { }
-        }
-        return store[key];
+        return localStorage.getItem(THEME_KEY) || 'light';
     }
     function saveClientTheme(clientId, theme) {
-        const store = readClientThemeStore(), key = clientId || 'default';
-        store[key] = theme;
         try {
-            localStorage.setItem(CLIENT_THEME_STORE_KEY, JSON.stringify(store));
+            localStorage.setItem(THEME_KEY, theme);
         }
         catch (_) { }
     }

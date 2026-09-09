@@ -162,6 +162,14 @@
       min-height: 36px;
       transition: border-color .15s, box-shadow .15s;
     }
+    /* Safari/iOS le da a los campos de fecha (y mes/hora) un ancho minimo
+       de contenido que ignora el "width:100%" de arriba en cuanto el input
+       vive dentro de un grid o flex (como los <label> de .form-grid): el
+       campo se desborda de su recuadro en vez de encogerse. Con
+       min-width:0 se deja que el ancho real lo defina el contenedor. */
+    input[type="date"], input[type="month"], input[type="time"], input[type="datetime-local"] {
+      min-width: 0;
+    }
     input[type="checkbox"], input[type="radio"] {
       width: auto;
       min-height: auto;
@@ -1578,19 +1586,14 @@ document.addEventListener('DOMContentLoaded', () => {
         store[ukey].hiddenColumns=hidden;
         writeColPrefsStore(store);
       }
-      function readUserThemeStore(){ try { return JSON.parse(localStorage.getItem(USER_THEME_KEY)) || {}; } catch (_) { return {}; } }
-      function userTheme(){
-        const store=readUserThemeStore(), key=activeUser?.id || 'default';
-        if(!store[key]){
-          store[key]=localStorage.getItem(UI_THEME_KEY)||'light';
-          localStorage.setItem(USER_THEME_KEY,JSON.stringify(store));
-        }
-        return store[key];
-      }
+      // El tema ahora es unico por dispositivo (misma llave que usan
+      // login.html y cliente.html), no por usuario: si lo cambias aca,
+      // debe verse igual al volver al login o entrar al portal del
+      // cliente en el mismo navegador. USER_THEME_KEY queda sin uso (se
+      // deja declarada por compatibilidad con datos viejos).
+      function userTheme(){ return localStorage.getItem(UI_THEME_KEY)||'light'; }
       function saveUserTheme(theme){
-        const store=readUserThemeStore(), key=activeUser?.id || 'default';
-        store[key]=theme;
-        localStorage.setItem(USER_THEME_KEY,JSON.stringify(store));
+        localStorage.setItem(UI_THEME_KEY,theme);
       }
       function readDriverViewDateStore(){ try{ return JSON.parse(localStorage.getItem(DRIVER_VIEW_DATE_KEY))||{}; }catch(_){ return {}; } }
       function realToday(){ return cachedServerDate || today(); }
@@ -2753,8 +2756,8 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="plan-summary-row">
             <div class="plan-option-info"><b>Plan asignado: ${esc(planName(c.planId))}</b><span class="muted">${n(c.paidDays)?`${n(c.consumedDays)} de ${n(c.paidDays)} día(s) consumidos · quedan ${remaining}`:'Sin días cargados todavía'}</span></div>
             <div class="plan-option-actions">
-              <button type="button" class="outline" data-action="renew-client" data-id="${c.id}">🔄 Renovar</button>
-              <button type="button" class="outline" data-action="change-client-plan" data-id="${c.id}">➕ Añadir nuevo plan</button>
+              <button type="button" class="outline" data-action="renew-client-inline" data-id="${c.id}">🔄 Renovar</button>
+              <button type="button" class="outline" data-action="change-client-plan-inline" data-id="${c.id}">➕ Añadir nuevo plan</button>
             </div>
           </div>
           <p class="muted" style="margin:0 0 4px">Usa estos botones para sumar días o cambiar de plan: los días pagados/consumidos no se resetean, se acumulan para poder ver la antigüedad y el consumo real del cliente. Si necesitas ajustar los números a mano, hazlo desde aquí abajo.</p>
@@ -2921,7 +2924,7 @@ document.addEventListener('DOMContentLoaded', () => {
       //    nuevo sumando los días indicados.
       // En cualquier caso, si el cliente estaba Pausado o en Retorno
       // pendiente, la renovación también lo reactiva (vuelve a Activo).
-      function openRenewClient(id, fromNoteId, initialMode='renew'){
+      function openRenewClient(id, fromNoteId, initialMode='renew', returnToEdit=false){
         const c=state.clients.find(x=>x.id===id);if(!c)return;
         const hasRemainingBalance=n(c.paidDays)>n(c.consumedDays);
         const remaining=Math.max(0,n(c.paidDays)-n(c.consumedDays));
@@ -2967,7 +2970,7 @@ document.addEventListener('DOMContentLoaded', () => {
           scrollToRow(c.id);
           logAudit(samePlan?'Cliente renovado':'Nuevo plan asignado','client',c.name,c.id,{plan:planName(c.planId),diasAgregados:days,modo:samePlan?'mismo-plan':(data.planChangeMode||'immediate')});
           if(fromNoteId) await markNoteDone(fromNoteId);
-        });
+        }, returnToEdit?()=>openClient(id):null);
         const form=$('#modal-form'), planField=form?.elements.planId, daysField=form?.elements.days, choiceWrap=$('#renew-plan-change-choice');
         if(planField) planField.onchange=()=>{
           const p=plan(planField.value);
@@ -4132,9 +4135,10 @@ document.addEventListener('DOMContentLoaded', () => {
           if(saved)logAudit('Menús Premium actualizados','settings','Qué requiere Premium','',{});
         });
       }
-      function showModal(title,html,submit){const dialog=$('#modal');if(dialog.open)dialog.close();$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const form=$('#modal-form'),saveButton=$('#modal-save');
-        saveButton.hidden=false;$('#modal-cancel').textContent='Cancelar';
-        form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
+      let modalCancelFn=null;
+      function showModal(title,html,submit,onCancel){const dialog=$('#modal');if(dialog.open)dialog.close();$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const form=$('#modal-form'),saveButton=$('#modal-save');
+        saveButton.hidden=false;$('#modal-cancel').textContent='Cancelar';modalCancelFn=onCancel||null;
+        form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false){modalCancelFn=null;dialog.close();}}finally{saveButton.disabled=false;}};dialog.showModal();}
       async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);if(u?.role==='superadmin'&&!isSuperAdmin()){notice('No puedes eliminar al Super Administrador.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}if(state.clients.some(c=>c.pendingPlan?.planId===id)){notice('No se puede eliminar un plan que algún cliente tiene programado como su próximo plan.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
 
       function buildDaySnapshotPayload(date,clientIds){
@@ -4459,7 +4463,7 @@ document.addEventListener('DOMContentLoaded', () => {
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
-        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"renew-client":()=>openRenewClient(id),"renew-client-from-note":()=>openRenewClient(id,kind),"change-client-plan":()=>openRenewClient(id,null,'change'),"edit-client":()=>openClient(id),"edit-client-from-note":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"reassign-plan":()=>openPlanReassign(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"toggle-plan-available":async()=>{const p=plan(id);if(!p)return;p.availableForPurchase=e.target.checked;const saved=await save();if(!saved){p.availableForPurchase=!p.availableForPurchase;e.target.checked=p.availableForPurchase;notice('No se pudo guardar el cambio.',true);}},"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"refresh-metrics":()=>renderMetrics(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"export-metrics":exportMetrics,"remove-logo":async()=>{if(state.settings.logoUrl)removeStorageImageByUrl(state.settings.logoUrl);state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{if(state.settings.adImageUrl)removeStorageImageByUrl(state.settings.adImageUrl);state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-payment-qr":async()=>{if(state.settings.paymentQrUrl)removeStorageImageByUrl(state.settings.paymentQrUrl);state.settings.paymentQrUrl='';const saved=await save();renderSettings();notice(saved?'QR de pago eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{if(state.settings.itemIcons[id])removeStorageImageByUrl(state.settings.itemIcons[id]);delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"renew-client":()=>openRenewClient(id),"renew-client-from-note":()=>openRenewClient(id,kind),"change-client-plan":()=>openRenewClient(id,null,'change'),"renew-client-inline":()=>openRenewClient(id,null,'renew',true),"change-client-plan-inline":()=>openRenewClient(id,null,'change',true),"edit-client":()=>openClient(id),"edit-client-from-note":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"reassign-plan":()=>openPlanReassign(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"toggle-plan-available":async()=>{const p=plan(id);if(!p)return;p.availableForPurchase=e.target.checked;const saved=await save();if(!saved){p.availableForPurchase=!p.availableForPurchase;e.target.checked=p.availableForPurchase;notice('No se pudo guardar el cambio.',true);}},"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"refresh-metrics":()=>renderMetrics(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"export-metrics":exportMetrics,"remove-logo":async()=>{if(state.settings.logoUrl)removeStorageImageByUrl(state.settings.logoUrl);state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{if(state.settings.adImageUrl)removeStorageImageByUrl(state.settings.adImageUrl);state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-payment-qr":async()=>{if(state.settings.paymentQrUrl)removeStorageImageByUrl(state.settings.paymentQrUrl);state.settings.paymentQrUrl='';const saved=await save();renderSettings();notice(saved?'QR de pago eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{if(state.settings.itemIcons[id])removeStorageImageByUrl(state.settings.itemIcons[id]);delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
           const scope=$('#export-scope')?.value||'all';
           if(scope!=='all'){
             const scopes={clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};
@@ -4483,7 +4487,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },"import-json":()=>$('#import-file').click(),"open-route-map":()=>window.DriverMap?.open(e.target.closest('[data-action]')?.dataset.route||'')};
 
         const ACTION_PERMS={
-          "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"renew-client":()=>canEditPage('clients'),"renew-client-from-note":()=>canEditPage('clients'),"change-client-plan":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"edit-client-from-note":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),"quick-status":()=>canEditPage('clients'),
+          "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"renew-client":()=>canEditPage('clients'),"renew-client-from-note":()=>canEditPage('clients'),"change-client-plan":()=>canEditPage('clients'),"renew-client-inline":()=>canEditPage('clients'),"change-client-plan-inline":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"edit-client-from-note":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),"quick-status":()=>canEditPage('clients'),
           "add-note":()=>canEditPage('notes'),"edit-note":()=>canEditPage('notes'),"note-done":()=>canEditPage('notes'),"note-reschedule":()=>canEditPage('notes'),"delete-note":()=>canEditPage('notes'),
           "add-driver":()=>canEditPage('drivers'),"edit-driver":()=>canEditPage('drivers'),"delete-driver":()=>canEditPage('drivers'),"remove-driver-photo":()=>canEditPage('drivers'),
           "add-route":()=>canEditPage('routes'),"edit-route":()=>canEditPage('routes'),"delete-route":()=>canEditPage('routes'),
@@ -4507,7 +4511,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const apply=collapsed=>{ document.getElementById('app').classList.toggle('sidebar-collapsed',collapsed); btn.textContent=collapsed?'»':'«'; btn.title=collapsed?'Expandir menú':'Contraer menú'; };
         apply(localStorage.getItem(SIDEBAR_COLLAPSED_KEY)==='1');
         btn.onclick=()=>{ const collapsed=!document.getElementById('app').classList.contains('sidebar-collapsed'); apply(collapsed); localStorage.setItem(SIDEBAR_COLLAPSED_KEY,collapsed?'1':'0'); };
-      })();$('#modal-close').onclick=()=>$('#modal').close();$('#modal-cancel').onclick=()=>$('#modal').close();$('#logout-btn').onclick=async()=>{
+      })();
+      function closeOrReturnModal(){const cb=modalCancelFn;modalCancelFn=null;if(cb)cb();else $('#modal').close();}
+      $('#modal-close').onclick=closeOrReturnModal;$('#modal-cancel').onclick=closeOrReturnModal;
+      $('#modal').addEventListener('cancel',e=>{if(modalCancelFn){e.preventDefault();closeOrReturnModal();}});
+      $('#logout-btn').onclick=async()=>{
         try{ await operationsSaveQueue; }catch(_){}
         try{ await window.SupabaseDB?.revokeSession(); }catch(_){}
         sessionStorage.removeItem(STAFF_SESSION_KEY);
