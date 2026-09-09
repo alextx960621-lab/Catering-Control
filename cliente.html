@@ -75,6 +75,22 @@
       box-shadow:none;
     }
     .plan-pick-btn:hover{border-color:var(--bs-primary,#3867f4)!important;background:color-mix(in srgb,var(--bs-primary) 6%,var(--bs-body-bg))}
+    /* Boton de cerrar modal circular y gris, igual al de panel.html (ahi
+       sale asi porque hereda el boton base en pildora con fondo gris; acA
+       Bootstrap trae su propio "x" en forma de imagen sin fondo, asi que
+       se le agrega el circulo a mano). */
+    .btn-close{
+      background-color:var(--bs-tertiary-bg,#f5f7fb);
+      border-radius:50%;
+      opacity:1;
+      width:1.9rem;
+      height:1.9rem;
+      padding:0;
+      background-size:.65rem;
+      box-shadow:none;
+      transform:none!important;
+    }
+    .btn-close:hover{background-color:var(--bs-secondary-bg,#e9ecef);opacity:1}
     body{background:var(--page-bg,#f5f7fb);font-family:var(--font)}
     h1,h2,h3,.btn{font-family:var(--font-display)}
     .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#3867f4,#15a77f);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.btn-whatsapp{background:#25D366!important;border-color:transparent!important;color:#fff!important;font-weight:650}.btn-whatsapp:hover{background:#20bd5a!important;color:#fff!important}a.link-whatsapp{color:#1da851;font-weight:650;text-decoration:none}a.link-whatsapp:hover{color:#178a42;text-decoration:underline}.hidden{display:none!important}
@@ -630,8 +646,8 @@ function boot() {
     }
     function PlanChangeButton({ onOpen }) {
         return (React.createElement("div", { className: "col-12" },
-            React.createElement("button", { className: "btn btn-primary btn-lg w-100 rounded-4 shadow-sm py-3", onClick: onOpen },
-                "\u00BFQuieres renovar o cambiar de plan?")));
+            React.createElement("button", { className: "btn btn-primary w-100 rounded-4 shadow-sm py-2", onClick: onOpen },
+                "Renovar o cambiar de plan")));
     }
     function PlanChangeModal({ show, onClose, data, client, branding, plan }) {
         const [step, setStep] = useState('choose'); // choose | pay | sent
@@ -715,10 +731,10 @@ function boot() {
                             React.createElement("button", { type: "button", className: "btn-close", "aria-label": "Cerrar", onClick: onClose })),
                         React.createElement("div", { className: "modal-body" },
                             step === 'choose' && React.createElement("div", { className: "d-grid gap-2" },
-                                React.createElement("button", { className: "btn btn-primary btn-lg", onClick: chooseRenew }, "Quiero renovar mi plan"),
-                                React.createElement("button", { className: "btn btn-outline-primary btn-lg", onClick: () => setStep('newplan') }, "Quiero un nuevo plan")),
+                                React.createElement("button", { className: "btn btn-primary", onClick: chooseRenew }, "Quiero renovar mi plan"),
+                                React.createElement("button", { className: "btn btn-outline-primary", onClick: () => setStep('newplan') }, "Quiero un nuevo plan")),
                             step === 'newplan' && React.createElement("div", { className: "d-grid gap-2" },
-                                availablePlans.length ? availablePlans.map(p => (React.createElement("button", { key: p.id, className: "btn plan-pick-btn btn-lg text-start", onClick: () => choosePlan(p) },
+                                availablePlans.length ? availablePlans.map(p => (React.createElement("button", { key: p.id, className: "btn plan-pick-btn text-start", onClick: () => choosePlan(p) },
                                     React.createElement("b", null, p.name),
                                     p.cost ? React.createElement("span", { className: "float-end" }, `Bs ${p.cost}`) : null)))
                                     : React.createElement("p", { className: "text-secondary mb-0" }, "Por ahora no hay planes disponibles para elegir. Contáctanos directamente."),
