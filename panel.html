@@ -718,10 +718,65 @@
       gap: 9px;
       padding: 12px;
       background: var(--surface-2);
-      border-radius: 99px;
+      border-radius: var(--radius);
     }
     .items-grid label { font-size: 11px; }
     .items-grid input { padding: 6px; min-height: auto; }
+    /* Secciones con color para diferenciar bloques en formularios largos
+       (ej. ficha de cliente). El bug anterior de .items-grid (border-radius:
+       99px en una caja de varias filas) hacía que el fondo se viera "corto"
+       en las esquinas; con var(--radius) el fondo cubre bien todo el
+       recuadro, y reusamos el mismo criterio acá. */
+    .form-section {
+      grid-column: 1 / -1;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      background: var(--surface-2);
+    }
+    .form-section-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .form-section-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .form-section-grid .wide { grid-column: 1 / -1; }
+    .form-section.tone-primary {
+      background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+      border-color: color-mix(in srgb, var(--primary) 30%, var(--line));
+    }
+    .form-section.tone-accent {
+      background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+      border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+    }
+    .form-section.tone-warning {
+      background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+      border-color: color-mix(in srgb, var(--warning) 35%, var(--line));
+    }
+    .form-section.tone-danger {
+      background: color-mix(in srgb, var(--danger) 6%, var(--surface));
+      border-color: color-mix(in srgb, var(--danger) 20%, var(--line));
+    }
+    .plan-summary-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--line);
+      background: var(--surface);
+      margin-bottom: 4px;
+    }
 
     dialog {
       border: 0;
@@ -1101,6 +1156,8 @@
       .sheet { max-height: calc(100vh - 280px); }
       .form-grid { grid-template-columns: 1fr; }
       .items-grid { grid-template-columns: repeat(2, 1fr); border-radius: var(--radius); }
+      .form-section-grid { grid-template-columns: 1fr; }
+      .plan-summary-row { flex-direction: column; align-items: stretch; }
     }
     @media (max-width: 480px) {
       .summary-grid { grid-template-columns: 1fr 1fr; }
@@ -2637,7 +2694,69 @@ document.addEventListener('DOMContentLoaded', () => {
         ];
         $('#clients-page').innerHTML=pageHead('Clientes','Ficha completa, plan alimenticio y datos de entrega.',canEditPage('clients')?'<button class="primary" data-action="add-client">+ Añadir cliente</button>':'')+`<div class="toolbar"><input id="clients-search" class="search" placeholder="Buscar clientes…" value="${esc(ui.search.clients||'')}"><span class="spacer"></span><span class="muted">${list.length} clientes</span></div>`+orderedTable(list,definitions,'clients',c=>c.id); bindSearch('clients-search','clients',renderClients);
       }
-      function clientForm(c={}){ return `<div class="form-grid"><label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label><label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label><div class="wide"><label>Direcciones</label><p class="muted" style="margin:2px 0 8px">Agrega una o varias direcciones de entrega. La ruta de cada una define automáticamente su driver.</p><div id="client-addresses-rows"></div><button type="button" class="outline" id="add-address-row">+ Añadir dirección</button><div id="client-active-address-wrap"></div></div><label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label><label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label><label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label>${c.pendingPlan?(()=>{const daysLeftOld=Math.max(0,n(c.pendingPlan.activateAtConsumedDays)-n(c.consumedDays));const daysNew=Math.max(0,n(c.paidDays)-n(c.pendingPlan.activateAtConsumedDays));return `<div class="wide plan-option is-alt" style="margin:0"><div class="plan-option-info"><b>Cambio de plan programado</b><span class="muted">Le quedan ${daysLeftOld} día(s) con el plan actual ("${esc(planName(c.planId))}"), después pasa a "${esc(planName(c.pendingPlan.planId))}" por ${daysNew} día(s) más (${n(c.paidDays)} en total).</span></div><label style="display:flex;align-items:center;gap:6px;flex-direction:row;font-weight:400"><input type="checkbox" name="cancelPendingPlan"> Cancelar este cambio programado</label></div>`;})():''}<div class="wide" id="plan-change-choice" hidden><div class="plan-options"><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Cambiar de inmediato</b><span class="muted">El plan nuevo y sus días empiezan a contar desde hoy.</span></div><input type="radio" name="planChangeMode" value="immediate" checked></label><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Conservar los días actuales y sumar</b><span class="muted">Termina primero el plan actual y pasa solo al nuevo cuando se acaben esos días.</span></div><input type="radio" name="planChangeMode" value="carry"></label></div></div><label>Estado del plan<select name="status" id="client-status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label><label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label><label>Fecha de retorno${!pageNeedsPremium('returnDate')?`<input name="returnDate" id="client-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${c.status==='Programado'?esc(c.returnDate):''}" ${c.status==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label><label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label><label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label><label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label><label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label><div class="wide"><label>Artículos incluidos</label><p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>${itemFields(c.items || plan(c.planId)?.items || {})}</div><div class="wide">${!pageNeedsPremium('weeklySchedule')?`<label>Horario semanal (opcional)</label><p class="muted" style="margin:2px 0 8px">Marca los días de la semana en que este cliente recibe entrega y a qué dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). <b>Si cargas al menos una franja, los días que no queden en ninguna quedan fuera del reparto</b> (no se le descuenta el día ni aparece en Despacho/Reparto esos días) hasta que termine su plan. Si no cargas ninguna franja, el cliente sigue yendo todos los días como siempre, usando su dirección activa.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:`<label>Horario semanal</label>${premiumLockHtml('Horario semanal')}`}</div></div>`; }
+      function clientForm(c={}){
+        const isExisting=!!c.id;
+        const hasRemainingBalance=isExisting && n(c.paidDays)>n(c.consumedDays);
+        const remaining=Math.max(0,n(c.paidDays)-n(c.consumedDays));
+        const planBlock = isExisting ? `
+          <div class="plan-summary-row">
+            <div class="plan-option-info"><b>Plan asignado: ${esc(planName(c.planId))}</b><span class="muted">${n(c.paidDays)?`${n(c.consumedDays)} de ${n(c.paidDays)} día(s) consumidos · quedan ${remaining}`:'Sin días cargados todavía'}</span></div>
+            <div class="plan-option-actions">
+              <button type="button" class="outline" data-action="renew-client" data-id="${c.id}">🔄 Renovar</button>
+              <button type="button" class="outline" data-action="change-client-plan" data-id="${c.id}">➕ Añadir nuevo plan</button>
+            </div>
+          </div>
+          <p class="muted" style="margin:0 0 4px">Usa estos botones para sumar días o cambiar de plan: los días pagados/consumidos no se resetean, se acumulan para poder ver la antigüedad y el consumo real del cliente. Si necesitas ajustar los números a mano, hazlo desde aquí abajo.</p>
+          <input type="hidden" name="planId" value="${esc(c.planId)}">
+        ` : `<label>Plan asignado<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label>`;
+        const pendingPlanBlock = c.pendingPlan?(()=>{const daysLeftOld=Math.max(0,n(c.pendingPlan.activateAtConsumedDays)-n(c.consumedDays));const daysNew=Math.max(0,n(c.paidDays)-n(c.pendingPlan.activateAtConsumedDays));return `<div class="wide plan-option is-alt" style="margin:0"><div class="plan-option-info"><b>Cambio de plan programado</b><span class="muted">Le quedan ${daysLeftOld} día(s) con el plan actual ("${esc(planName(c.planId))}"), después pasa a "${esc(planName(c.pendingPlan.planId))}" por ${daysNew} día(s) más (${n(c.paidDays)} en total).</span></div><label style="display:flex;align-items:center;gap:6px;flex-direction:row;font-weight:400"><input type="checkbox" name="cancelPendingPlan"> Cancelar este cambio programado</label></div>`;})():'';
+        const planChangeChoiceBlock = isExisting ? '' : `<div class="wide" id="plan-change-choice" hidden><div class="plan-options"><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Cambiar de inmediato</b><span class="muted">El plan nuevo y sus días empiezan a contar desde hoy.</span></div><input type="radio" name="planChangeMode" value="immediate" checked></label><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Conservar los días actuales y sumar</b><span class="muted">Termina primero el plan actual y pasa solo al nuevo cuando se acaben esos días.</span></div><input type="radio" name="planChangeMode" value="carry"></label></div></div>`;
+        const daysFieldsBlock = isExisting
+          ? `<input type="hidden" name="paidDays" value="${n(c.paidDays)}"><input type="hidden" name="consumedDays" value="${n(c.consumedDays)}">`
+          : `<label>Días pagados<input name="paidDays" type="number" min="0" value="${n(c.paidDays)}"></label><label>Días consumidos<input name="consumedDays" type="number" min="0" value="${n(c.consumedDays)}"></label>`;
+        return `<div class="form-grid">
+          <div class="form-section tone-primary">
+            <div class="form-section-title">🧾 Datos del cliente</div>
+            <div class="form-section-grid">
+              <label>Nombre completo *<input name="name" required value="${esc(c.name)}"></label>
+              <label>Carnet *<input name="carnet" required value="${esc(c.carnet)}"></label>
+              <label>Teléfono 1 *<input name="phone1" required value="${esc(c.phone1)}"></label>
+              <label>Teléfono 2<input name="phone2" value="${esc(c.phone2)}"></label>
+            </div>
+          </div>
+          <div class="form-section tone-accent">
+            <div class="form-section-title">📍 Direcciones</div>
+            <p class="muted" style="margin:2px 0 8px">Agrega una o varias direcciones de entrega. La ruta de cada una define automáticamente su driver.</p>
+            <div id="client-addresses-rows"></div>
+            <button type="button" class="outline" id="add-address-row">+ Añadir dirección</button>
+            <div id="client-active-address-wrap"></div>
+          </div>
+          <div class="form-section tone-warning">
+            <div class="form-section-title">🍽️ Plan y estado del servicio</div>
+            <div class="form-section-grid">
+              <div class="wide">${planBlock}</div>
+              ${pendingPlanBlock?`<div class="wide">${pendingPlanBlock}</div>`:''}
+              ${planChangeChoiceBlock}
+              <label>Estado del plan<select name="status" id="client-status">${['Activo','Pausado','Retorno pendiente','Programado'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></label>
+              <label>Fecha de inicio<input name="startDate" type="date" value="${esc(c.startDate)}"></label>
+              <label>Fecha de retorno${!pageNeedsPremium('returnDate')?`<input name="returnDate" id="client-returndate" type="date" min="${nextDay(lastProcessedDate()||state.currentDate)}" value="${c.status==='Programado'?esc(c.returnDate):''}" ${c.status==='Programado'?'':'disabled'}>`:` <span class="muted" style="font-weight:400">🔒 Función Premium — contacta a tu proveedor</span><input type="hidden" name="returnDate" value="${esc(c.returnDate)}">`}</label>
+              ${daysFieldsBlock}
+              <label>Carreras por entrega<select name="career"><option value="1" ${n(c.career)!==2&&n(c.career)!==3?'selected':''}>Corto (1)</option><option value="2" ${n(c.career)===2?'selected':''}>Largo (2)</option><option value="3" ${n(c.career)===3?'selected':''}>Muy Largo (3)</option></select></label>
+              <label>Cantidad de bolsas<input name="bags" type="number" min="0" value="${n(c.bags)}"></label>
+              <label class="wide">Dieta especial<textarea name="specialDiet">${esc(c.specialDiet)}</textarea></label>
+            </div>
+          </div>
+          <div class="form-section tone-accent">
+            <div class="form-section-title">🥗 Artículos incluidos</div>
+            <p class="muted" style="margin:2px 0 8px">Se autorrellenan al elegir un plan arriba; puedes editarlos manualmente después.</p>
+            ${itemFields(c.items || plan(c.planId)?.items || {})}
+          </div>
+          <div class="form-section tone-danger">
+            <div class="form-section-title">🗓️ Horario semanal</div>
+            ${!pageNeedsPremium('weeklySchedule')?`<p class="muted" style="margin:2px 0 8px">Marca los días de la semana en que este cliente recibe entrega y a qué dirección (ej.: Lun/Mié/Vie a una dirección, Mar/Jue a otra). <b>Si cargas al menos una franja, los días que no queden en ninguna quedan fuera del reparto</b> (no se le descuenta el día ni aparece en Despacho/Reparto esos días) hasta que termine su plan. Si no cargas ninguna franja, el cliente sigue yendo todos los días como siempre, usando su dirección activa.</p><div id="client-schedule-rows"></div><button type="button" class="outline" id="add-schedule-row">+ Agregar franja de días</button>`:premiumLockHtml('Horario semanal')}
+          </div>
+        </div>`;
+      }
       function scrollToRow(id){
         requestAnimationFrame(()=>{
           const row=document.querySelector(`tr[data-id="${id}"]`);
@@ -2751,17 +2870,21 @@ document.addEventListener('DOMContentLoaded', () => {
       //    nuevo sumando los días indicados.
       // En cualquier caso, si el cliente estaba Pausado o en Retorno
       // pendiente, la renovación también lo reactiva (vuelve a Activo).
-      function openRenewClient(id, fromNoteId){
+      function openRenewClient(id, fromNoteId, initialMode='renew'){
         const c=state.clients.find(x=>x.id===id);if(!c)return;
         const hasRemainingBalance=n(c.paidDays)>n(c.consumedDays);
         const remaining=Math.max(0,n(c.paidDays)-n(c.consumedDays));
+        const isChangeMode=initialMode==='change';
+        const otherPlan=state.plans.find(p=>p.id!==c.planId);
+        const defaultPlanId=isChangeMode?(otherPlan?.id||c.planId):c.planId;
+        const showChoiceByDefault=isChangeMode && defaultPlanId!==c.planId && hasRemainingBalance;
         const html=`<div class="form-grid">
           <div class="wide plan-option is-alt" style="margin:0"><div class="plan-option-info"><b>${esc(c.name)}</b><span class="muted">Plan actual: ${esc(planName(c.planId))} · ${hasRemainingBalance?`le quedan ${remaining} día(s)`:'sin días restantes (Retorno pendiente)'}</span></div></div>
-          <label>Plan a renovar<select name="planId">${options(state.plans,c.planId,'Sin plan')}</select></label>
-          <label>Días a agregar *<input name="days" type="number" min="1" step="1" required value="${n(plan(c.planId)?.serviceDays)||''}"></label>
-          <div class="wide" id="renew-plan-change-choice" hidden><div class="plan-options"><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Cambiar de inmediato</b><span class="muted">Se pierden los días restantes del plan actual; el nuevo plan y sus días empiezan a contar desde hoy.</span></div><input type="radio" name="planChangeMode" value="immediate" checked></label><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Conservar los días actuales y sumar</b><span class="muted">Termina primero el plan actual y pasa al nuevo recién cuando se acaben esos días.</span></div><input type="radio" name="planChangeMode" value="carry"></label></div></div>
+          <label>${isChangeMode?'Nuevo plan':'Plan a renovar'}<select name="planId">${options(state.plans,defaultPlanId,'Sin plan')}</select></label>
+          <label>Días a agregar *<input name="days" type="number" min="1" step="1" required value="${n(plan(defaultPlanId)?.serviceDays)||''}"></label>
+          <div class="wide" id="renew-plan-change-choice" ${showChoiceByDefault?'':'hidden'}><div class="plan-options"><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Cambiar de inmediato</b><span class="muted">Se pierden los días restantes del plan actual; el nuevo plan y sus días empiezan a contar desde hoy.</span></div><input type="radio" name="planChangeMode" value="immediate" ${showChoiceByDefault?'':'checked'}></label><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Conservar los días actuales y sumar</b><span class="muted">Termina primero el plan actual y pasa al nuevo recién cuando se acaben esos días.</span></div><input type="radio" name="planChangeMode" value="carry" ${showChoiceByDefault?'checked':''}></label></div></div>
         </div>`;
-        showModal('Renovar plan',html,async f=>{
+        showModal(isChangeMode?'Añadir nuevo plan':'Renovar plan',html,async f=>{
           const data=Object.fromEntries(new FormData(f));
           const days=n(data.days);
           if(!days || days<1){ notice('Ingresa cuántos días agregar.',true); return false; }
@@ -2786,9 +2909,9 @@ document.addEventListener('DOMContentLoaded', () => {
           if(c.status==='Pausado' || c.status==='Retorno pendiente'){ c.status='Activo'; c.pauseStart=''; c.pauseDates=[]; }
           const saved=await save();
           if(!saved)return false;
-          renderPage(ui.page);notice(`Plan de ${c.name} renovado.`);
+          renderPage(ui.page);notice(samePlan?`Plan de ${c.name} renovado.`:`Nuevo plan asignado a ${c.name}.`);
           scrollToRow(c.id);
-          logAudit('Cliente renovado','client',c.name,c.id,{plan:planName(c.planId),diasAgregados:days,modo:samePlan?'mismo-plan':(data.planChangeMode||'immediate')});
+          logAudit(samePlan?'Cliente renovado':'Nuevo plan asignado','client',c.name,c.id,{plan:planName(c.planId),diasAgregados:days,modo:samePlan?'mismo-plan':(data.planChangeMode||'immediate')});
           if(fromNoteId) await markNoteDone(fromNoteId);
         });
         const form=$('#modal-form'), planField=form?.elements.planId, daysField=form?.elements.days, choiceWrap=$('#renew-plan-change-choice');
@@ -2796,7 +2919,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const p=plan(planField.value);
           if(daysField && p?.serviceDays) daysField.value=n(p.serviceDays);
           const isDifferentPlan=planField.value && planField.value!==c.planId;
-          if(choiceWrap){ choiceWrap.hidden=!(isDifferentPlan && hasRemainingBalance); if(!choiceWrap.hidden) form.elements.planChangeMode.value='immediate'; }
+          if(choiceWrap){ choiceWrap.hidden=!(isDifferentPlan && hasRemainingBalance); if(!choiceWrap.hidden) form.elements.planChangeMode.value=isDifferentPlan?'carry':'immediate'; }
         };
       }
       function openQuickStatus(id){
@@ -3955,7 +4078,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if(saved)logAudit('Menús Premium actualizados','settings','Qué requiere Premium','',{});
         });
       }
-      function showModal(title,html,submit){$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const dialog=$('#modal'),form=$('#modal-form'),saveButton=$('#modal-save');
+      function showModal(title,html,submit){const dialog=$('#modal');if(dialog.open)dialog.close();$('#modal-title').textContent=title;$('#modal-body').innerHTML=html;const form=$('#modal-form'),saveButton=$('#modal-save');
         saveButton.hidden=false;$('#modal-cancel').textContent='Cancelar';
         form.onsubmit=async e=>{e.preventDefault();saveButton.disabled=true;try{if(await submit(form)!==false)dialog.close();}finally{saveButton.disabled=false;}};dialog.showModal();}
       async function remove(kind,id){const labels={client:'cliente',driver:'driver',route:'ruta',user:'usuario',plan:'plan'};if(!confirm(`¿Eliminar este ${labels[kind]}?`))return;if(kind==='user'){if(id===activeUser.id){notice('No puedes eliminar tu usuario actual.',true);return;}const u=staffUsers.find(x=>x.id===id);if(u?.role==='superadmin'&&!isSuperAdmin()){notice('No puedes eliminar al Super Administrador.',true);return;}staffUsers=staffUsers.filter(x=>x.id!==id);const saved=await save();renderUsers();notice(saved?'Usuario eliminado de la base de datos.':'El usuario solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Usuario eliminado','user',u?`${u.name} (${u.username})`:id,id,{});return;}if(kind==='plan'){if(state.clients.some(c=>c.planId===id)){notice('No se puede eliminar un plan asignado a clientes. Reasígnalos primero.',true);return;}if(state.clients.some(c=>c.pendingPlan?.planId===id)){notice('No se puede eliminar un plan que algún cliente tiene programado como su próximo plan.',true);return;}const p=plan(id);state.plans=state.plans.filter(x=>x.id!==id);const saved=await save();renderPlans();notice(saved?'Plan eliminado de la base de datos.':'El plan solo se eliminó de esta copia local.',!saved);if(saved)logAudit('Plan eliminado','plan',p?.name||id,id,{});return;}const map={client:'clients',driver:'drivers',route:'routes'};if(kind==='route'&&(state.clients.some(c=>c.routeId===id)||state.drivers.some(d=>d.routeId===id))){notice('No se puede eliminar una ruta asignada.',true);return;}const before=state[map[kind]].find(x=>x.id===id);const label=kind==='client'?before?.name:kind==='driver'?`${before?.firstName||''} ${before?.lastName||''}`.trim():before?.name;state[map[kind]]=state[map[kind]].filter(x=>x.id!==id);const saved=await save();renderPage(ui.page);notice(saved?'Registro eliminado de la base de datos.':'El registro solo se eliminó de esta copia local.',!saved);if(saved)logAudit(`${labels[kind][0].toUpperCase()}${labels[kind].slice(1)} eliminado`,kind,label||id,id,{});}
@@ -4282,7 +4405,7 @@ document.addEventListener('DOMContentLoaded', () => {
         notice('Archivo Excel generado.');
       }
       document.addEventListener('click',e=>{const action=e.target.closest('[data-action]')?.dataset.action,id=e.target.closest('[data-action]')?.dataset.id,kind=e.target.closest('[data-action]')?.dataset.kind;if(!action)return;const map={
-        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"renew-client":()=>openRenewClient(id),"renew-client-from-note":()=>openRenewClient(id,kind),"edit-client":()=>openClient(id),"edit-client-from-note":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"reassign-plan":()=>openPlanReassign(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"toggle-plan-available":async()=>{const p=plan(id);if(!p)return;p.availableForPurchase=e.target.checked;const saved=await save();if(!saved){p.availableForPurchase=!p.availableForPurchase;e.target.checked=p.availableForPurchase;notice('No se pudo guardar el cambio.',true);}},"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"refresh-metrics":()=>renderMetrics(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"export-metrics":exportMetrics,"remove-logo":async()=>{if(state.settings.logoUrl)removeStorageImageByUrl(state.settings.logoUrl);state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{if(state.settings.adImageUrl)removeStorageImageByUrl(state.settings.adImageUrl);state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-payment-qr":async()=>{if(state.settings.paymentQrUrl)removeStorageImageByUrl(state.settings.paymentQrUrl);state.settings.paymentQrUrl='';const saved=await save();renderSettings();notice(saved?'QR de pago eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{if(state.settings.itemIcons[id])removeStorageImageByUrl(state.settings.itemIcons[id]);delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
+        "mark-delivered":()=>openDeliveryMark(id,'entregado'),"mark-not-delivered":()=>openDeliveryMark(id,'no_entregado'),"edit-delivery":()=>openDeliveryMark(id,kind),"clear-delivery":()=>clearDelivery(id),"view-delivery":()=>openDeliveryDetail(id),"add-client":()=>openClient(),"pause-client":()=>openClientPause(id),"resume-client":()=>resumeClient(id),"renew-client":()=>openRenewClient(id),"renew-client-from-note":()=>openRenewClient(id,kind),"change-client-plan":()=>openRenewClient(id,null,'change'),"edit-client":()=>openClient(id),"edit-client-from-note":()=>openClient(id),"quick-status":()=>openQuickStatus(id),"delete-client":()=>remove('client',id),"add-note":()=>openNote(),"edit-note":()=>openNote(id),"note-done":()=>markNoteDone(id),"note-reschedule":()=>openNoteReschedule(id),"delete-note":()=>deleteNote(id),"add-driver":()=>openDriver(),"edit-driver":()=>openDriver(id),"delete-driver":()=>remove('driver',id),"remove-driver-photo":()=>removeDriverPhoto(id),"add-route":()=>openRoute(),"edit-route":()=>openRoute(id),"delete-route":()=>remove('route',id),"add-plan":()=>openPlan(),"reassign-plan":()=>openPlanReassign(),"edit-plan":()=>openPlan(id),"delete-plan":()=>remove('plan',id),"remove-plan-photo":()=>removePlanPhoto(id),"toggle-plan-available":async()=>{const p=plan(id);if(!p)return;p.availableForPurchase=e.target.checked;const saved=await save();if(!saved){p.availableForPurchase=!p.availableForPurchase;e.target.checked=p.availableForPurchase;notice('No se pudo guardar el cambio.',true);}},"add-menu-item":()=>openMenuItem(),"edit-menu-item":()=>openMenuItem(id),"delete-menu-item":()=>deleteMenuItem(id),"open-item-icons":()=>openItemIcons(),"add-inventory-item":()=>openInventoryItem(),"edit-inventory-item":()=>openInventoryItem(id),"delete-inventory-item":()=>deleteInventoryItem(id),"add-inventory-entry":()=>openInventoryMovement('entry'),"add-inventory-use":()=>openInventoryMovement('use'),"add-inventory-waste":()=>openInventoryMovement('waste'),"edit-inventory-movement":()=>{const m=state.inventory.movements.find(x=>x.id===id);if(m)openInventoryMovement(m.type,id);},"delete-inventory-movement":()=>deleteInventoryMovement(id),"add-inventory-link":()=>openInventoryLink(),"edit-inventory-link":()=>openInventoryLink(id),"delete-inventory-link":()=>deleteInventoryLink(id),"add-user":()=>openUser(),"edit-user":()=>openUser(id),"delete-user":()=>remove('user',id),"add-role":()=>openRole(),"edit-role":()=>openRole(id),"delete-role":()=>deleteRole(id),"refresh-audit":()=>renderAudit(true),"load-all-audit":()=>loadAllAudit(),"refresh-metrics":()=>renderMetrics(true),"process-day":processDay,"unprocess-day":unprocessDay,"dispatch-force-live":()=>{ui.forceLiveDispatch=true;renderDispatch();},"toggle-day-pause":()=>toggleDayPause(id),"export-diets":exportDiets,"export-route-order":exportRouteOrder,"export-metrics":exportMetrics,"remove-logo":async()=>{if(state.settings.logoUrl)removeStorageImageByUrl(state.settings.logoUrl);state.settings.logoUrl='';const saved=await save();applyBranding();renderSettings();notice(saved?'Logo eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-ad-image":async()=>{if(state.settings.adImageUrl)removeStorageImageByUrl(state.settings.adImageUrl);state.settings.adImageUrl='';const saved=await save();renderSettings();notice(saved?'Imagen publicitaria eliminada.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-payment-qr":async()=>{if(state.settings.paymentQrUrl)removeStorageImageByUrl(state.settings.paymentQrUrl);state.settings.paymentQrUrl='';const saved=await save();renderSettings();notice(saved?'QR de pago eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"remove-item-icon":async()=>{if(state.settings.itemIcons[id])removeStorageImageByUrl(state.settings.itemIcons[id]);delete state.settings.itemIcons[id];const saved=await save();$('#modal-body').innerHTML=itemIconsForm();openItemIconsHandlers();notice(saved?'Ícono eliminado.':'Se quitó localmente, pero no se guardó en la base de datos.',!saved);},"export-json":async()=>{
           const scope=$('#export-scope')?.value||'all';
           if(scope!=='all'){
             const scopes={clientes:{data:{clients:state.clients,plans:state.plans,days:state.days,currentDate:state.currentDate},label:'clientes'},personal:{data:{drivers:state.drivers,routes:state.routes,settings:state.settings,staffUsers},label:'personal'},inventario:{data:{inventory:state.inventory},label:'inventario'}};
@@ -4306,7 +4429,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },"import-json":()=>$('#import-file').click(),"open-route-map":()=>window.DriverMap?.open(e.target.closest('[data-action]')?.dataset.route||'')};
 
         const ACTION_PERMS={
-          "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"renew-client":()=>canEditPage('clients'),"renew-client-from-note":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"edit-client-from-note":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),"quick-status":()=>canEditPage('clients'),
+          "add-client":()=>canEditPage('clients'),"pause-client":()=>canEditPage('clients'),"resume-client":()=>canEditPage('clients'),"renew-client":()=>canEditPage('clients'),"renew-client-from-note":()=>canEditPage('clients'),"change-client-plan":()=>canEditPage('clients'),"edit-client":()=>canEditPage('clients'),"edit-client-from-note":()=>canEditPage('clients'),"delete-client":()=>canEditPage('clients'),"quick-status":()=>canEditPage('clients'),
           "add-note":()=>canEditPage('notes'),"edit-note":()=>canEditPage('notes'),"note-done":()=>canEditPage('notes'),"note-reschedule":()=>canEditPage('notes'),"delete-note":()=>canEditPage('notes'),
           "add-driver":()=>canEditPage('drivers'),"edit-driver":()=>canEditPage('drivers'),"delete-driver":()=>canEditPage('drivers'),"remove-driver-photo":()=>canEditPage('drivers'),
           "add-route":()=>canEditPage('routes'),"edit-route":()=>canEditPage('routes'),"delete-route":()=>canEditPage('routes'),
