@@ -115,24 +115,36 @@
       box-shadow: 0 4px 14px color-mix(in srgb, var(--danger) 38%, transparent);
     }
     button.danger:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--danger) 42%, transparent); }
-    /* Sistema de 3 niveles: .primary y .danger son los unicos botones "solidos".
-       Todo lo demas (outline, success, warning, info, excel) comparte el mismo
-       nivel "secundario" (mismo fondo/forma), y cada clase conserva solo un
-       tinte sutil de texto/borde para no perder su significado. */
-    button.outline, button.success, button.warning, button.info, button.excel {
+    button.outline {
       background: transparent;
       border: 1px solid var(--line);
       box-shadow: none;
-      color: var(--text);
     }
-    button.outline:hover, button.success:hover, button.warning:hover, button.info:hover, button.excel:hover {
-      background: var(--surface-2);
-      box-shadow: none;
+    button.outline:hover { background: var(--surface-2); box-shadow: none; }
+    button.success {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 78%, white 22%), var(--accent));
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 38%, transparent);
     }
-    button.success { color: color-mix(in srgb, var(--accent) 70%, var(--text) 30%); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
-    button.warning { color: color-mix(in srgb, var(--warning) 55%, var(--text) 45%); border-color: color-mix(in srgb, var(--warning) 35%, var(--line)); }
-    button.info { color: color-mix(in srgb, #0ea5b7 65%, var(--text) 35%); border-color: color-mix(in srgb, #0ea5b7 35%, var(--line)); }
-    button.excel { color: color-mix(in srgb, #217346 65%, var(--text) 35%); border-color: color-mix(in srgb, #217346 35%, var(--line)); }
+    button.success:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 42%, transparent); }
+    button.warning {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--warning) 78%, white 22%), var(--warning));
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--warning) 38%, transparent);
+    }
+    button.warning:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--warning) 42%, transparent); }
+    button.info {
+      background: linear-gradient(135deg, color-mix(in srgb, #0ea5b7 78%, white 22%), #0ea5b7);
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, #0ea5b7 38%, transparent);
+    }
+    button.info:hover { box-shadow: 0 8px 22px color-mix(in srgb, #0ea5b7 42%, transparent); }
+    button.excel {
+      background: linear-gradient(135deg, color-mix(in srgb, #217346 78%, white 22%), #217346);
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, #217346 38%, transparent);
+    }
+    button.excel:hover { box-shadow: 0 8px 22px color-mix(in srgb, #217346 42%, transparent); }
     button:disabled {
       cursor: not-allowed;
       opacity: .52;
@@ -492,6 +504,8 @@
       color: var(--muted);
       text-transform: uppercase;
       user-select: none;
+      font-family: var(--font-display);
+      font-weight: 700;
     }
     th[data-sort] { cursor: pointer; }
     th[data-sort]:hover { color: var(--primary); }
