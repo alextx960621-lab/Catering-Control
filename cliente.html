@@ -26,7 +26,28 @@
 
   <style>
     
-    :root{--font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Figtree,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--bs-primary:#3867f4;--bs-primary-rgb:56,103,244;--bs-link-color:#3867f4;--bs-link-color-rgb:56,103,244;--bs-link-hover-color:#2a52d6;--bs-link-hover-color-rgb:42,82,214}
+    :root{--font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Figtree,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--bs-primary:#3867f4;--bs-primary-rgb:56,103,244;--bs-link-color:#3867f4;--bs-link-color-rgb:56,103,244;--bs-link-hover-color:#2a52d6;--bs-link-hover-color-rgb:42,82,214;--bs-border-radius:8px;--bs-border-radius-sm:6px;--bs-border-radius-lg:12px;--bs-border-radius-xl:1rem;--bs-border-radius-2xl:1rem}
+    /* Misma familia visual que panel.html: botones en pildora, inputs con
+       el mismo radio, y el boton nativo de "Seleccionar archivo" con el
+       mismo tratamiento chico (evita que se salga del recuadro y se ve
+       igual que en el panel). */
+    .btn:not(.btn-close):not(.btn-check){border-radius:999px!important;font-weight:650}
+    .form-control,.form-select{border-radius:8px}
+    input[type="file"].form-control{padding:6px 10px;font-size:.8rem;color:var(--bs-secondary-color,#6c757d)}
+    input[type="file"].form-control::file-selector-button{
+      font-family:var(--font-display);
+      font-weight:650;
+      font-size:.75rem;
+      padding:6px 12px;
+      border-radius:999px;
+      border:1px solid var(--bs-border-color,#dee2e6);
+      background:var(--bs-tertiary-bg,#f5f7fb);
+      color:var(--bs-body-color,#212529);
+      cursor:pointer;
+      margin-right:8px;
+      transition:background .15s;
+    }
+    input[type="file"].form-control::file-selector-button:hover{background:var(--bs-secondary-bg,#e9ecef)}
     body{background:var(--page-bg,#f5f7fb);font-family:var(--font)}
     h1,h2,h3,.btn{font-family:var(--font-display)}
     .portal{max-width:1080px}.portal .card{border-radius:1rem}.brand-image{width:42px;height:42px;object-fit:contain}.hero{background:linear-gradient(115deg,#3867f4,#15a77f);color:#fff}.metric{background:var(--bs-tertiary-bg);border-radius:1rem}.client-avatar{width:52px;height:52px;background:rgba(255,255,255,.2)}.instagram{background:linear-gradient(125deg,#833ab4,#fd1d1d,#fcb045);color:#fff;text-decoration:none}.btn-whatsapp{background:#25D366!important;border-color:transparent!important;color:#fff!important;font-weight:650}.btn-whatsapp:hover{background:#20bd5a!important;color:#fff!important}a.link-whatsapp{color:#1da851;font-weight:650;text-decoration:none}a.link-whatsapp:hover{color:#178a42;text-decoration:underline}.hidden{display:none!important}
