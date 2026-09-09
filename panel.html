@@ -638,6 +638,7 @@
     .note-date { margin-left: auto; font-size: 12px; white-space: nowrap; }
     .note-text { margin: 0; white-space: pre-wrap; word-break: break-word; }
     .note-client { margin: 0; font-size: 12.5px; }
+    .note-client-name { font-family: var(--font-display); font-weight: 700; font-size: var(--fs-base); color: var(--text); }
     .note-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
     [data-theme="night"] .badge.active { color: #8cf0ce; background: #164c3b; }
     [data-theme="night"] .badge.paused { color: #ffd58e; background: #5e4318; }
@@ -2929,7 +2930,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const defaultPlanId=isChangeMode?(otherPlan?.id||c.planId):c.planId;
         const showChoiceByDefault=isChangeMode && defaultPlanId!==c.planId && hasRemainingBalance;
         const html=`<div class="form-grid">
-          <div class="wide plan-option is-alt" style="margin:0"><div class="plan-option-info"><b>${esc(c.name)}</b><span class="muted">Plan actual: ${esc(planName(c.planId))} · ${hasRemainingBalance?`le quedan ${remaining} día(s)`:'sin días restantes (Retorno pendiente)'}</span></div></div>
+          <div class="wide plan-summary-row" style="margin:0"><div class="plan-option-info"><b>${esc(c.name)}</b><span class="muted">Plan actual: ${esc(planName(c.planId))} · ${hasRemainingBalance?`le quedan ${remaining} día(s)`:'sin días restantes (Retorno pendiente)'}</span></div></div>
           <label>${isChangeMode?'Nuevo plan':'Plan a renovar'}<select name="planId">${options(state.plans,defaultPlanId,'Sin plan')}</select></label>
           <label>Días a agregar *<input name="days" type="number" min="1" step="1" required value="${n(plan(defaultPlanId)?.serviceDays)||''}"></label>
           <div class="wide" id="renew-plan-change-choice" ${showChoiceByDefault?'':'hidden'}><div class="plan-options"><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Cambiar de inmediato</b><span class="muted">Se pierden los días restantes del plan actual; el nuevo plan y sus días empiezan a contar desde hoy.</span></div><input type="radio" name="planChangeMode" value="immediate" ${showChoiceByDefault?'':'checked'}></label><label class="plan-option" style="cursor:pointer"><div class="plan-option-info"><b>Conservar los días actuales y sumar</b><span class="muted">Termina primero el plan actual y pasa al nuevo recién cuando se acaben esos días.</span></div><input type="radio" name="planChangeMode" value="carry" ${showChoiceByDefault?'checked':''}></label></div></div>
@@ -3226,7 +3227,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return `<div class="note-card${overdue?' note-overdue':''}">
             <div class="note-card-top">${statusBadge}${sourceBadge}<span class="muted note-date">${esc(nt.dueDate.split('-').reverse().join('/'))}</span></div>
             <p class="note-text">${esc(displayText)}</p>
-            ${nt.clientName?`<p class="muted note-client">Cliente: ${esc(nt.clientName)}</p>`:''}
+            ${nt.clientName?`<p class="muted note-client">Cliente: <b class="note-client-name">${esc(nt.clientName)}</b></p>`:''}
             ${proofUrl?`<p class="note-client"><a class="success" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;padding:6px 12px" href="${esc(proofUrl)}" target="_blank" rel="noopener">🧾 Ver comprobante</a></p>`:''}
             ${actions}
           </div>`;
