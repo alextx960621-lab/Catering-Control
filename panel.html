@@ -21,6 +21,7 @@
       --line: #dbe2ee;
       --primary: #3867f4;
       --primary-ink: #fff;
+      --primary-solid: var(--primary);
       --accent: #15a77f;
       --danger: #e4002b;
       --warning: #f4a940;
@@ -49,6 +50,7 @@
       --line: #324158;
       --primary: #7296ff;
       --primary-ink: #0f1726;
+      --primary-solid: #3867f4;
       --accent: #51cfaa;
       --danger: #ff4d4d;
       --warning: #ffc466;
@@ -95,11 +97,11 @@
     button:hover { filter: brightness(.97); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,.13); }
     button:active { transform: translateY(0); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
     button.primary, button.refresh {
-      background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 78%, white 22%), var(--primary));
-      color: var(--primary-ink);
-      box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 38%, transparent);
+      background: linear-gradient(135deg, color-mix(in srgb, var(--primary-solid) 78%, white 22%), var(--primary-solid));
+      color: #fff;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--primary-solid) 38%, transparent);
     }
-    button.primary:hover, button.refresh:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 42%, transparent); }
+    button.primary:hover, button.refresh:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--primary-solid) 42%, transparent); }
     button.danger {
       background: linear-gradient(135deg, color-mix(in srgb, var(--danger) 78%, white 22%), var(--danger));
       color: #fff;
@@ -264,11 +266,13 @@
     .menu-toggle {
       display: none;
       background: transparent;
-      font-size: 24px;
       padding: 4px 8px;
       min-height: auto;
       color: var(--text);
+      border: 1px solid var(--line);
+      box-shadow: none;
     }
+    .menu-toggle svg { display: block; }
     .collapse-toggle {
       display: block;
       background: transparent;
@@ -578,7 +582,20 @@
       color: var(--primary);
       min-height: auto;
     }
-    .icon-btn.delete { color: var(--danger); }
+    .icon-btn.delete {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 13%, transparent);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 28px;
+      padding: 0;
+      font-size: 16px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .icon-btn.delete:hover { background: color-mix(in srgb, var(--danger) 24%, transparent); }
     .sort-ind {
       font-size: 9px;
       margin-left: 3px;
@@ -1237,7 +1254,7 @@
           <div><b id="current-name">Operaciones</b><small class="muted" id="current-role" style="display:block;font-size:10px;">Administrador</small></div>
         </div>
         <div class="aside-bottom-actions">
-          <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú">☰</button>
+          <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg></button>
           <span class="btn-sep" aria-hidden="true">•</span>
           <button class="refresh" id="manual-sync-btn" title="Actualizar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span class="btn-text"> Actualizar</span></button>
           <div class="sync-pill" id="sync-pill" title="Estado de sincronización"><span class="sync-dot" id="sync-dot"></span><span id="sync-text" class="sync-text-label">Listo</span></div>
@@ -3172,7 +3189,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const canEditClient=nt.clientId && canEditPage('clients') && state.clients.some(x=>x.id===nt.clientId);
           const proofUrl=extractProofUrl(nt.text);
           const displayText=proofUrl?nt.text.replace(/\s*Comprobante:\s*https?:\/\/\S+/,'').trim():nt.text;
-          const actions=canEdit?`<div class="note-actions">${nt.status!=='cumplida'?`<button class="success" data-action="note-done" data-id="${nt.id}">✓ Cumplida</button><button class="warning" data-action="note-reschedule" data-id="${nt.id}">Reprogramar</button>`:`<button class="warning" data-action="note-reschedule" data-id="${nt.id}">Reabrir</button>`}${canEditClient?`<button class="info" data-action="edit-client-from-note" data-id="${nt.clientId}">Editar cliente</button><button class="success" data-action="renew-client-from-note" data-id="${nt.clientId}" data-kind="${nt.id}">Renovar</button>`:''}<button class="icon-btn delete" data-action="delete-note" data-id="${nt.id}" title="Eliminar">×</button></div>`:'';
+          const actions=canEdit?`<div class="note-actions">${nt.status!=='cumplida'?`<button class="success" data-action="note-done" data-id="${nt.id}">✓ Cumplida</button><button class="warning" data-action="note-reschedule" data-id="${nt.id}">Reprogramar</button>`:`<button class="warning" data-action="note-reschedule" data-id="${nt.id}">Reabrir</button>`}${canEditClient?`<button class="info" data-action="edit-client-from-note" data-id="${nt.clientId}">Editar cliente</button><button class="primary" data-action="renew-client-from-note" data-id="${nt.clientId}" data-kind="${nt.id}">Renovar</button>`:''}<button class="icon-btn delete" data-action="delete-note" data-id="${nt.id}" title="Eliminar">×</button></div>`:'';
           return `<div class="note-card${overdue?' note-overdue':''}">
             <div class="note-card-top">${statusBadge}${sourceBadge}<span class="muted note-date">${esc(nt.dueDate.split('-').reverse().join('/'))}</span></div>
             <p class="note-text">${esc(displayText)}</p>
