@@ -2966,10 +2966,14 @@ document.addEventListener('DOMContentLoaded', () => {
           if(c.status==='Pausado' || c.status==='Retorno pendiente'){ c.status='Activo'; c.pauseStart=''; c.pauseDates=[]; }
           const saved=await save();
           if(!saved)return false;
-          renderPage(ui.page);notice(samePlan?`Plan de ${c.name} renovado.`:`Nuevo plan asignado a ${c.name}.`);
+          renderPage(ui.page);
+          if(!fromNoteId) notice(samePlan?`Plan de ${c.name} renovado.`:`Nuevo plan asignado a ${c.name}.`);
           scrollToRow(c.id);
           logAudit(samePlan?'Cliente renovado':'Nuevo plan asignado','client',c.name,c.id,{plan:planName(c.planId),diasAgregados:days,modo:samePlan?'mismo-plan':(data.planChangeMode||'immediate')});
-          if(fromNoteId) await markNoteDone(fromNoteId);
+          // markNoteDone ya muestra su propio aviso (incluye si se pudo
+          // abrir WhatsApp o no), por eso arriba no se duplica el "notice"
+          // cuando la renovación viene de una nota.
+          if(fromNoteId) await markNoteDone(fromNoteId,{kind:samePlan?'renovacion':'compra',clientName:c.name,planName:planName(c.planId),days,phone:c.phone1});
         }, returnToEdit?()=>openClient(id):null);
         const form=$('#modal-form'), planField=form?.elements.planId, daysField=form?.elements.days, choiceWrap=$('#renew-plan-change-choice');
         if(planField) planField.onchange=()=>{
@@ -3061,13 +3065,29 @@ document.addEventListener('DOMContentLoaded', () => {
           logAudit(nt?'Nota editada':'Nota creada','note',data.clientName||nt?.createdBy||activeUser?.name||'Nota interna',nt?.id||'',{texto:data.text.slice(0,60),fecha:data.dueDate});
         });
       }
-      async function markNoteDone(id){
+      // `renewalInfo` (opcional) llega SOLO cuando la nota se cumple porque
+      // se confirmó una renovación/compra de plan desde el botón "Renovar"
+      // de esa misma nota (ver openRenewClient). En ese caso, además de
+      // marcar la nota como cumplida, se abre WhatsApp con el mensaje de
+      // confirmación ya escrito, usando el plan y los días que realmente
+      // se cargaron. Si la nota se cumple a mano (botón "✓ Cumplida", o
+      // porque el staff solo usó "Editar cliente" y resolvió la solicitud
+      // por su cuenta), no hay renewalInfo y no se abre WhatsApp: no hay
+      // forma de saber con certeza qué se le confirmó al cliente.
+      async function markNoteDone(id, renewalInfo){
         const nt=state.notes.find(x=>x.id===id);if(!nt)return;
         nt.status='cumplida';nt.completedAt=state.currentDate;nt.read=true;
         const saved=await save();
         if(!saved){notice('No se pudo guardar en la base de datos. Intenta nuevamente.',true);return;}
-        renderNotes();updateNotesBadge();notice('Nota marcada como cumplida.');
+        renderNotes();updateNotesBadge();
         logAudit('Nota cumplida','note',nt.clientName||nt.createdBy||'Nota interna',nt.id,{texto:nt.text.slice(0,60)});
+        if(renewalInfo && nt.clientId){
+          const link=clientWaLink(renewalInfo.phone, renewalWaMessage(renewalInfo));
+          if(link){ window.open(link,'_blank'); notice('Nota marcada como cumplida. Abrimos WhatsApp para confirmarle al cliente.'); }
+          else { notice('Nota marcada como cumplida. El cliente no tiene teléfono cargado para avisarle por WhatsApp.',true); }
+        } else {
+          notice('Nota marcada como cumplida.');
+        }
       }
       function openNoteReschedule(id){
         const nt=state.notes.find(x=>x.id===id);if(!nt)return;
@@ -3093,6 +3113,25 @@ document.addEventListener('DOMContentLoaded', () => {
       function extractProofUrl(text){
         const m = String(text||'').match(/Comprobante:\s*(https?:\/\/\S+)/);
         return m ? m[1] : null;
+      }
+      // Link de WhatsApp para escribirle a un cliente (distinto del waLink
+      // local de renderClients, que arma un <a> ya con el teléfono como
+      // texto visible). Este devuelve la URL pelada, lista para abrir con
+      // window.open, con el mensaje ya cargado.
+      function clientWaLink(phone, text){
+        const digits=(phone||'').replace(/\D/g,'');
+        if(!digits) return null;
+        const full=digits.length<=8?`591${digits}`:digits;
+        return `https://wa.me/${full}${text?`?text=${encodeURIComponent(text)}`:''}`;
+      }
+      // Mensaje de confirmación que se manda al cliente por WhatsApp cuando
+      // se cumple una nota de solicitud de renovación/compra de plan hecha
+      // desde el portal (ver openRenewClient: cuando la renovación viene de
+      // una nota, se pasa esta info para armar el mensaje con el plan y los
+      // días REALES que se cargaron, no lo que el cliente pidió).
+      function renewalWaMessage({kind,clientName,planName,days}){
+        const accion = kind==='compra' ? 'la compra de tu nuevo plan' : 'la renovación de tu plan';
+        return `Hola ${clientName}, te confirmamos ${accion} "${planName}" por ${days} día(s). ¡Gracias por seguir con nosotros! 🙌`;
       }
       async function cleanupOldProofImages(){
         if(!canEditPage('notes')) return;

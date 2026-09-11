@@ -26,8 +26,11 @@
 --   · 3 operaciones admin-exclusivas (gestionar cuentas de staff, restaurar
 --     backups de auditoría/snapshots) con chequeo de rol server-side
 --   · Bucket de Storage para imágenes (logo, fotos, íconos)
---   · Limpieza automática con pg_cron (delivery_status 7d, snapshots 1 año,
---     audit_log 15 días, intentos de login 1 día)
+--   · Limpieza automática con pg_cron (delivery_status 7d, snapshots 2 años,
+--     audit_log 15 días, intentos de login 1 día, FOTOS reales del bucket
+--     de Storage —de pedidos y comprobantes de pago— a los 7 días, y
+--     clientes inactivos (sin ninguna edición/proceso hace más de 2 años) a
+--     los 2 años)
 --
 -- NO incluido a propósito (lleva un dato tuyo, va aparte):
 --   · Poner la contraseña real del primer admin -- por defecto, hasta que
@@ -55,12 +58,8 @@ set search_path = public, extensions;
 -- 1. Extensiones necesarias
 -- --------------------------------------------------------------------------
 create extension if not exists pgcrypto;
-do $do$
-begin
-  create extension if not exists pg_cron;
-exception when others then
-  raise notice 'No se pudo crear la extensión pg_cron automáticamente (falta habilitarla desde Database → Extensions → pg_cron en el dashboard de Supabase). El resto del script sigue funcionando igual -- los jobs de limpieza automática de más abajo simplemente no quedarán programados hasta que la actives ahí.';
-end $do$;
+create extension if not exists pg_cron;  -- si da error de permisos, activala
+                                          -- desde Database → Extensions → pg_cron
 
 -- --------------------------------------------------------------------------
 -- 2. Tablas
@@ -1042,13 +1041,64 @@ end $do$;
 
 do $do$
 begin
+  perform cron.unschedule('delete-old-dispatch-snapshots')
+  where exists (select 1 from cron.job where jobname = 'delete-old-dispatch-snapshots');
+
   perform cron.schedule(
     'delete-old-dispatch-snapshots',
     '0 1 * * *',
-    $cron$ delete from public.db_dispatch_snapshots where date < (current_date - interval '1 year'); $cron$
+    $cron$ delete from public.db_dispatch_snapshots where date < (current_date - interval '2 years'); $cron$
   );
 exception when others then
   raise notice 'No se pudo programar el cron de dispatch_snapshots (revisa permisos/pg_cron).';
+end $do$;
+
+-- Borra el ARCHIVO real del bucket (no solo la fila que lo referencia):
+-- las fotos de respaldo de un pedido viven en 'delivery-proof/' y los
+-- comprobantes de pago en 'comprobantes/' (ver uploadImage() en el
+-- frontend). Borrar la fila de db_delivery_status o el texto de la nota
+-- no borraba el archivo -- quedaba huérfano en Storage para siempre. Esto
+-- sí lo borra: borrar de storage.objects es lo mismo que borrarlo desde el
+-- bucket a mano, deja de existir y de contar para el espacio usado.
+do $do$
+begin
+  perform cron.unschedule('borrar-fotos-viejas-storage')
+  where exists (select 1 from cron.job where jobname = 'borrar-fotos-viejas-storage');
+
+  perform cron.schedule(
+    'borrar-fotos-viejas-storage',
+    '0 2 * * *',
+    $cron$
+      delete from storage.objects
+      where bucket_id = 'app-images'
+        and (name like 'delivery-proof/%' or name like 'comprobantes/%')
+        and created_at < now() - interval '7 days';
+    $cron$
+  );
+exception when others then
+  raise notice 'No se pudo programar el cron de limpieza de fotos en Storage (revisa permisos/pg_cron).';
+end $do$;
+
+-- Clientes "inactivos": ninguna edición ni "Procesar día" tocó su fila en
+-- 2 años (updated_at se refresca con cada guardado desde
+-- staff_upsert_client_rows, incluido el conteo diario de días consumidos
+-- de los clientes activos -- por eso un cliente realmente inactivo es el
+-- único que se queda atrás en el tiempo). Si tu definición de "inactivo"
+-- es otra (ej. solo los marcados como "Inactivo"/dados de baja, sin
+-- importar cuándo se tocó la fila por última vez), avisame y se ajusta
+-- el where de abajo.
+do $do$
+begin
+  perform cron.unschedule('borrar-clientes-inactivos')
+  where exists (select 1 from cron.job where jobname = 'borrar-clientes-inactivos');
+
+  perform cron.schedule(
+    'borrar-clientes-inactivos',
+    '0 3 * * *',
+    $cron$ delete from db_clientes_rows where updated_at < now() - interval '2 years'; $cron$
+  );
+exception when others then
+  raise notice 'No se pudo programar el cron de clientes inactivos (revisa permisos/pg_cron).';
 end $do$;
 
 do $do$
@@ -1100,7 +1150,7 @@ end $do$;
 --   select get_branding();      -- {} vacío hasta que cargues Configuración
 --   select get_plan_status();   -- {"plan":"basico","clientPortalLocked":true}
 --
---   select * from cron.job;     -- los 5 jobs de limpieza programados
+--   select * from cron.job;     -- los 7 jobs de limpieza programados
 --
 --   curl "https://<tu-proyecto>.supabase.co/rest/v1/db_personal?select=*&apikey=<publishable key>"
 --   -- tiene que devolver un array vacío, no datos.
